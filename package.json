@@ -1,0 +1,11 @@
+{
+  "name": "baseline-weight-tracker",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "node baseline/serve.mjs",
+    "dev": "node baseline/serve.mjs",
+    "test": "node --test baseline/tests/model.test.mjs"
+  },
+  "engines": { "node": ">=20" }
+}
