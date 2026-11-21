@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { bmi, calculateTrend, dateOf, dayOf, normalizeState, saveWeight, validDate } from "../dist/model.mjs";
+import { bmi, calculateTrend, dateOf, dayOf, normalizeState, saveWeight, shiftDate, validDate } from "../dist/model.mjs";
 
 const first = dayOf("2026-03-01");
 const entry = (index, weight) => ({ date: dateOf(first + index), weight });
@@ -67,6 +67,20 @@ test("BMI uses centimeters and stays empty until both measurements exist", () =>
   assert.equal(bmi(81, null), null);
   assert.equal(bmi(null, 180), null);
   assert.equal(bmi(70, 0), null);
+});
+
+test("date arrows step one calendar day and never pass today", () => {
+  const today = "2026-11-21";
+  assert.equal(shiftDate("2026-11-21", -1, today), "2026-11-20");
+  assert.equal(shiftDate("2026-11-20", 1, today), "2026-11-21");
+  assert.equal(shiftDate("2026-11-21", 1, today), "2026-11-21");
+  assert.equal(shiftDate("2026-11-30", -1, today), "2026-11-21");
+  assert.equal(shiftDate("2026-03-01", -1, today), "2026-02-28");
+  assert.equal(shiftDate("2024-03-01", -1, today), "2024-02-29");
+  assert.equal(shiftDate("2026-01-01", -1, today), "2025-12-31");
+  assert.equal(shiftDate("2026-03-08", 1, today), "2026-03-09");
+  assert.equal(shiftDate("", -1, today), "2026-11-20");
+  assert.equal(shiftDate("", 1, today), "2026-11-21");
 });
 
 test("empty and future-only logs have no current average", () => {

@@ -127,6 +127,14 @@ body[data-view="log"] .quick-log { display: inline-flex; }
 .input-frame input[type="number"]::-webkit-inner-spin-button, .input-frame input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 .input-unit { color: var(--muted); font-size: .875rem; padding-right: 13px; }
 .input-icon { position: absolute; right: 12px; width: 16px; height: 16px; color: #69776c; pointer-events: none; }
+.date-field { position: relative; display: flex; align-items: center; flex: 1; min-width: 0; }
+.date-step { display: inline-grid; place-items: center; flex: 0 0 36px; align-self: stretch; color: #4f6455; }
+.date-step:first-child { border-right: 1px solid #e3e8e1; border-radius: 6px 0 0 6px; }
+.date-step:last-child { border-left: 1px solid #e3e8e1; border-radius: 0 6px 6px 0; }
+.date-step:not([aria-disabled="true"]):hover { background: var(--pale); color: var(--forest); }
+.date-step[aria-disabled="true"] { cursor: default; color: #b3bdb4; }
+.date-step:focus-visible { outline-offset: -3px; }
+.date-step .icon { width: 17px; height: 17px; }
 .date-frame input { padding-right: 36px; }
 .date-frame input::-webkit-calendar-picker-indicator { position: absolute; right: 6px; height: 28px; width: 28px; opacity: 0; cursor: pointer; }
 .date-frame input::-webkit-date-and-time-value { text-align: left; }
@@ -208,6 +216,7 @@ dialog::backdrop { background: rgb(22 35 26 / 35%); }
   .chart-wrap { min-height: 223px; }
   .entry-panel { padding: 20px; }
   #entry-form { margin-top: 17px; }
+  .date-step { flex-basis: 44px; }
   .quick-log { display: inline-flex; }
   .heading-actions { flex-direction: column-reverse; align-items: flex-end; gap: 6px; }
   .page-heading { align-items: flex-start; }

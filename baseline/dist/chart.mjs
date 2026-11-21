@@ -228,8 +228,9 @@ export class TrendChart {
   inspectKey(event) {
     if (!this.points.length) return;
     const lastIndex = this.points.length - 1;
-    const current = this.active ?? lastIndex;
-    const keys = { ArrowLeft: Math.max(0, current - 1), ArrowRight: Math.min(lastIndex, current + 1), Home: 0, End: lastIndex };
+    // With nothing selected, either arrow starts on the latest point.
+    const step = delta => this.active === null ? lastIndex : Math.max(0, Math.min(lastIndex, this.active + delta));
+    const keys = { ArrowLeft: step(-1), ArrowRight: step(1), Home: 0, End: lastIndex };
     if (event.key === "Escape") return this.hideTooltip();
     if (!Object.hasOwn(keys, event.key)) return;
     event.preventDefault();

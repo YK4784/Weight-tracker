@@ -1,4 +1,4 @@
-import { bmi, calculateTrend, localToday, normalizeState, oneDecimal, positive, prettyDate, sampleEntries, saveWeight, validDate } from "./model.mjs";
+import { bmi, calculateTrend, localToday, normalizeState, oneDecimal, positive, prettyDate, sampleEntries, saveWeight, shiftDate, validDate } from "./model.mjs";
 import { drawMiniatures, TrendChart } from "./chart.mjs";
 
 const $ = id => document.getElementById(id);
@@ -87,6 +87,8 @@ function syncEntryForm(force = false) {
     input.value = entry ? String(entry.weight) : "";
     autoWeight = true;
   }
+  // aria-disabled keeps the button focusable when repeated presses reach today.
+  $("next-day").setAttribute("aria-disabled", String(validDate(date) && date >= today));
   $("save-label").textContent = entry ? "Update entry" : "Save entry";
   document.querySelector(".save-button use").setAttribute("href", "./icons.svg#" + (entry ? "check" : "plus"));
   $("entry-hint").textContent = demo ? "Your first entry starts your personal log."
@@ -206,10 +208,26 @@ function scheduleMidnight() {
   setTimeout(() => { syncDay(); scheduleMidnight(); }, midnight - now + 100);
 }
 
-$("entry-date").value = today;
-$("entry-date").addEventListener("change", () => {
+function dateChanged() {
   if (state.entries.some(item => item.date === $("entry-date").value)) autoWeight = true;
   syncEntryForm();
+}
+
+function stepDate(delta) {
+  syncDay();
+  const input = $("entry-date");
+  const date = shiftDate(input.value, delta, today);
+  if (date === input.value) return;
+  input.value = date;
+  dateChanged();
+  $("date-announce").textContent = prettyDate(date, "long");
+}
+
+$("entry-date").value = today;
+$("entry-date").addEventListener("change", dateChanged);
+$("prev-day").addEventListener("click", () => stepDate(-1));
+$("next-day").addEventListener("click", () => {
+  if ($("next-day").getAttribute("aria-disabled") !== "true") stepDate(1);
 });
 $("entry-weight").addEventListener("input", () => { autoWeight = false; });
 $("entry-form").addEventListener("submit", async event => {

@@ -22,6 +22,12 @@ export function validDate(value) {
   return Number.isInteger(day) && dateOf(day) === value;
 }
 
+// Step a date by whole days, never past `latest`. A blank or invalid date steps from `latest`.
+export function shiftDate(date, delta, latest) {
+  const from = validDate(date) ? dayOf(date) : dayOf(latest);
+  return dateOf(Math.min(dayOf(latest), from + delta));
+}
+
 export function prettyDate(date, kind = "short") {
   if (!dateFormats.has(kind)) {
     const choices = {
