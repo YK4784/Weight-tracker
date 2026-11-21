@@ -1,5 +1,5 @@
 import { bmi, calculateTrend, localToday, normalizeState, oneDecimal, positive, prettyDate, sampleEntries, saveWeight, shiftDate, validDate } from "./model.mjs";
-import { drawMiniatures, TrendChart } from "./chart.mjs";
+import { TrendChart } from "./chart.mjs";
 
 const $ = id => document.getElementById(id);
 const STORAGE_KEY = "baseline.weight-log.v1";
@@ -65,18 +65,31 @@ function icon(name) {
   return '<svg class="icon" aria-hidden="true"><use href="./icons.svg#' + name + '"></use></svg>';
 }
 
+function shortDate(date) {
+  return date.slice(0, 4) === today.slice(0, 4) ? prettyDate(date) : prettyDate(date, "full");
+}
+
+// Missing values show a quiet dash instead of a big bold one.
+function setValue(id, value, unit = "") {
+  const empty = !Number.isFinite(value);
+  $(id).textContent = empty ? "—" : oneDecimal(value) + unit;
+  $(id).classList.toggle("is-empty", empty);
+}
+
 function showMetrics() {
   const latest = trend.readings.at(-1);
   const height = demo ? 178 : state.height;
-  $("avg-value").textContent = oneDecimal(trend.current?.average);
+  setValue("avg-value", trend.current?.average);
+  document.querySelector(".hero").classList.toggle("is-empty", !trend.current);
   const count = trend.current?.count ?? 0;
-  $("avg-detail").textContent = count ? "Based on " + count + (count === 1 ? " weigh-in" : " weigh-ins") : "No weigh-ins in the past 14 days";
-  $("weight-value").textContent = oneDecimal(latest?.weight);
-  $("weight-detail").textContent = latest ? "Logged " + prettyDate(latest.date, "full") : "Your latest weigh-in";
-  $("bmi-value").textContent = oneDecimal(bmi(latest?.weight, height));
-  $("height-label").textContent = height ? "Height " + height + " cm" : "Add your height";
-  document.querySelector(".height-link").setAttribute("aria-label", height ? "Edit height, currently " + height + " centimeters" : "Add your height for BMI");
-  drawMiniatures(trend, height);
+  $("avg-detail").textContent = count ? "From " + count + (count === 1 ? " weigh-in" : " weigh-ins") + " in the last 14 days" : "No weigh-ins in the last 14 days";
+  setValue("weight-value", latest?.weight, " kg");
+  $("weight-detail").textContent = latest ? shortDate(latest.date) : "";
+  $("height-value").textContent = height ? height + " cm" : "—";
+  $("height-value").classList.toggle("is-empty", !height);
+  $("height-label").textContent = height ? "Edit" : "Add";
+  $("height-label").setAttribute("aria-label", height ? "Edit height, currently " + height + " centimeters" : "Add your height for BMI");
+  setValue("bmi-value", bmi(latest?.weight, height));
 }
 
 function syncEntryForm(force = false) {
@@ -84,23 +97,20 @@ function syncEntryForm(force = false) {
   const date = $("entry-date").value;
   const entry = state.entries.find(item => item.date === date);
   if (force || autoWeight) {
-    input.value = entry ? String(entry.weight) : "";
+    input.value = entry ? entry.weight.toFixed(1) : "";
     autoWeight = true;
   }
   // aria-disabled keeps the button focusable when repeated presses reach today.
   $("next-day").setAttribute("aria-disabled", String(validDate(date) && date >= today));
   $("save-label").textContent = entry ? "Update entry" : "Save entry";
-  document.querySelector(".save-button use").setAttribute("href", "./icons.svg#" + (entry ? "check" : "plus"));
   $("entry-hint").textContent = demo ? "Your first entry starts your personal log."
     : entry ? "You have a weigh-in on this date." : "Choose an earlier date to add a past weigh-in.";
 }
 
 function changeCell(change) {
   if (change === null) return '<span class="dash" aria-label="First entry">—</span>';
-  const direction = change < 0 ? "falling" : change > 0 ? "rising" : "steady";
-  const name = change < 0 ? "down" : change > 0 ? "up" : "flat";
   const sign = change < 0 ? "−" : change > 0 ? "+" : "";
-  return '<span class="day-change ' + direction + '">' + icon(name) + sign + oneDecimal(Math.abs(change)) + " kg</span>";
+  return '<span class="change">' + sign + oneDecimal(Math.abs(change)) + '</span><span class="table-unit">kg</span>';
 }
 
 function showTable(isLog) {
@@ -118,13 +128,11 @@ function showTable(isLog) {
   $("action-heading").hidden = !canEdit;
   $("entry-rows").innerHTML = rows.map(point => {
     const date = prettyDate(point.date, "full");
-    const year = point.date.slice(0, 4);
-    const compactDate = year === today.slice(0, 4) ? prettyDate(point.date) : date;
     const action = canEdit ? '<td class="row-action"><button type="button" class="icon-button" data-edit="' + point.date + '" aria-label="Edit weigh-in for ' + date + '">' + icon("pencil") + "</button></td>" : "";
-    return '<tr><td class="date-cell"><time datetime="' + point.date + '"><span class="long-label">' + date + '</span><span class="short-label">' + compactDate + '</span></time></td>' +
-      '<td class="entry-weight">' + oneDecimal(point.weight) + '<span class="table-unit">kg</span></td>' +
-      "<td>" + oneDecimal(point.average) + '<span class="table-unit">kg</span></td>' +
-      "<td>" + changeCell(point.change) + "</td>" + action + "</tr>";
+    return '<tr><td><time datetime="' + point.date + '"><span class="long-label">' + (point.date.slice(0, 4) === today.slice(0, 4) ? prettyDate(point.date, "weekday") : date) + '</span><span class="short-label">' + shortDate(point.date) + '</span></time></td>' +
+      '<td class="num entry-weight">' + oneDecimal(point.weight) + '<span class="table-unit">kg</span></td>' +
+      '<td class="num">' + oneDecimal(point.average) + '<span class="table-unit">kg</span></td>' +
+      '<td class="num">' + changeCell(point.change) + "</td>" + action + "</tr>";
   }).join("");
   $("table-empty").hidden = total > 0;
   $("pagination").hidden = !isLog || pages <= 1;
@@ -138,19 +146,19 @@ function onLogPage() { return location.hash === "#weight-log"; }
 function showPage() {
   const isLog = onLogPage();
   document.body.dataset.view = isLog ? "log" : "overview";
-  const title = isLog ? "Weight log" : "Weight overview";
-  document.title = title + " · Baseline";
-  $("page-title").textContent = title;
+  document.title = isLog ? "Weight log · Baseline" : "Baseline";
+  // The overview is a page for today, so today's date is its heading.
+  $("page-title").textContent = isLog ? "Weight log" : prettyDate(today, "day");
   $("overview-view").hidden = isLog;
   $("overview-link").toggleAttribute("aria-current", !isLog);
   $("log-link").toggleAttribute("aria-current", isLog);
   $(isLog ? "log-link" : "overview-link").setAttribute("aria-current", "page");
   const first = trend.readings[0];
   const last = trend.readings.at(-1);
-  $("heading-detail").textContent = isLog && first && last && first !== last
-    ? prettyDate(first.date, "full") + " – " + prettyDate(last.date, "full")
-    : prettyDate(isLog && first ? first.date : today, "long");
-  $("sample-button").hidden = !demo;
+  $("heading-detail").textContent = !isLog || !first ? ""
+    : first === last ? prettyDate(first.date, "full")
+    : prettyDate(first.date, "full") + " – " + prettyDate(last.date, "full");
+  $("sample-note").hidden = !demo;
   showTable(isLog);
   if (!isLog) chart.update(trend, range, today);
 }
@@ -162,9 +170,9 @@ function render() {
   showMetrics();
   syncEntryForm();
   showPage();
-  $("storage-status").querySelector("span").textContent = sessionOnly
-    ? "Browser storage is unavailable. Changes will last for this session."
-    : "Your personal log is stored in this browser.";
+  $("storage-status").textContent = sessionOnly
+    ? "Browser storage is unavailable, so changes last only for this session."
+    : "Your log is stored only in this browser.";
 }
 
 function focusEntry() {
@@ -262,10 +270,8 @@ $("profile-form").addEventListener("submit", async event => {
   $("profile-dialog").close();
   notify("Height saved.");
 });
-$("sample-button").addEventListener("click", () => $("sample-dialog").showModal());
 $("start-log").addEventListener("click", async () => {
   await changeState(current => ({ ...current, started: true }));
-  $("sample-dialog").close();
   focusEntry();
 });
 
@@ -276,7 +282,7 @@ $("entry-rows").addEventListener("click", event => {
   if (!entry) return;
   editingDate = entry.date;
   $("edit-date-label").textContent = prettyDate(entry.date, "long");
-  $("edit-weight").value = entry.weight;
+  $("edit-weight").value = entry.weight.toFixed(1);
   $("edit-form").hidden = false;
   $("delete-confirm").hidden = true;
   $("edit-dialog").showModal();

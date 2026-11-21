@@ -1,6 +1,6 @@
 # Baseline
 
-A daily weight journal with a 14-day moving average and height-based BMI. Each dot on the chart represents a weigh-in. The green line shows the mean of the weights recorded on that calendar day and the preceding 13 days. The first entry produces an average immediately, and missing dates contribute no measurements.
+A daily weight journal with a 14-day moving average and height-based BMI. Each gray dot on the chart is a weigh-in. The blue line shows the mean of the weights recorded on that calendar day and the preceding 13 days. The first entry produces an average immediately, and missing dates contribute no measurements.
 
 ## Run locally
 
@@ -14,6 +14,6 @@ Open [Baseline locally](http://127.0.0.1:4173/). The static app lives in `baseli
 
 ## Using the tracker
 
-Save a weight in kilograms and a date in **Log a weigh-in**. The arrows beside the date move it back or forward one day and stop at today. Saving again on the same date updates that entry. Use **Profile** to enter a height in centimeters. Baseline calculates BMI from the latest recorded weight.
+Save a weight in kilograms and a date in **Log a weigh-in**. The arrows beside the date move it back or forward one day and stop at today. Saving again on the same date updates that entry. Use **Add** or **Edit** next to **Height** to enter a height in centimeters. Baseline calculates BMI from the latest recorded weight.
 
 The initial view contains labeled sample data. Your first saved weight or height starts your own log. Personal entries and height stay in the browser that saved them. Clearing site data removes them. The **Weight log** shows every entry and lets you edit or delete individual weigh-ins.

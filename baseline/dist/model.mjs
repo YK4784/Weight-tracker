@@ -33,6 +33,8 @@ export function prettyDate(date, kind = "short") {
     const choices = {
       short: { month: "short", day: "numeric" },
       full: { year: "numeric", month: "short", day: "numeric" },
+      weekday: { weekday: "short", month: "short", day: "numeric" },
+      day: { weekday: "long", month: "long", day: "numeric" },
       monthYear: { year: "numeric", month: "short" },
       long: { weekday: "long", year: "numeric", month: "long", day: "numeric" }
     };

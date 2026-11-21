@@ -1,9 +1,8 @@
 import { dateOf, dayOf, oneDecimal, prettyDate } from "./model.mjs";
 
 const NS = "http://www.w3.org/2000/svg";
-const GREEN = "#397355";
-const ORANGE = "#bd784a";
 
+// Colors live in styles.css (by class), so the chart follows light and dark mode.
 function svg(name, attributes = {}, content) {
   const node = document.createElementNS(NS, name);
   for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, String(value));
@@ -12,70 +11,6 @@ function svg(name, attributes = {}, content) {
 }
 
 const coord = value => Math.round(value * 100) / 100;
-
-export function drawMiniatures(trend, height) {
-  const average = document.getElementById("avg-mini");
-  const weight = document.getElementById("weight-mini");
-  const ruler = document.getElementById("height-mini");
-  average.replaceChildren();
-  weight.replaceChildren();
-  ruler.replaceChildren();
-
-  const last = trend.days.at(-1);
-  const window = last ? trend.days.filter(point => point.day > last.day - 30) : [];
-  if (window.length && trend.current) {
-    const values = window.map(point => point.average);
-    const low = Math.min(...values);
-    const span = Math.max(.3, Math.max(...values) - low);
-    const start = window[0].day;
-    const x = day => 5 + (day - start) / Math.max(1, last.day - start) * 101;
-    const y = value => 37 - (value - low) / span * 26;
-    let previous;
-    let path = "";
-    for (const point of window) {
-      path += (previous?.day === point.day - 1 ? " L" : " M") + coord(x(point.day)) + " " + coord(y(point.average));
-      previous = point;
-    }
-    average.append(
-      svg("path", { d: "M3 42H109", stroke: "#789a7f", opacity: .65, "stroke-dasharray": "2 4", fill: "none" }),
-      svg("path", { d: path, stroke: "#c4e8aa", fill: "none", "stroke-width": 2.4, "stroke-linejoin": "round", "stroke-linecap": "round" }),
-      svg("circle", { cx: x(last.day), cy: y(last.average), r: 3.1, fill: "#d6efbc" })
-    );
-  }
-
-  const recent = trend.readings.slice(-14);
-  if (recent.length) {
-    const values = recent.map(point => point.weight);
-    const low = Math.min(...values);
-    const span = Math.max(.3, Math.max(...values) - low);
-    const step = 106 / Math.max(14, recent.length);
-    recent.forEach((point, index) => {
-      const bar = 10 + (point.weight - low) / span * 26;
-      weight.append(svg("rect", {
-        x: coord(3 + (14 - recent.length + index) * step), y: coord(42 - bar),
-        width: coord(step - 2.5), height: coord(bar), rx: 1.7,
-        fill: index === recent.length - 1 ? "#b57046" : "#e4c7b1"
-      }));
-    });
-  }
-
-  if (height) {
-    const min = Math.max(0, Math.floor((height - 20) / 10) * 10);
-    const max = min + 50;
-    for (let n = 0; n <= 20; n++) {
-      const x = 6 + n * 5;
-      ruler.append(svg("line", { x1: x, x2: x, y1: n % 5 === 0 ? 18 : n % 2 === 0 ? 23 : 26, y2: 32, stroke: "#a7b5a7", "stroke-width": 1.2 }));
-    }
-    const pointer = 6 + (height - min) * 2;
-    ruler.append(
-      svg("line", { x1: 6, x2: 106, y1: 32, y2: 32, stroke: "#b9c6b8" }),
-      svg("path", { d: "M" + (pointer - 3.8) + " 9h7.6l-3.8 5z", fill: GREEN }),
-      svg("line", { x1: pointer, x2: pointer, y1: 16, y2: 32, stroke: GREEN, "stroke-width": 2 }),
-      svg("text", { x: 4, y: 46, fill: "#66756a", "font-size": 12 }, min),
-      svg("text", { x: 109, y: 46, fill: "#66756a", "font-size": 12, "text-anchor": "end" }, max)
-    );
-  }
-}
 
 function yDomain(points) {
   let low = Infinity;
@@ -143,36 +78,40 @@ export class TrendChart {
       return;
     }
 
-    const compact = width < 420;
+    const compact = width < 480;
     const { bottom, top, step } = yDomain(this.points);
-    const maxLabelLength = String(Math.floor(top)).length;
-    const left = Math.max(compact ? 30 : 37, maxLabelLength * 8 + 10);
-    const right = width - (compact ? 40 : 46);
-    const ceiling = 17;
-    const floor = height - 29;
+    const last = this.points.at(-1);
+    const endLabel = oneDecimal(last.average);
+    const left = Math.max(compact ? 30 : 38, String(Math.floor(top)).length * 8 + 14);
+    const right = width - (endLabel.length * 8.5 + 18);
+    const ceiling = 24;
+    const floor = height - 30;
     const x = day => start === end ? (left + right) / 2 : left + (day - start) / (end - start) * (right - left);
     const y = value => floor - (value - bottom) / (top - bottom) * (floor - ceiling);
     this.axes = { start, end, left, right, ceiling, floor, x, y };
     const fragment = document.createDocumentFragment();
-    const gradient = svg("linearGradient", { id: "trend-fill", x1: 0, y1: 0, x2: 0, y2: 1, gradientUnits: "objectBoundingBox" });
-    gradient.append(svg("stop", { offset: "0%", "stop-color": "#98b99a", "stop-opacity": .18 }), svg("stop", { offset: "100%", "stop-color": "#c9d9c4", "stop-opacity": .025 }));
-    const defs = svg("defs");
-    defs.append(gradient);
-    fragment.append(defs);
-    fragment.append(svg("text", { x: 0, y: 10 }, "kg"));
+
+    fragment.append(svg("text", { x: left - 12, y: 12, "text-anchor": "end" }, "kg"));
     for (let tick = Math.ceil((bottom - 1e-8) / step) * step; tick <= top + 1e-8; tick += step) {
-      const label = String(Number(tick.toFixed(2)));
-      const yy = coord(y(tick));
+      const yy = coord(y(tick)) + .5;
       fragment.append(
-        svg("line", { x1: left, x2: right + 2, y1: yy, y2: yy, stroke: "#e0e6df", "stroke-dasharray": "3 4" }),
-        svg("text", { x: left - 9, y: yy + 4, "text-anchor": "end" }, label)
+        svg("line", { class: "grid", x1: left, x2: width, y1: yy, y2: yy }),
+        svg("text", { x: left - 12, y: yy + 4, "text-anchor": "end" }, String(Number(tick.toFixed(2))))
       );
     }
-    const tickCount = Math.min(end - start + 1, width < 340 ? 3 : compact ? 4 : width < 530 ? 5 : 6);
+    const tickCount = Math.min(end - start + 1, width < 360 ? 3 : compact ? 4 : width < 680 ? 5 : 7);
     for (let n = 0; n < tickCount; n++) {
       const day = tickCount === 1 ? start : start + Math.round(n / (tickCount - 1) * (end - start));
+      const anchor = tickCount > 1 && n === 0 ? "start" : tickCount > 1 && n === tickCount - 1 ? "end" : "middle";
       const label = prettyDate(dateOf(day), end - start > 365 ? "monthYear" : "short");
-      fragment.append(svg("text", { x: coord(x(day)), y: height - 5, "text-anchor": "middle" }, label));
+      fragment.append(svg("text", { x: coord(x(day)), y: height - 6, "text-anchor": anchor }, label));
+    }
+
+    // Daily weigh-ins sit underneath; the average line is the figure.
+    const count = this.points.filter(p => p.weight !== null).length;
+    const radius = count > 160 ? 2.5 : compact ? 3.5 : 4;
+    for (const p of this.points) {
+      if (p.weight !== null) fragment.append(svg("circle", { class: "dot", cx: coord(x(p.day)), cy: coord(y(p.weight)), r: radius }));
     }
 
     // Break the line where the trailing window contains no measurements.
@@ -183,33 +122,24 @@ export class TrendChart {
       else sections.push([point]);
     }
     for (const section of sections) {
-      const path = section.map((p, i) => (i ? "L" : "M") + coord(x(p.day)) + " " + coord(y(p.average))).join(" ");
-      if (section.length > 1) {
-        const area = path + " L" + coord(x(section.at(-1).day)) + " " + floor + " L" + coord(x(section[0].day)) + " " + floor + " Z";
-        fragment.append(svg("path", { d: area, fill: "url(#trend-fill)" }));
+      if (section.length === 1) {
+        fragment.append(svg("circle", { class: "avg-single", cx: coord(x(section[0].day)), cy: coord(y(section[0].average)), r: 3 }));
+        continue;
       }
-      fragment.append(svg("path", { d: path, fill: "none", stroke: GREEN, "stroke-width": 2.8, "stroke-linecap": "round", "stroke-linejoin": "round" }));
-      if (section.length === 1) fragment.append(svg("circle", { cx: x(section[0].day), cy: y(section[0].average), r: 4.5, fill: GREEN }));
+      const path = section.map((p, i) => (i ? "L" : "M") + coord(x(p.day)) + " " + coord(y(p.average))).join(" ");
+      fragment.append(svg("path", { class: "avg", d: path }));
     }
-    const last = this.points.at(-1);
+
     const lastX = x(last.day);
     const lastY = y(last.average);
-    fragment.append(svg("circle", { cx: lastX, cy: lastY, r: 4.2, fill: "white", stroke: GREEN, "stroke-width": 2.2 }));
-    const count = this.points.filter(p => p.weight !== null).length;
-    for (const p of this.points) {
-      if (p.weight !== null) fragment.append(svg("circle", { cx: coord(x(p.day)), cy: coord(y(p.weight)), r: count > 160 ? 2 : compact ? 2.8 : 3.6, fill: ORANGE, stroke: "white", "stroke-width": .75 }));
-    }
-    const label = oneDecimal(last.average);
-    const labelWidth = Math.max(33, label.length * 6.8 + 9);
-    const tagX = Math.min(width - labelWidth, lastX + 7);
     fragment.append(
-      svg("rect", { x: tagX, y: lastY - 10, width: labelWidth, height: 20, rx: 5, fill: GREEN }),
-      svg("text", { class: "end-label", x: tagX + labelWidth / 2, y: lastY + 4, "text-anchor": "middle" }, label)
+      svg("circle", { class: "end-dot", cx: coord(lastX), cy: coord(lastY), r: 5 }),
+      svg("text", { class: "end-label", x: coord(lastX + 11), y: coord(lastY + 5) }, endLabel)
     );
     this.cursor = svg("g", { visibility: "hidden", "pointer-events": "none" });
     fragment.append(this.cursor);
     this.canvas.append(fragment);
-    this.canvas.setAttribute("aria-label", "Daily weights and 14-day moving averages, " + prettyDate(dateOf(start), "full") + " through " + prettyDate(this.today, "full") + ". Last plotted average " + label + " kilograms.");
+    this.canvas.setAttribute("aria-label", "Daily weights and 14-day moving averages, " + prettyDate(dateOf(start), "full") + " through " + prettyDate(this.today, "full") + ". Last plotted average " + endLabel + " kilograms.");
   }
 
   inspectPointer(event) {
@@ -218,7 +148,7 @@ export class TrendChart {
     const { left, right, start, end, floor, ceiling } = this.axes;
     const xx = event.clientX - bounds.left;
     const yy = event.clientY - bounds.top;
-    if (xx < left - 5 || xx > right + 5 || yy < ceiling - 8 || yy > floor + 5) return this.hideTooltip();
+    if (xx < left - 5 || xx > right + 5 || yy < ceiling - 12 || yy > floor + 5) return this.hideTooltip();
     const day = start + Math.round(Math.max(0, Math.min(1, (xx - left) / (right - left))) * (end - start));
     const index = this.points.findIndex(p => p.day === day);
     if (index < 0) return this.hideTooltip();
@@ -241,22 +171,22 @@ export class TrendChart {
     const point = this.points[index];
     const { x, y, ceiling, floor } = this.axes;
     this.active = index;
-    const xx = x(point.day);
-    this.cursor.replaceChildren(
-      svg("line", { x1: xx, x2: xx, y1: ceiling, y2: floor, stroke: "#7e9482", "stroke-dasharray": "3 3" }),
-      svg("circle", { cx: xx, cy: y(point.average), r: 4.5, fill: "white", stroke: GREEN, "stroke-width": 2 })
-    );
-    if (point.weight !== null) this.cursor.append(svg("circle", { cx: xx, cy: y(point.weight), r: 4, fill: ORANGE, stroke: "white", "stroke-width": 1 }));
+    const xx = coord(x(point.day));
+    this.cursor.replaceChildren(svg("line", { class: "crosshair", x1: xx + .5, x2: xx + .5, y1: ceiling - 8, y2: floor }));
+    if (point.weight !== null) this.cursor.append(svg("circle", { class: "cursor-dot", cx: xx, cy: coord(y(point.weight)), r: 4.5 }));
+    this.cursor.append(svg("circle", { class: "cursor-avg", cx: xx, cy: coord(y(point.average)), r: 5 }));
     this.cursor.setAttribute("visibility", "visible");
     const heading = prettyDate(point.date, "full");
-    const daily = point.weight === null ? "No entry" : oneDecimal(point.weight) + " kg";
+    const daily = point.weight === null ? null : oneDecimal(point.weight) + " kg";
     const mean = oneDecimal(point.average) + " kg";
-    this.tooltip.innerHTML = "<strong>" + heading + "</strong><div>Daily weight<b>" + daily + "</b></div><div>14-day average<b>" + mean + "</b></div>";
+    this.tooltip.innerHTML = "<strong>" + heading + "</strong>" +
+      '<div class="tip-row"><i class="key-line"></i><b>' + mean + "</b>14-day average</div>" +
+      '<div class="tip-row"><i class="key-dot"></i>' + (daily ? "<b>" + daily + "</b>weigh-in" : "No weigh-in") + "</div>";
     this.tooltip.hidden = false;
     const tipWidth = this.tooltip.offsetWidth;
-    this.tooltip.style.left = Math.max(0, Math.min(this.wrap.clientWidth - tipWidth, xx + tipWidth + 10 < this.wrap.clientWidth ? xx + 10 : xx - tipWidth - 10)) + "px";
+    this.tooltip.style.left = Math.max(0, Math.min(this.wrap.clientWidth - tipWidth, xx + tipWidth + 14 < this.wrap.clientWidth ? xx + 14 : xx - tipWidth - 14)) + "px";
     this.tooltip.style.top = Math.max(0, Math.min(floor - this.tooltip.offsetHeight, y(point.average) - this.tooltip.offsetHeight / 2)) + "px";
-    if (announce) this.announce.textContent = heading + ". Daily weight " + daily + ". 14-day average " + mean + ".";
+    if (announce) this.announce.textContent = heading + ". 14-day average " + mean + ". " + (daily ? "Weigh-in " + daily + "." : "No weigh-in.");
   }
 
   hideTooltip() {
