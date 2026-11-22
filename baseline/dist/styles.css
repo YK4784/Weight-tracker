@@ -66,10 +66,27 @@ a { color: inherit; }
 .masthead { border-bottom: 1px solid var(--rule); }
 .masthead-inner { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 64px; }
 .wordmark { font-size: 1.375rem; font-weight: 760; letter-spacing: -.02em; text-decoration: underline 3px var(--accent); text-underline-offset: 6px; text-decoration-skip-ink: none; }
-.nav { display: flex; gap: 4px; margin-right: -12px; }
+.masthead-actions { display: flex; align-items: center; gap: 12px; }
+.nav { display: flex; gap: 4px; }
 .nav a { padding: 8px 12px; border-radius: 8px; color: var(--ink-2); font-weight: 600; text-decoration: none; }
 .nav a:hover { color: var(--ink); }
 .nav a[aria-current="page"] { color: var(--ink); text-decoration: underline 2px var(--accent); text-underline-offset: 8px; }
+/* Holds the avatar's space before Clerk mounts it. */
+.user-button { display: flex; flex: none; align-items: center; justify-content: center; min-width: 32px; min-height: 32px; }
+
+/* Signed out */
+.auth { padding-block: 48px 64px; }
+.auth:focus { outline: none; }
+.auth-message { max-width: 34rem; margin-inline: auto; text-align: center; }
+.auth-message h1 { font-size: 1.5rem; font-weight: 700; letter-spacing: -.015em; color: var(--ink); }
+.auth-message p { margin-top: 8px; color: var(--ink-2); text-wrap: pretty; }
+.auth-message .button { margin-top: 20px; }
+.auth-message code { padding: 1px 5px; border-radius: 4px; background: var(--accent-wash); color: var(--ink); font: .9375em ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: nowrap; }
+/* Only shows when loading takes long enough to notice. */
+#auth-loading p { color: var(--ink-3); animation: fade-in .2s .5s both; }
+@keyframes fade-in { from { opacity: 0; } }
+.sign-in { display: flex; justify-content: center; }
+.auth-note { max-width: 25rem; margin: 20px auto 0; color: var(--ink-3); font-size: .875rem; text-align: center; text-wrap: pretty; }
 
 /* Page */
 .page { padding-block: 32px 48px; }
@@ -215,8 +232,9 @@ dialog h2 { font-size: 1.25rem; font-weight: 700; letter-spacing: -.01em; }
 @media (max-width: 600px) {
   .wrap { width: calc(100% - 32px); }
   .masthead-inner { min-height: 56px; }
-  .nav { margin-right: -10px; }
+  .masthead-actions { gap: 8px; }
   .nav a { padding-inline: 10px; }
+  .auth { padding-top: 32px; }
   .page { padding-top: 24px; }
   .page-heading { margin-bottom: 16px; }
   body[data-view="log"] h1 { font-size: 1.875rem; }
@@ -237,4 +255,8 @@ dialog h2 { font-size: 1.25rem; font-weight: 700; letter-spacing: -.01em; }
   .long-label { display: none; }
   .short-label { display: inline; }
   .row-action { width: 40px; }
+}
+@media (max-width: 360px) {
+  .nav { gap: 0; }
+  .nav a { padding-inline: 8px; }
 }

@@ -18,14 +18,34 @@
   <header class="masthead">
     <div class="wrap masthead-inner">
       <a class="wordmark" href="#overview">Baseline</a>
-      <nav class="nav" aria-label="Main">
-        <a id="overview-link" href="#overview" aria-current="page">Overview</a>
-        <a id="log-link" href="#weight-log">Log</a>
-      </nav>
+      <div class="masthead-actions" id="account-bar" hidden>
+        <nav class="nav" aria-label="Main">
+          <a id="overview-link" href="#overview" aria-current="page">Overview</a>
+          <a id="log-link" href="#weight-log">Log</a>
+        </nav>
+        <div class="user-button" id="user-button"></div>
+      </div>
     </div>
   </header>
 
-  <main class="wrap page" id="main" tabindex="-1">
+  <main class="wrap auth" id="auth" tabindex="-1" aria-busy="true">
+    <div aria-live="polite">
+      <div class="auth-message" id="auth-loading"><p>Loading…</p></div>
+      <div class="auth-message" id="auth-setup" hidden>
+        <h1>Sign-in isn’t set up yet</h1>
+        <p>Add your Clerk publishable key to <code>baseline/dist/config.mjs</code>, then reload this page.</p>
+      </div>
+      <div class="auth-message" id="auth-error" hidden>
+        <h1>Couldn’t load sign-in</h1>
+        <p>Check your connection, then try again.</p>
+        <button class="button secondary" type="button" id="auth-retry">Try again</button>
+      </div>
+    </div>
+    <div class="sign-in" id="sign-in" hidden></div>
+    <p class="auth-note" id="auth-note" hidden>Your weight log stays in this browser, and each account keeps its own log.</p>
+  </main>
+
+  <main class="wrap page" id="main" tabindex="-1" hidden>
     <div class="sample-note" id="sample-note" hidden>
       <p><strong>You’re looking at sample data.</strong> Saving a weight or your height starts your own log.</p>
       <button class="text-button" id="start-log" type="button">Start an empty log</button>
@@ -106,7 +126,7 @@
       <p id="table-empty" class="table-empty" hidden>Your entries will appear here after your first weigh-in.</p>
       <div class="pagination" id="pagination" hidden><span id="page-count"></span><div><button type="button" id="prev-page" class="small-button">Newer</button><button type="button" id="next-page" class="small-button">Older</button></div></div>
     </section>
-    <p class="storage-status" id="storage-status">Your log is stored only in this browser.</p>
+    <p class="storage-status" id="storage-status"></p>
   </main>
 
   <dialog id="profile-dialog" aria-labelledby="profile-title">

@@ -1,12 +1,17 @@
 import { bmi, calculateTrend, localToday, normalizeState, oneDecimal, positive, prettyDate, sampleEntries, saveWeight, shiftDate, validDate } from "./model.mjs";
 import { TrendChart } from "./chart.mjs";
+import { claimLegacyLog, storageKeyFor } from "./account.mjs";
+import { AuthSetupError, startClerk } from "./auth.mjs";
 
 const $ = id => document.getElementById(id);
-const STORAGE_KEY = "baseline.weight-log.v1";
 const PAGE_SIZE = 15;
 const chart = new TrendChart();
 let today = localToday();
-let state;
+let clerk;
+let mounted = null; // Which Clerk component is on the page: "sign-in" or "user".
+let account = null; // { id, email } of the signed-in user.
+let storageKey = null;
+let state = null; // The signed-in account's log. Null while signed out.
 let sessionOnly = false;
 let demo;
 let trend;
@@ -17,14 +22,7 @@ let autoWeight = true;
 let toastTimer;
 
 function readState() {
-  return normalizeState(JSON.parse(localStorage.getItem(STORAGE_KEY)));
-}
-
-try {
-  state = readState();
-} catch {
-  state = normalizeState(null);
-  sessionOnly = true;
+  return normalizeState(JSON.parse(localStorage.getItem(storageKey)));
 }
 
 function notify(message) {
@@ -36,14 +34,17 @@ function notify(message) {
 // Start a transaction from the latest browser state so edits from another
 // open tab survive. Keep the current session usable if storage is unavailable.
 async function changeState(change) {
+  const key = storageKey;
+  if (!key) return;
   const commit = () => {
+    if (storageKey !== key) return; // Signed out or switched accounts meanwhile.
     let current = state;
     if (!sessionOnly) {
       try { current = readState(); } catch { sessionOnly = true; }
     }
     const next = normalizeState(change(current));
     if (!sessionOnly) {
-      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); } catch { sessionOnly = true; }
+      try { localStorage.setItem(key, JSON.stringify(next)); } catch { sessionOnly = true; }
     }
     state = next;
     render();
@@ -51,7 +52,7 @@ async function changeState(change) {
   if (!sessionOnly) {
     try {
       if (navigator.locks) {
-        await navigator.locks.request(STORAGE_KEY, commit);
+        await navigator.locks.request(key, commit);
         return;
       }
     } catch (error) {
@@ -170,9 +171,99 @@ function render() {
   showMetrics();
   syncEntryForm();
   showPage();
+  showStorageStatus();
+}
+
+function showStorageStatus() {
   $("storage-status").textContent = sessionOnly
     ? "Browser storage is unavailable, so changes last only for this session."
-    : "Your log is stored only in this browser.";
+    : "Your log" + (account.email ? " for " + account.email : "") + " is stored only in this browser.";
+}
+
+// Signed out, the page shows one of these in place of the app.
+const authViews = ["auth-loading", "auth-setup", "auth-error", "sign-in"];
+
+function showAuth(view) {
+  for (const id of authViews) $(id).hidden = id !== view;
+  $("auth-note").hidden = view !== "sign-in";
+  $("auth").setAttribute("aria-busy", String(view === "auth-loading"));
+  $("auth").hidden = false;
+  $("main").hidden = true;
+  $("account-bar").hidden = true;
+  document.title = view === "sign-in" ? "Sign in · Baseline" : "Baseline";
+}
+
+function emailOf(user) {
+  return user.primaryEmailAddress?.emailAddress ?? "";
+}
+
+function openLog(user) {
+  account = { id: user.id, email: emailOf(user) };
+  storageKey = storageKeyFor(user.id);
+  sessionOnly = false;
+  try { claimLegacyLog(localStorage, user.id); } catch { /* Leave the old log where it is. */ }
+  try { state = readState(); } catch {
+    state = normalizeState(null);
+    sessionOnly = true;
+  }
+  today = localToday();
+  page = 0;
+  editingDate = null;
+  autoWeight = true;
+  $("entry-date").value = today;
+  $("auth").hidden = true;
+  $("main").hidden = false;
+  $("account-bar").hidden = false;
+  render();
+}
+
+function closeLog() {
+  account = null;
+  storageKey = null;
+  state = null;
+  for (const dialog of document.querySelectorAll("dialog[open]")) dialog.close();
+  clearTimeout(toastTimer);
+  $("toast").textContent = "";
+}
+
+function showSignedIn(user) {
+  if (account?.id !== user.id) openLog(user);
+  else if (account.email !== emailOf(user)) {
+    account.email = emailOf(user);
+    showStorageStatus();
+  }
+  if (mounted === "user") return;
+  if (mounted === "sign-in") clerk.unmountSignIn($("sign-in"));
+  clerk.mountUserButton($("user-button"), { appearance: { elements: { userButtonAvatarBox: { width: "2rem", height: "2rem" } } } });
+  mounted = "user";
+}
+
+function showSignedOut() {
+  if (state) closeLog();
+  // Clerk's sign-in steps live in the hash ("#/factor-one"), so drop the app's own views from it.
+  if (location.hash && !location.hash.startsWith("#/")) history.replaceState(null, "", location.pathname + location.search);
+  showAuth("sign-in");
+  if (mounted === "sign-in") return;
+  if (mounted === "user") clerk.unmountUserButton($("user-button"));
+  clerk.mountSignIn($("sign-in"), { withSignUp: true });
+  mounted = "sign-in";
+}
+
+async function startAuth() {
+  showAuth("auth-loading");
+  try {
+    clerk = await startClerk();
+  } catch (error) {
+    console.error(error);
+    showAuth(error instanceof AuthSetupError ? "auth-setup" : "auth-error");
+    return;
+  }
+  // Fires now with the current user, then on every sign-in, sign-out and profile change,
+  // including ones made in other tabs.
+  clerk.addListener(({ user }) => {
+    if (user) showSignedIn(user);
+    else if (user === null) showSignedOut();
+  });
 }
 
 function focusEntry() {
@@ -207,7 +298,7 @@ function syncDay() {
   if (now === today) return;
   if ($("entry-date").value === today && autoWeight) $("entry-date").value = now;
   today = now;
-  render();
+  if (state) render();
 }
 
 function scheduleMidnight() {
@@ -327,17 +418,24 @@ for (const dialog of document.querySelectorAll("dialog")) {
   });
 }
 window.addEventListener("hashchange", () => {
+  if (!state) return;
   page = 0;
   showPage();
   window.scrollTo({ top: 0, behavior: "auto" });
 });
-document.querySelector(".skip-link").addEventListener("click", event => { event.preventDefault(); $("main").focus(); });
+document.querySelector(".skip-link").addEventListener("click", event => {
+  event.preventDefault();
+  ($("main").hidden ? $("auth") : $("main")).focus();
+});
+// Signed out, the wordmark's "#overview" would land in Clerk's hash routes.
+document.querySelector(".wordmark").addEventListener("click", event => { if (!state) event.preventDefault(); });
+$("auth-retry").addEventListener("click", () => location.reload());
 window.addEventListener("storage", event => {
-  if (event.key !== STORAGE_KEY && event.key !== null) return;
+  if (!storageKey || (event.key !== storageKey && event.key !== null)) return;
   try { state = readState(); } catch { sessionOnly = true; }
   render();
 });
 document.addEventListener("visibilitychange", () => { if (!document.hidden) syncDay(); });
 window.addEventListener("focus", syncDay);
-render();
+startAuth();
 scheduleMidnight();
