@@ -92,3 +92,26 @@ test("imports are normalized like the app's own log", () => {
   assert.equal(parseOp({ op: "import", log: { entries: "lots" } }, NOW), null);
   assert.equal(parseOp({ op: "import", log: { entries: new Array(MAX_IMPORT_ENTRIES + 1).fill({ date: "2026-11-01", weight: 80 }) } }, NOW), null);
 });
+
+const GOAL = { weight: 60, startDate: "2026-09-13", startWeight: 66, rate: 0.5, milestones: 10 };
+
+test("goals are checked and rounded like weights", () => {
+  assert.deepEqual(parseOp({ op: "set-goal", goal: { weight: 60.04, startDate: "2026-11-23", startWeight: 66.06, rate: 0.504, milestones: 20, extra: 1 } }, NOW),
+    { op: "set-goal", goal: { weight: 60, startDate: "2026-11-23", startWeight: 66.1, rate: 0.5, milestones: 20 } });
+  assert.deepEqual(parseOp({ op: "set-goal", goal: { ...GOAL, rate: null } }, NOW).goal.rate, null);
+  assert.deepEqual(parseOp({ op: "set-goal", goal: { ...GOAL, rate: undefined } }, NOW).goal.rate, null);
+  assert.deepEqual(parseOp({ op: "set-goal", goal: { ...GOAL, milestones: 1, rate: 5 } }, NOW).goal, { ...GOAL, milestones: 1, rate: 5 });
+  assert.deepEqual(parseOp({ op: "clear-goal", goal: GOAL }, NOW), { op: "clear-goal" });
+});
+
+test("goals with a bad field are rejected", () => {
+  const bad = [
+    { weight: 0 }, { weight: "60" }, { startWeight: 2000.1 }, { startWeight: null },
+    { startDate: "2026-11-24" }, { startDate: "2026-02-30" }, { startDate: undefined },
+    { rate: 0 }, { rate: 5.01 }, { rate: "0.5" }, { rate: -0.5 },
+    { milestones: 0 }, { milestones: 21 }, { milestones: 2.5 }, { milestones: "10" }, { milestones: undefined }
+  ];
+  for (const change of bad) assert.equal(parseOp({ op: "set-goal", goal: { ...GOAL, ...change } }, NOW), null, JSON.stringify(change));
+  assert.equal(parseOp({ op: "set-goal" }, NOW), null);
+  assert.equal(parseOp({ op: "set-goal", goal: "60" }, NOW), null);
+});

@@ -31,6 +31,19 @@ export function createStore(url = process.env.DATABASE_URL) {
       case "set-height":
         return [sql`INSERT INTO profiles (user_id, started, height_cm) VALUES (${userId}, true, ${change.height})
                     ON CONFLICT (user_id) DO UPDATE SET started = true, height_cm = excluded.height_cm, updated_at = now()`];
+      case "set-goal": {
+        const { weight, startDate, startWeight, rate, milestones } = change.goal;
+        return [sql`
+          INSERT INTO profiles (user_id, started, goal_kg, goal_start_date, goal_start_kg, goal_rate_kg_week, goal_milestones)
+          VALUES (${userId}, true, ${weight}, ${startDate}::date, ${startWeight}, ${rate}, ${milestones})
+          ON CONFLICT (user_id) DO UPDATE SET started = true, goal_kg = excluded.goal_kg, goal_start_date = excluded.goal_start_date,
+            goal_start_kg = excluded.goal_start_kg, goal_rate_kg_week = excluded.goal_rate_kg_week,
+            goal_milestones = excluded.goal_milestones, updated_at = now()`];
+      }
+      case "clear-goal":
+        return [sql`UPDATE profiles SET goal_kg = NULL, goal_start_date = NULL, goal_start_kg = NULL, goal_rate_kg_week = NULL,
+                      goal_milestones = NULL, updated_at = now()
+                    WHERE user_id = ${userId}`];
       case "start":
         return [sql`INSERT INTO profiles (user_id, started) VALUES (${userId}, true)
                     ON CONFLICT (user_id) DO UPDATE SET started = true, updated_at = now()`];
@@ -65,12 +78,19 @@ export function createStore(url = process.env.DATABASE_URL) {
       const queries = writes(userId, change);
       const results = await sql.transaction([
         ...queries,
-        sql`SELECT started, height_cm::float8 AS height FROM profiles WHERE user_id = ${userId}`,
+        sql`SELECT started, height_cm::float8 AS height, goal_kg::float8 AS goal_weight,
+                   to_char(goal_start_date, 'YYYY-MM-DD') AS goal_start_date, goal_start_kg::float8 AS goal_start_weight,
+                   goal_rate_kg_week::float8 AS goal_rate, goal_milestones
+            FROM profiles WHERE user_id = ${userId}`,
         sql`SELECT to_char(date, 'YYYY-MM-DD') AS date, weight_kg::float8 AS weight
             FROM weigh_ins WHERE user_id = ${userId} ORDER BY date`
       ]);
       const [profile] = results.at(-2);
-      const result = { log: { started: Boolean(profile?.started), height: profile?.height ?? null, entries: results.at(-1) } };
+      const goal = profile?.goal_weight == null ? null : {
+        weight: profile.goal_weight, startDate: profile.goal_start_date, startWeight: profile.goal_start_weight,
+        rate: profile.goal_rate, milestones: profile.goal_milestones
+      };
+      const result = { log: { started: Boolean(profile?.started), height: profile?.height ?? null, goal, entries: results.at(-1) } };
       if (change?.op === "update-weight") result.found = results[0].length > 0;
       if (change?.op === "import") result.imported = results[0][0]?.imported > 0;
       return result;

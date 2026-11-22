@@ -1,4 +1,4 @@
-import { dateOf, dayOf, normalizeState, validDate } from "../baseline/dist/model.mjs";
+import { GOAL_MAX_MILESTONES, GOAL_MAX_RATE, dateOf, dayOf, normalizeState, validDate } from "../baseline/dist/model.mjs";
 
 export const MAX_IMPORT_ENTRIES = 20_000;
 
@@ -22,6 +22,18 @@ export function parseOp(body, now = new Date()) {
       return validDate(body.date) ? { op: body.op, date: body.date } : null;
     case "set-height":
       return inRange(body.height, 0.1, 400) ? { op: body.op, height: round(body.height) } : null;
+    case "set-goal": {
+      const goal = body.goal;
+      const valid = inRange(goal?.weight, 0.1, 2000) && inRange(goal.startWeight, 0.1, 2000)
+        && validDate(goal.startDate) && goal.startDate <= latest
+        && (goal.rate == null || inRange(goal.rate, 0.01, GOAL_MAX_RATE))
+        && Number.isInteger(goal.milestones) && goal.milestones >= 1 && goal.milestones <= GOAL_MAX_MILESTONES;
+      return valid ? { op: body.op, goal: {
+        weight: round(goal.weight), startDate: goal.startDate, startWeight: round(goal.startWeight),
+        rate: goal.rate == null ? null : Math.round(goal.rate * 100) / 100, milestones: goal.milestones
+      } } : null;
+    }
+    case "clear-goal":
     case "start":
       return { op: body.op };
     case "import": {

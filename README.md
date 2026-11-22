@@ -4,6 +4,16 @@ A daily weight journal with a 14-day moving average and height-based BMI. Each g
 
 Under the average, the weekly trend gives the slope of a straight line fitted through the last 21 days of weigh-ins, in kilograms a week. An average runs about a week behind a falling or rising weight, and the fitted line does not. The trend appears once there are 8 weigh-ins spread over at least 14 days. When the slope is too small to tell apart from normal day-to-day scale noise, it reads "No clear change".
 
+A goal has a goal weight, a start date and a start weight, which defaults to the 14-day average on the start date. Whether it is a loss, a gain or staying at a weight comes from those two weights. The distance is split into milestones, 10 by default, each at least 0.1 kg. Progress is measured with the 14-day average as shown, to 0.1 kg, so a single light day doesn't count as reaching a milestone.
+
+The forecast says when the 14-day average would reach each remaining milestone and the goal at a steady rate. You choose the rate:
+
+- **Your target rate:** the optional rate saved with the goal.
+- **Last 3 weeks:** the weekly trend. It is only used when it is a clear change toward the goal.
+- **Since the start date:** the change in the 14-day average since the start, which appears 14 days after the start date.
+
+When the chosen rate is flat or heads away from the goal, the forecast says so and gives no date.
+
 ## Set up sign-in
 
 Baseline uses [Clerk](https://clerk.com) for accounts, with email and Google sign-in. The sign-in screen comes from Clerk's prebuilt components, loaded from your Clerk app's Frontend API, so the page itself needs no build step.
@@ -46,10 +56,10 @@ Open [Baseline locally](http://127.0.0.1:4173/). `npm start` serves the page fro
 
 ## Using the tracker
 
-Save a weight in kilograms and a date in **Log a weigh-in**. The arrows beside the date move it back or forward one day and stop at today. Saving again on the same date updates that entry. Use **Add** or **Edit** next to **Height** to enter a height in centimeters. Baseline calculates BMI from the latest recorded weight.
+Save a weight in kilograms and a date in **Log a weigh-in**. The arrows beside the date move it back or forward one day and stop at today. Saving again on the same date updates that entry. Use **Add** or **Edit** next to **Height** to enter a height in centimeters. Baseline calculates BMI from the latest recorded weight. Use **Set** or **Edit** next to **Goal** to set, change or remove a goal. Progress appears under the average, and the **Forecast** section below it gives the expected dates.
 
 Sign in to open your log. Use the avatar at the top right to manage your account or sign out. A new account starts with an empty log. The **Weight log** shows every entry and lets you edit or delete individual weigh-ins.
 
-Entries and height are saved to your account, so the same log opens on any device you sign in on. A change shows right away and is saved in the background. If saving fails, the change is undone and a message says so. Switching back to the tab picks up changes made on another device.
+Entries, height and your goal are saved to your account, so the same log opens on any device you sign in on. A change shows right away and is saved in the background. If saving fails, the change is undone and a message says so. Switching back to the tab picks up changes made on another device.
 
 Earlier versions kept logs only in the browser. The first time an account with an empty online log signs in on such a browser, that browser's log moves into the account and the browser copy is removed. An account that already has entries keeps them, and the browser copy is left untouched.

@@ -1,4 +1,4 @@
-import { RATE_DAYS, RATE_MIN_ENTRIES, RATE_MIN_SPAN, bmi, calculateRate, calculateTrend, localToday, normalizeState, oneDecimal, positive, prettyDate, saveWeight, shiftDate, validDate } from "./model.mjs";
+import { FORECAST_MAX_DAYS, GOAL_MILESTONES, OVERALL_MIN_DAYS, RATE_DAYS, RATE_MIN_ENTRIES, RATE_MIN_SPAN, bmi, calculateRate, calculateTrend, dateOf, dayOf, forecastGoal, goalProgress, localToday, normalizeGoal, normalizeState, oneDecimal, overallRate, positive, prettyDate, saveWeight, shiftDate, validDate } from "./model.mjs";
 import { TrendChart } from "./chart.mjs";
 import { claimLegacyLog, storageKeyFor } from "./account.mjs";
 import { AuthSetupError, startClerk } from "./auth.mjs";
@@ -16,6 +16,10 @@ let saved = null; // The log as the server last returned it.
 let queue = Promise.resolve(); // Changes reach the server one at a time, in order.
 let unsaved = 0; // Changes sent and not yet answered.
 let trend;
+let weeklyRate; // calculateRate for today, or null.
+let progress; // goalProgress for today's average, or null without a goal.
+let rateSource = null; // The rate the forecast uses. Null picks one from the goal.
+let startWeightFrom = "average"; // Where the goal dialog's start weight came from: "average", "saved" or "typed".
 let range = "30";
 let page = 0;
 let editingDate = null;
@@ -96,20 +100,155 @@ function showMetrics() {
   $("height-label").textContent = height ? "Edit" : "Add";
   $("height-label").setAttribute("aria-label", height ? "Edit height, currently " + height + " centimeters" : "Add your height for BMI");
   setValue("bmi-value", bmi(latest?.weight, height));
+  showGoal();
+}
+
+const kg = value => oneDecimal(value) + " kg";
+
+// Up to two decimals, as the target rate is entered, and at least one.
+const rateFormat = new Intl.NumberFormat("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 2 });
+
+function showGoal() {
+  const goal = state.goal;
+  setValue("goal-value", goal?.weight, " kg");
+  $("goal-label").textContent = goal ? "Edit" : "Set";
+  $("goal-label").setAttribute("aria-label", goal ? "Edit your goal of " + oneDecimal(goal.weight) + " kilograms" : "Set a goal weight");
+  showProgress();
+  showForecast();
+}
+
+// A bold lead followed by quieter detail, as in the weekly trend line.
+function writeLine(element, lead, rest = "") {
+  const strong = document.createElement("strong");
+  strong.textContent = lead;
+  element.replaceChildren(strong, rest);
+}
+
+function showProgress() {
+  $("goal-progress").hidden = !progress;
+  if (!progress) return;
+  const note = $("progress-note");
+  const { current, direction } = progress;
+  $("progress-track").hidden = current === null || direction === "maintain";
+  note.classList.toggle("is-pending", current === null);
+  if (current === null) {
+    note.textContent = "Log a weigh-in to see your progress toward " + kg(progress.goal) + ".";
+    return;
+  }
+  if (direction === "maintain") {
+    const off = progress.difference;
+    if (off === 0) writeLine(note, "At your goal", " of " + kg(progress.goal));
+    else writeLine(note, kg(Math.abs(off)) + (off > 0 ? " above" : " below"), " your goal of " + kg(progress.goal));
+    return;
+  }
+  const count = progress.milestones.length;
+  $("progress-fill").style.width = progress.overall * 100 + "%";
+  $("progress-track").replaceChildren($("progress-fill"), ...progress.milestones.slice(0, -1).map(milestone => {
+    const tick = document.createElement("span");
+    tick.className = "progress-tick";
+    tick.style.left = milestone.index / count * 100 + "%";
+    return tick;
+  }));
+  const losing = direction === "lose";
+  if (progress.reached) {
+    const past = Math.abs(progress.difference);
+    writeLine(note, "Goal reached", past ? " · " + kg(past) + (losing ? " below " : " above ") + kg(progress.goal) : "");
+    return;
+  }
+  const details = [];
+  if (progress.behindStart) details.push(kg(progress.behindStart) + (losing ? " above" : " below") + " where you started");
+  else {
+    if (progress.next.index < count) details.push(kg(progress.next.toGo) + " to milestone " + progress.next.index + " of " + count);
+    details.push(Math.floor(progress.overall * 100) + "% of the way");
+  }
+  writeLine(note, kg(progress.toGo) + " to go", details.map(text => " · " + text).join(""));
+}
+
+function signedRate(perWeek) {
+  return (perWeek < 0 ? "−" : perWeek > 0 ? "+" : "") + rateFormat.format(Math.abs(perWeek)) + " kg/wk";
+}
+
+function setRate(id, text, empty = false) {
+  $(id).textContent = text;
+  $(id).classList.toggle("is-empty", empty);
+}
+
+function duration(days) {
+  if (days < 14) return days + (days === 1 ? " day" : " days");
+  if (days < 63) return "about " + Math.round(days / 7) + " weeks";
+  return "about " + Math.round(days / 30.44) + " months";
+}
+
+function expected(row) {
+  if (!row.date) return "Over " + FORECAST_MAX_DAYS / 365 + " years";
+  return row.days ? shortDate(row.date) : "Any day now";
+}
+
+// The forecast shows only while there is distance left to cover.
+function showForecast() {
+  const open = Boolean(progress?.next) && progress.direction !== "maintain";
+  $("forecast").hidden = !open;
+  if (!open) return;
+  const goal = state.goal;
+  const sign = progress.direction === "lose" ? -1 : 1;
+  const overall = overallRate(goal, trend.current.average, today);
+  const source = rateSource ?? (goal.rate ? "committed" : "current");
+  for (const input of $("rate-choice").querySelectorAll("input")) input.checked = input.value === source;
+
+  setRate("rate-committed", goal.rate ? signedRate(sign * goal.rate) : "Not set", !goal.rate);
+  setRate("rate-current", !weeklyRate ? "Not yet" : weeklyRate.clear ? signedRate(weeklyRate.perWeek) : "No clear change", !weeklyRate?.clear);
+  $("rate-overall-name").textContent = "Since " + shortDate(goal.startDate);
+  setRate("rate-overall", overall === null ? "Not yet" : overall ? signedRate(overall) : "No change", !overall);
+
+  const lead = $("forecast-lead");
+  const away = "away from your goal, so there’s no date to forecast.";
+  const perWeek = { committed: goal.rate && sign * goal.rate, current: weeklyRate?.clear ? weeklyRate.perWeek : null, overall }[source];
+  const rows = forecastGoal(progress, perWeek, today);
+  $("forecast-table").hidden = !rows || rows.length < 2;
+  if (!rows) {
+    if (source === "committed") {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "text-button";
+      button.dataset.goalRate = "";
+      button.textContent = "Add a target rate";
+      lead.replaceChildren(button, " to forecast from the pace you’re aiming for.");
+    } else if (source === "current") {
+      lead.textContent = !weeklyRate ? "Your weekly trend shows after " + RATE_MIN_ENTRIES + " weigh-ins over " + RATE_MIN_SPAN / 7 + " weeks."
+        : !weeklyRate.clear ? "Your weight shows no clear change over the last " + RATE_DAYS / 7 + " weeks, so there’s no date to forecast."
+        : "Your weight is going " + (weeklyRate.perWeek > 0 ? "up" : "down") + " over the last " + RATE_DAYS / 7 + " weeks, " + away;
+    } else {
+      lead.textContent = overall === null ? "Your rate since you started shows from " + shortDate(dateOf(dayOf(goal.startDate) + OVERALL_MIN_DAYS)) + "."
+        : !overall ? "Your 14-day average hasn’t changed since " + shortDate(goal.startDate) + ", so there’s no date to forecast."
+        : "Your 14-day average is " + (overall > 0 ? "higher" : "lower") + " than when you started, " + away;
+    }
+    return;
+  }
+  const last = rows.at(-1);
+  const pace = "At " + rateFormat.format(Math.abs(perWeek)) + " kg a week, ";
+  if (!last.date) lead.textContent = pace + kg(progress.goal) + " is more than " + FORECAST_MAX_DAYS / 365 + " years away.";
+  else if (!last.days) lead.textContent = pace + "you’d reach " + kg(progress.goal) + " any day now.";
+  else {
+    const strong = document.createElement("strong");
+    strong.textContent = shortDate(last.date);
+    lead.replaceChildren(pace + "you’d reach " + kg(progress.goal) + " around ", strong, ", in " + duration(last.days) + ".");
+  }
+  const count = progress.milestones.length;
+  $("forecast-rows").innerHTML = rows.map(row => "<tr><td>" + (row.index === count ? "Goal" : row.index + " of " + count) + "</td>" +
+    '<td class="num">' + oneDecimal(row.weight) + '<span class="table-unit">kg</span></td><td class="num">' + expected(row) + "</td></tr>").join("");
 }
 
 function showRate() {
-  const rate = calculateRate(state.entries, today);
   const line = $("rate-detail");
   line.hidden = !state.entries.length;
-  line.classList.toggle("is-pending", !rate);
-  if (!rate) {
+  line.classList.toggle("is-pending", !weeklyRate);
+  if (!weeklyRate) {
     line.textContent = "Your weekly trend shows after " + RATE_MIN_ENTRIES + " weigh-ins over " + RATE_MIN_SPAN / 7 + " weeks.";
     return;
   }
   const strong = document.createElement("strong");
-  strong.textContent = !rate.clear ? "No clear change"
-    : (rate.perWeek < 0 ? "Down " : "Up ") + oneDecimal(Math.abs(rate.perWeek)) + " kg a week";
+  strong.textContent = !weeklyRate.clear ? "No clear change"
+    : (weeklyRate.perWeek < 0 ? "Down " : "Up ") + oneDecimal(Math.abs(weeklyRate.perWeek)) + " kg a week";
   line.replaceChildren(strong, " over the last " + RATE_DAYS / 7 + " weeks");
 }
 
@@ -185,6 +324,8 @@ function showPage() {
 
 function render() {
   trend = calculateTrend(state.entries, today);
+  weeklyRate = calculateRate(state.entries, today);
+  progress = goalProgress(state.goal, trend.current?.average);
   $("entry-date").max = today;
   showMetrics();
   syncEntryForm();
@@ -256,6 +397,7 @@ async function openLog(user) {
   page = 0;
   editingDate = null;
   autoWeight = true;
+  rateSource = null;
   $("entry-date").value = today;
   $("auth").hidden = true;
   $("main").hidden = false;
@@ -348,6 +490,69 @@ function openProfile() {
   $("profile-height").focus();
 }
 
+function openGoal(focusId = "goal-weight") {
+  const goal = state.goal;
+  $("goal-title").textContent = goal ? "Edit your goal" : "Set a goal";
+  $("goal-weight").value = goal ? goal.weight.toFixed(1) : "";
+  $("goal-start-date").max = today;
+  $("goal-start-date").value = goal?.startDate ?? today;
+  $("goal-rate").value = goal?.rate ?? "";
+  $("goal-milestones").value = goal?.milestones ?? GOAL_MILESTONES;
+  startWeightFrom = goal ? "saved" : "average";
+  if (goal) $("goal-start-weight").value = goal.startWeight.toFixed(1);
+  else fillStartWeight();
+  $("clear-goal").hidden = !goal;
+  showStartHint();
+  previewGoal();
+  $("goal-dialog").showModal();
+  $(focusId).focus();
+}
+
+// The start weight defaults to the 14-day average on the start date.
+function fillStartWeight() {
+  const date = $("goal-start-date").value;
+  const average = validDate(date) ? calculateTrend(state.entries, date).current?.average : undefined;
+  $("goal-start-weight").value = Number.isFinite(average) ? average.toFixed(1) : "";
+}
+
+function showStartHint() {
+  const date = $("goal-start-date").value;
+  const filled = $("goal-start-weight").value !== "";
+  $("goal-start-hint").hidden = startWeightFrom !== "average" || !validDate(date);
+  $("goal-start-hint").textContent = !filled ? "No weigh-ins in the 14 days up to " + shortDate(date) + ", so enter your weight then."
+    : "Your 14-day average on " + shortDate(date) + ".";
+}
+
+function readGoal() {
+  const rate = $("goal-rate").valueAsNumber;
+  return normalizeGoal({
+    weight: $("goal-weight").valueAsNumber,
+    startDate: $("goal-start-date").value,
+    startWeight: $("goal-start-weight").valueAsNumber,
+    rate: Number.isFinite(rate) ? rate : null,
+    milestones: $("goal-milestones").valueAsNumber
+  });
+}
+
+function previewGoal() {
+  const preview = $("goal-preview");
+  const goal = readGoal();
+  preview.hidden = !goal;
+  if (!goal) return;
+  const plan = goalProgress(goal, goal.startWeight);
+  if (plan.direction === "maintain") {
+    preview.textContent = "Stay at " + kg(plan.goal) + ".";
+    return;
+  }
+  const tenths = Math.round(Math.abs(plan.goal - plan.start) * 10);
+  const count = plan.milestones.length;
+  let text = (plan.direction === "lose" ? "Lose " : "Gain ") + kg(tenths / 10);
+  if (count > 1) text += " in " + count + " milestones of " + (tenths % count ? "about " : "") + kg(tenths / count / 10);
+  text += ".";
+  if (goal.rate) text += " At " + rateFormat.format(goal.rate) + " kg a week, that’s " + duration(Math.round(tenths / 10 / goal.rate * 7)) + ".";
+  preview.textContent = text;
+}
+
 function previewBmi() {
   const latest = trend.readings.at(-1);
   $("profile-bmi").textContent = oneDecimal(bmi(latest?.weight, $("profile-height").valueAsNumber));
@@ -397,10 +602,20 @@ $("entry-form").addEventListener("submit", async event => {
   if (!validDate(date) || date > today || !positive(weight)) return;
   const updating = state.entries.some(entry => entry.date === date);
   autoWeight = true;
+  const before = progress;
   if (await changeState(current => saveWeight(current, date, weight), { op: "save-weight", date, weight })) {
-    notify((updating ? "Weigh-in updated" : "Weigh-in saved") + " for " + prettyDate(date) + ".");
+    notify((updating ? "Weigh-in updated" : "Weigh-in saved") + " for " + prettyDate(date) + "." + celebrate(before, progress));
   }
 });
+
+// A word when a weigh-in carries the average past a milestone. Needs an average
+// before the weigh-in too, so returning after a break doesn't count every milestone.
+function celebrate(before, after) {
+  if (before?.current == null || after?.current == null || after.direction === "maintain") return "";
+  if (after.reached && !before.reached) return " You’ve reached your goal.";
+  if (after.completed > before.completed) return " Milestone " + after.completed + " of " + after.milestones.length + " reached.";
+  return "";
+}
 $("ranges").addEventListener("click", event => {
   const button = event.target.closest("[data-range]");
   if (!button) return;
@@ -413,6 +628,40 @@ $("prev-page").addEventListener("click", () => { page--; showTable(true); });
 $("next-page").addEventListener("click", () => { page++; showTable(true); });
 
 for (const button of document.querySelectorAll("[data-profile]")) button.addEventListener("click", openProfile);
+for (const button of document.querySelectorAll("[data-goal]")) button.addEventListener("click", () => openGoal());
+$("forecast-lead").addEventListener("click", event => {
+  if (event.target.closest("[data-goal-rate]")) openGoal("goal-rate");
+});
+$("rate-choice").addEventListener("change", event => {
+  rateSource = event.target.value;
+  showForecast();
+});
+// A new start date brings its own average, unless a start weight was typed.
+$("goal-start-date").addEventListener("change", () => {
+  if (startWeightFrom !== "typed") {
+    startWeightFrom = "average";
+    fillStartWeight();
+  }
+  showStartHint();
+  previewGoal();
+});
+$("goal-start-weight").addEventListener("input", () => {
+  startWeightFrom = "typed";
+  showStartHint();
+});
+$("goal-form").addEventListener("input", previewGoal);
+$("goal-form").addEventListener("submit", async event => {
+  event.preventDefault();
+  syncDay();
+  const goal = readGoal();
+  if (!goal || goal.startDate > today) return;
+  $("goal-dialog").close();
+  if (await changeState(current => ({ ...current, started: true, goal }), { op: "set-goal", goal })) notify("Goal saved.");
+});
+$("clear-goal").addEventListener("click", async () => {
+  $("goal-dialog").close();
+  if (await changeState(current => ({ ...current, goal: null }), { op: "clear-goal" })) notify("Goal removed.");
+});
 $("profile-height").addEventListener("input", previewBmi);
 $("profile-form").addEventListener("submit", async event => {
   event.preventDefault();

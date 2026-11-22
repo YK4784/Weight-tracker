@@ -60,6 +60,20 @@ export function bmi(weight, heightCm) {
   return weight / (heightCm / 100) ** 2;
 }
 
+export const GOAL_MILESTONES = 10;
+export const GOAL_MAX_MILESTONES = 20;
+export const GOAL_MAX_RATE = 5;
+
+// A goal is a target weight, where and when the user started, an optional
+// planned rate in kg a week (a size; the direction comes from start and target)
+// and how many milestones to split the distance into. Returns null if invalid.
+export function normalizeGoal(value) {
+  if (!validWeight(value?.weight) || !validWeight(value.startWeight) || !validDate(value.startDate)) return null;
+  const rate = positive(value.rate) && value.rate >= .01 && value.rate <= GOAL_MAX_RATE ? Math.round(value.rate * 100) / 100 : null;
+  const milestones = Number.isInteger(value.milestones) && value.milestones >= 1 && value.milestones <= GOAL_MAX_MILESTONES ? value.milestones : GOAL_MILESTONES;
+  return { weight: Math.round(value.weight * 10) / 10, startDate: value.startDate, startWeight: Math.round(value.startWeight * 10) / 10, rate, milestones };
+}
+
 export function normalizeState(value) {
   const byDate = new Map();
   for (const item of Array.isArray(value?.entries) ? value.entries : []) {
@@ -69,7 +83,8 @@ export function normalizeState(value) {
   }
   const entries = [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
   const height = positive(value?.height) && value.height >= .1 && value.height <= 400 ? value.height : null;
-  return { version: 1, started: Boolean(value?.started || entries.length || height), height, entries };
+  const goal = normalizeGoal(value?.goal);
+  return { version: 1, started: Boolean(value?.started || entries.length || height || goal), height, goal, entries };
 }
 
 export function saveWeight(state, date, weight) {
@@ -150,4 +165,70 @@ export function calculateRate(entries, throughDate) {
   const error = Math.sqrt(residuals / (n - 2) / sxx);
   const perWeek = Math.round(slope * 70) / 10 || 0;
   return { perWeek, clear: perWeek !== 0 && Math.abs(slope) > RATE_CLEAR_ERRORS * error, count: n };
+}
+
+// Progress toward a goal, measured with the 14-day average rounded to the 0.1 kg
+// shown on screen. Works in tenths of a kilogram so every comparison is exact.
+// Milestone k of n targets start − k × (start − goal) / n, and the last is the
+// goal itself. A milestone is never smaller than 0.1 kg, so a short distance
+// gets fewer of them. Returns null without a goal; `current` is null without an
+// average to measure.
+export function goalProgress(goal, average) {
+  if (!goal) return null;
+  const start = Math.round(goal.startWeight * 10);
+  const end = Math.round(goal.weight * 10);
+  const sign = Math.sign(end - start);
+  const total = Math.abs(end - start);
+  const count = Math.min(goal.milestones, total);
+  const milestones = Array.from({ length: count }, (_, i) => {
+    const index = i + 1;
+    return { index, weight: (index === count ? end : Math.round(start + (end - start) * index / count)) / 10 };
+  });
+  const result = {
+    direction: sign < 0 ? "lose" : sign > 0 ? "gain" : "maintain",
+    start: start / 10, goal: end / 10, milestones,
+    current: null, difference: null, toGo: null, overall: 0, completed: 0, next: null, reached: false, behindStart: 0
+  };
+  if (!Number.isFinite(average)) return result;
+  const current = Math.round(average * 10);
+  result.current = current / 10;
+  result.difference = (current - end) / 10;
+  if (!sign) return result;
+  // How far the average has moved from the start toward the goal, in tenths.
+  const done = (current - start) * sign;
+  const reachedAt = weight => (Math.round(weight * 10) - start) * sign <= done;
+  result.reached = done >= total;
+  result.toGo = Math.max(0, total - done) / 10;
+  result.overall = Math.min(1, Math.max(0, done / total));
+  result.completed = milestones.filter(milestone => reachedAt(milestone.weight)).length;
+  result.behindStart = Math.max(0, -done) / 10;
+  const next = milestones.find(milestone => !reachedAt(milestone.weight));
+  if (next) result.next = { ...next, toGo: Math.abs(Math.round(next.weight * 10) - current) / 10 };
+  return result;
+}
+
+export const OVERALL_MIN_DAYS = 14;
+
+// The 14-day average's change since the goal's start, in kg a week, rounded to
+// 0.1 like the weekly trend. Waits OVERALL_MIN_DAYS after the start date, so
+// the current average no longer shares most of its weigh-ins with the start.
+export function overallRate(goal, average, throughDate) {
+  if (!goal || !Number.isFinite(average)) return null;
+  const days = dayOf(throughDate) - dayOf(goal.startDate);
+  if (days < OVERALL_MIN_DAYS) return null;
+  return Math.round((average - goal.startWeight) / days * 70) / 10 || 0;
+}
+
+export const FORECAST_MAX_DAYS = 5 * 365;
+
+// When the 14-day average would reach each milestone still ahead if it kept
+// changing by `perWeek` kg a week. Returns null when the rate is flat or heads
+// away from the goal. `date` is null past FORECAST_MAX_DAYS.
+export function forecastGoal(progress, perWeek, fromDate) {
+  if (!progress?.next || !Number.isFinite(perWeek) || Math.sign(perWeek) !== (progress.direction === "lose" ? -1 : 1)) return null;
+  const from = dayOf(fromDate);
+  return progress.milestones.filter(milestone => milestone.index >= progress.next.index).map(milestone => {
+    const days = Math.round(Math.abs(milestone.weight - progress.current) / Math.abs(perWeek) * 7);
+    return { ...milestone, days, date: days > FORECAST_MAX_DAYS ? null : dateOf(from + days) };
+  });
 }

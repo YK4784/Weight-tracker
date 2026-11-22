@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="light dark">
   <meta name="theme-color" content="#f6f5f1" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#121315" media="(prefers-color-scheme: dark)">
-  <meta name="description" content="Keep a daily weight log, follow your 14-day moving average, and calculate your BMI with Baseline.">
+  <meta name="description" content="Keep a daily weight log, follow your 14-day moving average, track progress toward a goal weight and calculate your BMI with Baseline.">
   <title>Baseline</title>
   <link rel="icon" href="./mark.svg" type="image/svg+xml">
   <link rel="preload" href="./fonts/funnel-sans-latin.woff2" as="font" type="font/woff2" crossorigin>
@@ -67,8 +67,13 @@
           <p class="hero"><span id="avg-value">—</span><span class="hero-unit">kg</span></p>
           <p class="hero-note" id="avg-detail"></p>
           <p class="hero-rate" id="rate-detail" hidden></p>
+          <div class="goal-progress" id="goal-progress" hidden>
+            <div class="progress-track" id="progress-track" aria-hidden="true"><span class="progress-fill" id="progress-fill"></span></div>
+            <p class="progress-note" id="progress-note"></p>
+          </div>
           <dl class="facts">
             <div class="fact"><dt>Latest weigh-in</dt><dd><span class="fact-value" id="weight-value">—</span><span class="fact-note" id="weight-detail"></span></dd></div>
+            <div class="fact"><dt>Goal</dt><dd><span class="fact-value" id="goal-value">—</span><button class="text-button" type="button" data-goal id="goal-label">Set</button></dd></div>
             <div class="fact"><dt>Height</dt><dd><span class="fact-value" id="height-value">—</span><button class="text-button height-link" type="button" data-profile id="height-label">Add</button></dd></div>
             <div class="fact"><dt>BMI</dt><dd><span class="fact-value" id="bmi-value">—</span></dd></div>
           </dl>
@@ -91,6 +96,31 @@
           </form>
         </section>
       </div>
+
+      <section class="forecast" id="forecast" aria-labelledby="forecast-title" hidden>
+        <div class="section-head">
+          <h2 id="forecast-title">Forecast</h2>
+          <button class="text-button" type="button" data-goal>Edit goal</button>
+        </div>
+        <div class="forecast-body">
+          <fieldset class="rate-choice" id="rate-choice">
+            <legend>Forecast from</legend>
+            <label class="rate-option"><input type="radio" name="rate-source" value="committed"><span class="rate-name">Your target rate</span><span class="rate-value" id="rate-committed"></span></label>
+            <label class="rate-option"><input type="radio" name="rate-source" value="current"><span class="rate-name">Last 3 weeks</span><span class="rate-value" id="rate-current"></span></label>
+            <label class="rate-option"><input type="radio" name="rate-source" value="overall"><span class="rate-name" id="rate-overall-name">Since you started</span><span class="rate-value" id="rate-overall"></span></label>
+          </fieldset>
+          <div class="forecast-result">
+            <p class="forecast-lead" id="forecast-lead" aria-live="polite"></p>
+            <div class="table-wrap" id="forecast-table" hidden>
+              <table>
+                <thead><tr><th scope="col">Milestone</th><th scope="col" class="num">Weight</th><th scope="col" class="num">Expected</th></tr></thead>
+                <tbody id="forecast-rows"></tbody>
+              </table>
+            </div>
+            <p class="note">Forecasts assume your 14-day average keeps changing at the chosen rate.</p>
+          </div>
+        </div>
+      </section>
 
       <section class="trend" aria-labelledby="trend-title">
         <div class="section-head">
@@ -140,6 +170,37 @@
       <div class="bmi-preview"><span>BMI</span><strong id="profile-bmi" aria-live="polite">—</strong></div>
       <p class="formula">BMI = weight (kg) ÷ height (m)². <a href="https://www.cdc.gov/bmi/about/index.html" target="_blank" rel="noopener noreferrer">About BMI</a></p>
       <div class="dialog-actions"><button class="button secondary" type="button" data-close>Cancel</button><button class="button primary" type="submit">Save height</button></div>
+    </form>
+  </dialog>
+  <dialog id="goal-dialog" aria-labelledby="goal-title">
+    <div class="dialog-heading"><h2 id="goal-title">Set a goal</h2><button class="icon-button" data-close type="button" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="./icons.svg#close"/></svg></button></div>
+    <p class="dialog-detail">Progress is measured with your 14-day average, so one heavy or light day doesn’t move it much.</p>
+    <form id="goal-form">
+      <label class="field-label" for="goal-weight">Goal weight</label>
+      <div class="input-frame"><input id="goal-weight" name="goal" type="number" inputmode="decimal" placeholder="0.0" min="0.1" max="2000" step="0.1" aria-describedby="goal-unit" required><span class="input-unit" id="goal-unit">kg</span></div>
+      <div class="field-row">
+        <div>
+          <label class="field-label" for="goal-start-date">Start date</label>
+          <div class="input-frame date-frame"><div class="date-field"><input id="goal-start-date" name="start-date" type="date" required><svg class="icon input-icon" aria-hidden="true"><use href="./icons.svg#calendar"/></svg></div></div>
+        </div>
+        <div>
+          <label class="field-label" for="goal-start-weight">Start weight</label>
+          <div class="input-frame"><input id="goal-start-weight" name="start-weight" type="number" inputmode="decimal" placeholder="0.0" min="0.1" max="2000" step="0.1" aria-describedby="goal-start-unit goal-start-hint" required><span class="input-unit" id="goal-start-unit">kg</span></div>
+        </div>
+      </div>
+      <p class="field-hint" id="goal-start-hint"></p>
+      <div class="field-row">
+        <div>
+          <label class="field-label" for="goal-rate">Target rate <span class="optional">(optional)</span></label>
+          <div class="input-frame"><input id="goal-rate" name="rate" type="number" inputmode="decimal" placeholder="e.g. 0.5" min="0.01" max="5" step="0.01" aria-describedby="goal-rate-unit"><span class="input-unit" id="goal-rate-unit">kg/wk</span></div>
+        </div>
+        <div>
+          <label class="field-label" for="goal-milestones">Milestones</label>
+          <div class="input-frame"><input id="goal-milestones" name="milestones" type="number" inputmode="numeric" min="1" max="20" step="1" required></div>
+        </div>
+      </div>
+      <p class="goal-preview" id="goal-preview" aria-live="polite"></p>
+      <div class="dialog-actions edit-actions"><button class="danger-link" type="button" id="clear-goal">Remove goal</button><button class="button primary" type="submit">Save goal</button></div>
     </form>
   </dialog>
   <dialog id="edit-dialog" aria-labelledby="edit-title">
