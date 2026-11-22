@@ -17,6 +17,12 @@ test("publishable keys decode to their Frontend API host", () => {
   assert.equal(frontendApiFor("  " + keyFor("test", "a-b.clerk.accounts.dev") + "\n"), "a-b.clerk.accounts.dev");
 });
 
+test("keys without base64 padding decode, as Clerk issues them", () => {
+  const unpadded = keyFor("test", "enabling-duck-7464.clerk.accounts.dev").replace(/=+$/, "");
+  assert.ok(!unpadded.endsWith("="));
+  assert.equal(frontendApiFor(unpadded), "enabling-duck-7464.clerk.accounts.dev");
+});
+
 test("missing or malformed publishable keys are rejected", () => {
   for (const key of [undefined, null, "", "pk_test_", "sk_test_" + btoa("x.clerk.accounts.dev$"),
     "pk_test_" + btoa("x.clerk.accounts.dev"), keyFor("test", "localhost"), keyFor("test", "evil.com/path"), "pk_test_%%%"]) {

@@ -1,20 +1,21 @@
 import { CLERK_PUBLISHABLE_KEY } from "./config.mjs";
 import { frontendApiFor } from "./account.mjs";
 
-// The page's own color tokens, so Clerk's components follow its light and dark palettes.
+// The page's colors, through the --auth-* aliases in styles.css, so Clerk's
+// components follow its light and dark palettes.
 const appearance = {
   variables: {
-    colorPrimary: "var(--accent)",
-    colorPrimaryForeground: "var(--on-accent)",
-    colorBackground: "var(--surface)",
-    colorForeground: "var(--ink)",
-    colorMutedForeground: "var(--ink-2)",
-    colorNeutral: "var(--ink)",
-    colorBorder: "var(--field-border)",
-    colorInput: "var(--surface)",
-    colorInputForeground: "var(--ink)",
-    colorDanger: "var(--danger)",
-    colorRing: "var(--accent)",
+    colorPrimary: "var(--auth-accent)",
+    colorPrimaryForeground: "var(--auth-on-accent)",
+    colorBackground: "var(--auth-surface)",
+    colorForeground: "var(--auth-ink)",
+    colorMutedForeground: "var(--auth-ink-2)",
+    colorNeutral: "var(--auth-ink)",
+    colorBorder: "var(--auth-ink)",
+    colorInput: "var(--auth-surface)",
+    colorInputForeground: "var(--auth-ink)",
+    colorDanger: "var(--auth-danger)",
+    colorRing: "var(--auth-accent)",
     colorModalBackdrop: "rgb(10 11 13 / 45%)",
     fontFamily: "var(--font)",
     borderRadius: "0.5rem"

@@ -46,6 +46,16 @@
     --shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 10px 30px rgb(0 0 0 / 35%);
   }
 }
+/* The colors handed to Clerk (see auth.mjs). Clerk's components declare their own
+   --accent, so passing var(--accent) would make theirs refer to itself. */
+:root {
+  --auth-accent: var(--accent);
+  --auth-on-accent: var(--on-accent);
+  --auth-surface: var(--surface);
+  --auth-ink: var(--ink);
+  --auth-ink-2: var(--ink-2);
+  --auth-danger: var(--danger);
+}
 
 *, *::before, *::after { box-sizing: border-box; }
 html { background: var(--paper); }

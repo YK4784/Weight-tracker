@@ -233,7 +233,7 @@ function showSignedIn(user) {
     showStorageStatus();
   }
   if (mounted === "user") return;
-  if (mounted === "sign-in") clerk.unmountSignIn($("sign-in"));
+  if (mounted === "sign-in") clerk.unmountSignIn($("sign-in-card"));
   clerk.mountUserButton($("user-button"), { appearance: { elements: { userButtonAvatarBox: { width: "2rem", height: "2rem" } } } });
   mounted = "user";
 }
@@ -245,7 +245,8 @@ function showSignedOut() {
   showAuth("sign-in");
   if (mounted === "sign-in") return;
   if (mounted === "user") clerk.unmountUserButton($("user-button"));
-  clerk.mountSignIn($("sign-in"), { withSignUp: true });
+  // Clerk styles the node it mounts into, so it gets a child of the centered wrapper.
+  clerk.mountSignIn($("sign-in-card"), { withSignUp: true });
   mounted = "sign-in";
 }
 
