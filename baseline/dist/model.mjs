@@ -116,12 +116,7 @@ export function calculateTrend(entries, throughDate) {
     }
     const count = next - left;
     if (count) {
-      const previous = readings.at(-1);
-      const point = {
-        day, date: dateOf(day), weight: entry?.weight ?? null,
-        average: sum / (count * 10), count,
-        change: entry && previous ? (entry.tenths - Math.round(previous.weight * 10)) / 10 : null
-      };
+      const point = { day, date: dateOf(day), weight: entry?.weight ?? null, average: sum / (count * 10), count };
       days.push(point);
       if (entry) readings.push(point);
     }
@@ -129,6 +124,48 @@ export function calculateTrend(entries, throughDate) {
   }
   const last = days.at(-1);
   return { days, readings, current: last?.day === end ? last : null };
+}
+
+export const CHANGE_WINDOWS = [7, 30, 90];
+
+// How much the 14-day average has changed over each of CHANGE_WINDOWS days, and
+// since the first weigh-in (`days` null), using averages rounded to the 0.1 kg
+// shown on screen. `trend` comes from calculateTrend through today. A window is
+// left out when there is no average exactly that many days ago: the log is
+// shorter than the window, or a gap of more than 14 days leaves that day without
+// one. The change since the first weigh-in needs the log to go back further than
+// the longest window shown, and further than a week, so it never repeats another
+// figure. Empty without an average today.
+export function averageChanges(trend) {
+  const now = trend.current;
+  if (!now) return [];
+  const byDay = new Map(trend.days.map(point => [point.day, point]));
+  const since = point => (Math.round(now.average * 10) - Math.round(point.average * 10)) / 10;
+  const changes = [];
+  for (const days of CHANGE_WINDOWS) {
+    const then = byDay.get(now.day - days);
+    if (then) changes.push({ days, change: since(then) });
+  }
+  const first = trend.days[0];
+  if (first.day < now.day - (changes.at(-1)?.days ?? CHANGE_WINDOWS[0])) changes.push({ days: null, change: since(first) });
+  return changes;
+}
+
+// The highest and lowest weigh-ins in the WINDOW_DAYS days through `throughDate`
+// (the same days as the 14-day average), with how many days ago each was. A tie
+// goes to the most recent. Null with fewer than two weigh-ins in those days.
+export function recentRange(entries, throughDate) {
+  const end = dayOf(throughDate);
+  const recent = entries.filter(entry => dayOf(entry.date) > end - WINDOW_DAYS && entry.date <= throughDate);
+  if (recent.length < 2) return null;
+  let high = recent[0];
+  let low = recent[0];
+  for (const entry of recent) {
+    if (entry.weight >= high.weight) high = entry;
+    if (entry.weight <= low.weight) low = entry;
+  }
+  const describe = entry => ({ date: entry.date, weight: entry.weight, daysAgo: end - dayOf(entry.date) });
+  return { high: describe(high), low: describe(low) };
 }
 
 export const RATE_DAYS = 21;

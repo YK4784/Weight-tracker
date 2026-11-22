@@ -132,14 +132,19 @@
             <button type="button" data-range="all" aria-label="All dates" aria-pressed="false">All</button>
           </div>
         </div>
-        <div class="legend"><span><i class="key-line"></i>14-day average</span><span><i class="key-dot"></i>Daily weigh-in</span></div>
+        <div class="trend-figures" id="trend-figures" hidden>
+          <dl class="figures" id="change-figures"></dl>
+          <p class="figures-pending" id="change-pending" hidden>Your 7-day change shows once your log is a week old.</p>
+          <dl class="figures" id="range-figures"></dl>
+        </div>
+        <div class="legend"><span><i class="key-line"></i>14-day average</span><span><i class="key-dot"></i>Daily weigh-in</span><span id="legend-goal" hidden><i class="key-goal"></i>Goal</span></div>
         <div class="chart-wrap" id="chart-wrap" tabindex="0" role="group" aria-label="Weight trend chart. Use the left and right arrow keys to inspect days.">
           <svg id="trend-chart" role="img" aria-label="Weight trend in kilograms"></svg>
           <div class="chart-tooltip" id="chart-tooltip" hidden></div>
           <div class="chart-empty" id="chart-empty" hidden></div>
         </div>
         <span class="sr-only" role="status" id="chart-announce"></span>
-        <p class="note">Each point on the line averages the weigh-ins from that day and the 13 days before it. Days without a weigh-in are skipped.</p>
+        <p class="note">Each point on the line averages the weigh-ins from that day and the 13 days before it. Days without a weigh-in are skipped. Each change compares today’s average with the one 7, 30 or 90 days earlier, or with your first weigh-in for all time.</p>
       </section>
     </div>
 
@@ -151,7 +156,7 @@
       </div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th scope="col">Date</th><th scope="col" class="num">Weight</th><th scope="col" class="num"><span class="long-label">14-day average</span><span class="short-label">14-day avg.</span></th><th scope="col" class="num"><span class="long-label">Change from previous</span><span class="short-label">Change</span></th><th scope="col" class="row-action" id="action-heading" hidden><span class="sr-only">Edit entry</span></th></tr></thead>
+          <thead><tr><th scope="col">Date</th><th scope="col" class="num">Weight</th><th scope="col" class="num"><span class="long-label">14-day average</span><span class="short-label">14-day avg.</span></th><th scope="col" class="num"><span class="long-label">Weekly trend</span><span class="short-label">Per week</span></th><th scope="col" class="row-action" id="action-heading" hidden><span class="sr-only">Edit entry</span></th></tr></thead>
           <tbody id="entry-rows"></tbody>
         </table>
       </div>

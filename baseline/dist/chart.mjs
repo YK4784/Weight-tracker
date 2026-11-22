@@ -12,9 +12,11 @@ function svg(name, attributes = {}, content) {
 
 const coord = value => Math.round(value * 100) / 100;
 
-function yDomain(points) {
-  let low = Infinity;
-  let high = -Infinity;
+// The y-axis range: every plotted average and weigh-in, and the goal (null for
+// none) so its line stays on screen, with some room above and below.
+export function yDomain(points, goal = null) {
+  let low = goal ?? Infinity;
+  let high = goal ?? -Infinity;
   for (const point of points) {
     low = Math.min(low, point.average, point.weight ?? Infinity);
     high = Math.max(high, point.average, point.weight ?? -Infinity);
@@ -27,6 +29,16 @@ function yDomain(points) {
   const factors = [1, 2, 2.5, 5, 10];
   const step = factors.reduce((best, n) => Math.abs(n - target / power) < Math.abs(best - target / power) ? n : best) * power;
   return { bottom, top, step };
+}
+
+// Where to put a label centered at `y` so it stays `gap` away from another label
+// centered at `avoid`: on its own side of it if that fits within [min, max],
+// otherwise on the other side.
+export function separateLabel(y, avoid, gap, min, max) {
+  if (Math.abs(y - avoid) >= gap) return y;
+  const side = y >= avoid ? 1 : -1;
+  const preferred = avoid + side * gap;
+  return preferred >= min && preferred <= max ? preferred : avoid - side * gap;
 }
 
 export class TrendChart {
@@ -52,10 +64,12 @@ export class TrendChart {
     this.resize.observe(this.wrap);
   }
 
-  update(trend, range, today) {
+  // `goal` is the goal weight in kg, or null without one.
+  update(trend, range, today, goal = null) {
     this.trend = trend;
     this.range = range;
     this.today = today;
+    this.goal = Number.isFinite(goal) ? goal : null;
     this.draw();
   }
 
@@ -79,11 +93,13 @@ export class TrendChart {
     }
 
     const compact = width < 480;
-    const { bottom, top, step } = yDomain(this.points);
+    const goal = this.goal;
+    const { bottom, top, step } = yDomain(this.points, goal);
     const last = this.points.at(-1);
     const endLabel = oneDecimal(last.average);
+    const goalLabel = goal === null ? "" : oneDecimal(goal);
     const left = Math.max(compact ? 30 : 38, String(Math.floor(top)).length * 8 + 14);
-    const right = width - (endLabel.length * 8.5 + 18);
+    const right = width - (Math.max(endLabel.length, goalLabel.length) * 8.5 + 18);
     const ceiling = 24;
     const floor = height - 30;
     const x = day => start === end ? (left + right) / 2 : left + (day - start) / (end - start) * (right - left);
@@ -105,6 +121,12 @@ export class TrendChart {
       const anchor = tickCount > 1 && n === 0 ? "start" : tickCount > 1 && n === tickCount - 1 ? "end" : "middle";
       const label = prettyDate(dateOf(day), end - start > 365 ? "monthYear" : "short");
       fragment.append(svg("text", { x: coord(x(day)), y: height - 6, "text-anchor": anchor }, label));
+    }
+
+    // The goal is a dashed hairline under the data, ending with its value.
+    if (goal !== null) {
+      const goalY = coord(y(goal)) + .5;
+      fragment.append(svg("line", { class: "goal", x1: left, x2: coord(right), y1: goalY, y2: goalY }));
     }
 
     // Daily weigh-ins sit underneath; the average line is the figure.
@@ -136,10 +158,16 @@ export class TrendChart {
       svg("circle", { class: "end-dot", cx: coord(lastX), cy: coord(lastY), r: 5 }),
       svg("text", { class: "end-label", x: coord(lastX + 11), y: coord(lastY + 5) }, endLabel)
     );
+    if (goal !== null) {
+      // Both labels sit at the right edge when the line reaches it, so keep them apart.
+      const shared = lastX > right - endLabel.length * 8.5;
+      const labelY = shared ? separateLabel(y(goal), lastY, 17, ceiling - 12, floor + 6) : y(goal);
+      fragment.append(svg("text", { class: "goal-label", x: coord(right + 11), y: coord(labelY + 4) }, goalLabel));
+    }
     this.cursor = svg("g", { visibility: "hidden", "pointer-events": "none" });
     fragment.append(this.cursor);
     this.canvas.append(fragment);
-    this.canvas.setAttribute("aria-label", "Daily weights and 14-day moving averages, " + prettyDate(dateOf(start), "full") + " through " + prettyDate(this.today, "full") + ". Last plotted average " + endLabel + " kilograms.");
+    this.canvas.setAttribute("aria-label", "Daily weights and 14-day moving averages, " + prettyDate(dateOf(start), "full") + " through " + prettyDate(this.today, "full") + ". Last plotted average " + endLabel + " kilograms." + (goal === null ? "" : " Goal " + goalLabel + " kilograms."));
   }
 
   inspectPointer(event) {

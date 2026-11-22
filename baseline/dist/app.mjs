@@ -1,4 +1,4 @@
-import { FORECAST_MAX_DAYS, GOAL_MILESTONES, OVERALL_MIN_DAYS, RATE_DAYS, RATE_MIN_ENTRIES, RATE_MIN_SPAN, bmi, calculateRate, calculateTrend, dateOf, dayOf, forecastGoal, goalProgress, localToday, normalizeGoal, normalizeState, oneDecimal, overallRate, positive, prettyDate, saveWeight, shiftDate, validDate } from "./model.mjs";
+import { FORECAST_MAX_DAYS, GOAL_MILESTONES, OVERALL_MIN_DAYS, RATE_DAYS, RATE_MIN_ENTRIES, RATE_MIN_SPAN, WINDOW_DAYS, averageChanges, bmi, calculateRate, calculateTrend, dateOf, dayOf, forecastGoal, goalProgress, localToday, normalizeGoal, normalizeState, oneDecimal, overallRate, positive, prettyDate, recentRange, saveWeight, shiftDate, validDate } from "./model.mjs";
 import { TrendChart } from "./chart.mjs";
 import { claimLegacyLog, storageKeyFor } from "./account.mjs";
 import { AuthSetupError, startClerk } from "./auth.mjs";
@@ -93,6 +93,7 @@ function showMetrics() {
   const count = trend.current?.count ?? 0;
   $("avg-detail").textContent = count ? "From " + count + (count === 1 ? " weigh-in" : " weigh-ins") + " in the last 14 days" : "No weigh-ins in the last 14 days";
   showRate();
+  showFigures();
   setValue("weight-value", latest?.weight, " kg");
   $("weight-detail").textContent = latest ? shortDate(latest.date) : "";
   $("height-value").textContent = height ? height + " cm" : "—";
@@ -252,6 +253,52 @@ function showRate() {
   line.replaceChildren(strong, " over the last " + RATE_DAYS / 7 + " weeks");
 }
 
+function signedKg(value) {
+  return (value < 0 ? "−" : value > 0 ? "+" : "") + kg(Math.abs(value));
+}
+
+function daysAgo(days) {
+  return days === 0 ? "Today" : days === 1 ? "Yesterday" : days + " days ago";
+}
+
+// One label and value in a row of figures, styled like the facts.
+function figure(label, value, note = "") {
+  const item = document.createElement("div");
+  item.className = "fact";
+  const term = document.createElement("dt");
+  term.textContent = label;
+  const number = document.createElement("span");
+  number.className = "fact-value";
+  number.textContent = value;
+  const detail = document.createElement("dd");
+  detail.append(number);
+  if (note) {
+    const span = document.createElement("span");
+    span.className = "fact-note";
+    span.textContent = note;
+    detail.append(span);
+  }
+  item.append(term, detail);
+  return item;
+}
+
+// Changes in the average and the recent high and low, above the chart. They
+// need a weigh-in in the last 14 days, like the average itself.
+function showFigures() {
+  $("trend-figures").hidden = !trend.current;
+  if (!trend.current) return;
+  const changes = averageChanges(trend);
+  $("change-figures").hidden = !changes.length;
+  $("change-pending").hidden = changes.length > 0;
+  $("change-figures").replaceChildren(...changes.map(({ days, change }) => figure(days === null ? "All-time change" : days + "-day change", signedKg(change))));
+  const recent = recentRange(state.entries, today);
+  $("range-figures").hidden = !recent;
+  $("range-figures").replaceChildren(...!recent ? [] : [
+    figure("Highest in " + WINDOW_DAYS + " days", kg(recent.high.weight), daysAgo(recent.high.daysAgo)),
+    figure("Lowest in " + WINDOW_DAYS + " days", kg(recent.low.weight), daysAgo(recent.low.daysAgo))
+  ]);
+}
+
 function syncEntryForm(force = false) {
   const input = $("entry-weight");
   const date = $("entry-date").value;
@@ -267,10 +314,12 @@ function syncEntryForm(force = false) {
     : entry ? "You have a weigh-in on this date." : "Choose an earlier date to add a past weigh-in.";
 }
 
-function changeCell(change) {
-  if (change === null) return '<span class="dash" aria-label="First entry">—</span>';
-  const sign = change < 0 ? "−" : change > 0 ? "+" : "";
-  return '<span class="change">' + sign + oneDecimal(Math.abs(change)) + '</span><span class="table-unit">kg</span>';
+// The weekly trend as it stood on a row's date (see showRate). Phones head the
+// column "Per week" and drop the "/wk".
+function rateCell(rate) {
+  if (!rate) return '<span class="dash" aria-hidden="true">—</span><span class="sr-only">Not enough weigh-ins</span>';
+  if (!rate.clear) return '<span class="rate-cell unclear">No clear change</span>';
+  return '<span class="rate-cell">' + (rate.perWeek < 0 ? "−" : "+") + oneDecimal(Math.abs(rate.perWeek)) + '</span><span class="table-unit">kg<span class="long-label">/wk</span></span>';
 }
 
 function showTable(isLog) {
@@ -292,7 +341,7 @@ function showTable(isLog) {
     return '<tr><td><time datetime="' + point.date + '"><span class="long-label">' + (point.date.slice(0, 4) === today.slice(0, 4) ? prettyDate(point.date, "weekday") : date) + '</span><span class="short-label">' + shortDate(point.date) + '</span></time></td>' +
       '<td class="num entry-weight">' + oneDecimal(point.weight) + '<span class="table-unit">kg</span></td>' +
       '<td class="num">' + oneDecimal(point.average) + '<span class="table-unit">kg</span></td>' +
-      '<td class="num">' + changeCell(point.change) + "</td>" + action + "</tr>";
+      '<td class="num">' + rateCell(calculateRate(state.entries, point.date)) + "</td>" + action + "</tr>";
   }).join("");
   $("table-empty").hidden = total > 0;
   $("pagination").hidden = !isLog || pages <= 1;
@@ -319,7 +368,12 @@ function showPage() {
     : first === last ? prettyDate(first.date, "full")
     : prettyDate(first.date, "full") + " – " + prettyDate(last.date, "full");
   showTable(isLog);
-  if (!isLog) chart.update(trend, range, today);
+  if (!isLog) drawChart();
+}
+
+function drawChart() {
+  $("legend-goal").hidden = !state.goal;
+  chart.update(trend, range, today, state.goal?.weight ?? null);
 }
 
 function render() {
@@ -621,7 +675,7 @@ $("ranges").addEventListener("click", event => {
   if (!button) return;
   range = button.dataset.range;
   for (const item of $("ranges").querySelectorAll("button")) item.setAttribute("aria-pressed", String(item === button));
-  chart.update(trend, range, today);
+  drawChart();
 });
 $("quick-log").addEventListener("click", focusEntry);
 $("prev-page").addEventListener("click", () => { page--; showTable(true); });

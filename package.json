@@ -5,7 +5,7 @@
   "scripts": {
     "start": "node baseline/serve.mjs",
     "dev": "node baseline/serve.mjs",
-    "test": "node --test baseline/tests/model.test.mjs baseline/tests/account.test.mjs server/tests/api.test.mjs"
+    "test": "node --test baseline/tests/model.test.mjs baseline/tests/chart.test.mjs baseline/tests/account.test.mjs server/tests/api.test.mjs"
   },
   "engines": {
     "node": ">=20.12"

@@ -2,9 +2,11 @@
 
 A daily weight journal with a 14-day moving average and height-based BMI. Each gray dot on the chart is a weigh-in. The blue line shows the mean of the weights recorded on that calendar day and the preceding 13 days. The first entry produces an average immediately, and missing dates contribute no measurements.
 
-Under the average, the weekly trend gives the slope of a straight line fitted through the last 21 days of weigh-ins, in kilograms a week. An average runs about a week behind a falling or rising weight, and the fitted line does not. The trend appears once there are 8 weigh-ins spread over at least 14 days. When the slope is too small to tell apart from normal day-to-day scale noise, it reads "No clear change".
+Under the average, the weekly trend gives the slope of a straight line fitted through the last 21 days of weigh-ins, in kilograms a week. An average runs about a week behind a falling or rising weight, and the fitted line does not. The trend appears once there are 8 weigh-ins spread over at least 14 days. When the slope is too small to tell apart from normal day-to-day scale noise, it reads "No clear change". The log gives the same figure for each weigh-in, as it stood on that date.
 
-A goal has a goal weight, a start date and a start weight, which defaults to the 14-day average on the start date. Whether it is a loss, a gain or staying at a weight comes from those two weights. The distance is split into milestones, 10 by default, each at least 0.1 kg. Progress is measured with the 14-day average as shown, to 0.1 kg, so a single light day doesn't count as reaching a milestone.
+Above the chart, the change figures compare today's 14-day average with the average 7, 30 and 90 days earlier. The all-time change compares it with your first weigh-in. Each uses the averages as shown, to 0.1 kg. A figure appears only when there is an average on exactly that day. It waits until the log goes back that far, and it is left out while a gap of more than 14 days without weigh-ins leaves that day with no average. The all-time change appears once the log is more than a week old and goes back further than the longest figure shown, so it never repeats another figure. Next to them are the highest and lowest weigh-ins in the same 14 days as the average, with how many days ago each was. They need at least two weigh-ins in those days, and a tie shows the more recent day.
+
+A goal has a goal weight, a start date and a start weight, which defaults to the 14-day average on the start date. Whether it is a loss, a gain or staying at a weight comes from those two weights. The distance is split into milestones, 10 by default, each at least 0.1 kg. Progress is measured with the 14-day average as shown, to 0.1 kg, so a single light day doesn't count as reaching a milestone. The chart draws the goal weight as a dashed line and always keeps it in view.
 
 The forecast says when the 14-day average would reach each remaining milestone and the goal at a steady rate. You choose the rate:
 
@@ -56,9 +58,9 @@ Open [Baseline locally](http://127.0.0.1:4173/). `npm start` serves the page fro
 
 ## Using the tracker
 
-Save a weight in kilograms and a date in **Log a weigh-in**. The arrows beside the date move it back or forward one day and stop at today. Saving again on the same date updates that entry. Use **Add** or **Edit** next to **Height** to enter a height in centimeters. Baseline calculates BMI from the latest recorded weight. Use **Set** or **Edit** next to **Goal** to set, change or remove a goal. Progress appears under the average, and the **Forecast** section below it gives the expected dates.
+Save a weight in kilograms and a date in **Log a weigh-in**. The arrows beside the date move it back or forward one day and stop at today. Saving again on the same date updates that entry. Use **Add** or **Edit** next to **Height** to enter a height in centimeters. Baseline calculates BMI from the latest recorded weight. Use **Set** or **Edit** next to **Goal** to set, change or remove a goal. Progress appears under the average, the goal shows as a dashed line on the chart, and the **Forecast** section gives the expected dates. The **Trend** section shows how much your average has changed over 7, 30 and 90 days and since your first weigh-in, and your highest and lowest weigh-ins of the last 14 days.
 
-Sign in to open your log. Use the avatar at the top right to manage your account or sign out. A new account starts with an empty log. The **Weight log** shows every entry and lets you edit or delete individual weigh-ins.
+Sign in to open your log. Use the avatar at the top right to manage your account or sign out. A new account starts with an empty log. The **Weight log** shows every entry with its weekly trend and lets you edit or delete individual weigh-ins.
 
 Entries, height and your goal are saved to your account, so the same log opens on any device you sign in on. A change shows right away and is saved in the background. If saving fails, the change is undone and a message says so. Switching back to the tab picks up changes made on another device.
 

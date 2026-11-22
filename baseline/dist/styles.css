@@ -195,11 +195,17 @@ body[data-view="log"] .button.quick-log { display: inline-flex; }
 .ranges button { padding: 6px 10px; border-radius: 6px; color: var(--ink-3); font-weight: 700; font-variant-numeric: tabular-nums; }
 .ranges button:hover { color: var(--ink); }
 .ranges button[aria-pressed="true"] { color: var(--ink); text-decoration: underline 2px var(--accent); text-underline-offset: 7px; }
+/* Changes in the average, then the recent high and low: figures like the facts. */
+.trend-figures { display: flex; flex-wrap: wrap; gap: 16px 64px; margin-top: 14px; padding-bottom: 24px; border-bottom: 1px solid var(--rule); }
+.figures { display: flex; flex-wrap: wrap; gap: 16px 40px; }
+.figures-pending { align-self: center; color: var(--ink-3); }
+.trend-figures + .legend { margin-top: 20px; }
 .legend { display: flex; flex-wrap: wrap; gap: 6px 22px; margin-top: 6px; color: var(--ink-2); font-size: .9375rem; }
 .legend span { display: inline-flex; align-items: center; gap: 8px; }
-.key-line, .key-dot { display: inline-block; flex: none; }
+.key-line, .key-dot, .key-goal { display: inline-block; flex: none; }
 .key-line { width: 18px; height: 2px; border-radius: 1px; background: var(--accent); }
 .key-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dot); }
+.key-goal { width: 18px; height: 1px; background: repeating-linear-gradient(90deg, var(--ink-2) 0 4px, transparent 4px 7px); }
 .chart-wrap { position: relative; height: clamp(240px, 28vw, 320px); margin-top: 18px; border-radius: 4px; }
 #trend-chart { position: absolute; inset: 0; display: block; width: 100%; height: 100%; overflow: visible; }
 #trend-chart text { font-family: var(--font); font-size: 12.5px; fill: var(--ink-3); font-variant-numeric: tabular-nums; }
@@ -210,6 +216,8 @@ body[data-view="log"] .button.quick-log { display: inline-flex; }
 #trend-chart .end-dot, #trend-chart .cursor-avg { fill: var(--accent); stroke: var(--paper); stroke-width: 4; paint-order: stroke; }
 #trend-chart .cursor-dot { fill: var(--ink-2); stroke: var(--paper); stroke-width: 4; paint-order: stroke; }
 #trend-chart .end-label { fill: var(--ink); font-size: 14px; font-weight: 700; }
+#trend-chart .goal { stroke: var(--ink-2); stroke-width: 1; stroke-dasharray: 4 3; }
+#trend-chart .goal-label { fill: var(--ink-2); font-weight: 600; }
 #trend-chart .crosshair { stroke: var(--ink-3); stroke-width: 1; }
 .chart-tooltip { position: absolute; z-index: 2; width: max-content; max-width: 100%; padding: 10px 12px; border: 1px solid var(--rule); border-radius: 10px; background: var(--surface); box-shadow: var(--shadow); font-size: .875rem; pointer-events: none; }
 .chart-tooltip strong { display: block; margin-bottom: 4px; font-weight: 700; }
@@ -232,7 +240,7 @@ th:last-child, td:last-child { padding-right: 0; }
 .num { text-align: right; }
 .entry-weight { font-weight: 700; }
 .table-unit { margin-left: 3px; color: var(--ink-3); font-size: .875rem; }
-.change { color: var(--ink-2); }
+.rate-cell { color: var(--ink-2); }
 .dash { color: var(--ink-3); }
 .row-action { width: 48px; text-align: right; }
 .icon-button { display: inline-grid; place-items: center; width: 36px; height: 36px; border-radius: 8px; color: var(--ink-3); }
@@ -283,8 +291,11 @@ dialog h2 { font-size: 1.25rem; font-weight: 700; letter-spacing: -.01em; }
   body[data-view="log"] h1 { font-size: 1.875rem; }
   .top { padding-bottom: 32px; }
   .facts { display: block; margin-top: 24px; padding-top: 0; border-top: 0; }
+  .trend-figures { display: block; margin-top: 12px; padding-bottom: 0; }
+  .figures { display: block; }
+  .figures-pending { padding-block: 10px; border-top: 1px solid var(--rule); }
   .fact { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding-block: 10px; border-top: 1px solid var(--rule); }
-  .fact dt { font-size: 1rem; }
+  .fact dt { flex: none; font-size: 1rem; }
   .fact dd { justify-content: flex-end; margin-top: 0; }
   .fact-value { font-size: 1.125rem; }
   .entry-panel { padding: 20px; }
@@ -296,6 +307,7 @@ dialog h2 { font-size: 1.25rem; font-weight: 700; letter-spacing: -.01em; }
   td { height: 50px; font-size: .9375rem; }
   .table-unit { margin-left: 2px; font-size: .8125rem; }
   .long-label { display: none; }
+  .rate-cell.unclear { display: inline-block; white-space: normal; }
   .short-label { display: inline; }
   .row-action { width: 40px; }
 }
@@ -305,4 +317,5 @@ dialog h2 { font-size: 1.25rem; font-weight: 700; letter-spacing: -.01em; }
 @media (max-width: 360px) {
   .nav { gap: 0; }
   .nav a { padding-inline: 8px; }
+  th, td { padding-inline: 4px; }
 }
