@@ -115,3 +115,39 @@ export function calculateTrend(entries, throughDate) {
   const last = days.at(-1);
   return { days, readings, current: last?.day === end ? last : null };
 }
+
+export const RATE_DAYS = 21;
+export const RATE_MIN_ENTRIES = 8;
+export const RATE_MIN_SPAN = 14;
+// Water weight lingers for days, so neighboring weigh-ins err together and the
+// textbook two standard errors calls flat logs a trend too often. 2.5 keeps that
+// to about one log in six while still catching a 0.5 kg/week loss most of the time.
+const RATE_CLEAR_ERRORS = 2.5;
+
+// The input is a normalized log (one entry per date, ascending).
+// Weekly rate of change: the slope of a least-squares line through the weigh-ins
+// of the last RATE_DAYS calendar days. An average trails the weight by half its
+// window; a fitted line does not. Needs RATE_MIN_ENTRIES weigh-ins spread over at
+// least RATE_MIN_SPAN days, otherwise returns null. `clear` is false when the
+// slope is too close to flat to tell apart from scale noise.
+export function calculateRate(entries, throughDate) {
+  const end = dayOf(throughDate);
+  const points = entries
+    .map(entry => [dayOf(entry.date) - end, entry.weight])
+    .filter(([x]) => x > -RATE_DAYS && x <= 0);
+  const n = points.length;
+  if (n < RATE_MIN_ENTRIES || points.at(-1)[0] - points[0][0] < RATE_MIN_SPAN - 1) return null;
+  const meanX = points.reduce((sum, [x]) => sum + x, 0) / n;
+  const meanY = points.reduce((sum, [, y]) => sum + y, 0) / n;
+  let sxx = 0, sxy = 0;
+  for (const [x, y] of points) {
+    sxx += (x - meanX) ** 2;
+    sxy += (x - meanX) * (y - meanY);
+  }
+  const slope = sxy / sxx;
+  let residuals = 0;
+  for (const [x, y] of points) residuals += (y - meanY - slope * (x - meanX)) ** 2;
+  const error = Math.sqrt(residuals / (n - 2) / sxx);
+  const perWeek = Math.round(slope * 70) / 10 || 0;
+  return { perWeek, clear: perWeek !== 0 && Math.abs(slope) > RATE_CLEAR_ERRORS * error, count: n };
+}

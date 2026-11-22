@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { bmi, calculateTrend, dateOf, dayOf, normalizeState, saveWeight, shiftDate, validDate } from "../dist/model.mjs";
+import { bmi, calculateRate, calculateTrend, dateOf, dayOf, normalizeState, saveWeight, shiftDate, validDate } from "../dist/model.mjs";
 
 const first = dayOf("2026-03-01");
 const entry = (index, weight) => ({ date: dateOf(first + index), weight });
@@ -89,4 +89,47 @@ test("empty and future-only logs have no current average", () => {
   assert.deepEqual(calculateTrend([entry(1, 70)], dateOf(first)), empty);
   assert.equal(validDate("2026-02-29"), false);
   assert.equal(validDate("2028-02-29"), true);
+});
+
+const daily = (days, weightOf) => Array.from({ length: days }, (_, i) => entry(i, weightOf(i)));
+
+test("the weekly rate is the slope of the last 21 days of weigh-ins", () => {
+  const log = daily(21, i => 80 - i / 10);
+  assert.deepEqual(calculateRate(log, log.at(-1).date), { perWeek: -0.7, clear: true, count: 21 });
+  const gaining = daily(21, i => 60 + i / 20);
+  assert.deepEqual(calculateRate(gaining, gaining.at(-1).date), { perWeek: 0.4, clear: true, count: 21 });
+});
+
+test("the weekly rate ignores weigh-ins older than 21 days or after today", () => {
+  const log = [entry(0, 95), ...daily(30, i => 80 - i / 10).slice(9), entry(31, 50)];
+  const rate = calculateRate(log, dateOf(first + 29));
+  assert.equal(rate.count, 21);
+  assert.equal(rate.perWeek, -0.7);
+});
+
+test("the weekly rate uses real dates when weigh-ins are spread out", () => {
+  const log = daily(21, i => 80 - i / 7).filter((_, i) => i % 3 === 0 || i === 20);
+  assert.equal(log.length, 8);
+  assert.deepEqual(calculateRate(log, log.at(-1).date), { perWeek: -1, clear: true, count: 8 });
+});
+
+test("the weekly rate waits for 8 weigh-ins over at least 2 weeks", () => {
+  const sparse = daily(21, i => 80 - i / 10).filter((_, i) => i % 3 === 0);
+  assert.equal(sparse.length, 7);
+  assert.equal(calculateRate(sparse, dateOf(first + 20)), null);
+  const short = daily(13, i => 80 - i / 10);
+  assert.equal(calculateRate(short, short.at(-1).date), null);
+  const twoWeeks = daily(14, i => 80 - i / 10);
+  assert.equal(calculateRate(twoWeeks, twoWeeks.at(-1).date).perWeek, -0.7);
+  assert.equal(calculateRate(twoWeeks, dateOf(first + 21)), null);
+  assert.equal(calculateRate([], dateOf(first)), null);
+});
+
+test("scale noise around a flat weight is not a clear change", () => {
+  const noisy = daily(21, i => 75 + (i % 2 ? .6 : -.6));
+  assert.equal(calculateRate(noisy, noisy.at(-1).date).clear, false);
+  const flat = daily(21, () => 75);
+  assert.deepEqual(calculateRate(flat, flat.at(-1).date), { perWeek: 0, clear: false, count: 21 });
+  const tiny = daily(21, i => 75 - i / 500);
+  assert.deepEqual(calculateRate(tiny, tiny.at(-1).date), { perWeek: 0, clear: false, count: 21 });
 });

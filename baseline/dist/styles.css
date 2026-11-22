@@ -117,6 +117,9 @@ body[data-view="log"] .button.quick-log { display: inline-flex; }
 .hero.is-empty { font-size: 3.5rem; font-weight: 500; color: var(--ink-3); }
 .hero.is-empty .hero-unit { display: none; }
 .hero-note { margin-top: 10px; color: var(--ink-2); }
+.hero-rate { margin-top: 4px; color: var(--ink-2); }
+.hero-rate strong { font-weight: 700; color: var(--ink); }
+.hero-rate.is-pending { color: var(--ink-3); }
 .facts { display: flex; flex-wrap: wrap; gap: 16px 48px; margin-top: 32px; padding-top: 20px; border-top: 1px solid var(--rule); }
 .fact dt { font-size: .875rem; color: var(--ink-3); }
 .fact dd { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-top: 2px; }

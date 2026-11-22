@@ -1,4 +1,4 @@
-import { bmi, calculateTrend, localToday, normalizeState, oneDecimal, positive, prettyDate, saveWeight, shiftDate, validDate } from "./model.mjs";
+import { RATE_DAYS, RATE_MIN_ENTRIES, RATE_MIN_SPAN, bmi, calculateRate, calculateTrend, localToday, normalizeState, oneDecimal, positive, prettyDate, saveWeight, shiftDate, validDate } from "./model.mjs";
 import { TrendChart } from "./chart.mjs";
 import { claimLegacyLog, storageKeyFor } from "./account.mjs";
 import { AuthSetupError, startClerk } from "./auth.mjs";
@@ -88,6 +88,7 @@ function showMetrics() {
   document.querySelector(".hero").classList.toggle("is-empty", !trend.current);
   const count = trend.current?.count ?? 0;
   $("avg-detail").textContent = count ? "From " + count + (count === 1 ? " weigh-in" : " weigh-ins") + " in the last 14 days" : "No weigh-ins in the last 14 days";
+  showRate();
   setValue("weight-value", latest?.weight, " kg");
   $("weight-detail").textContent = latest ? shortDate(latest.date) : "";
   $("height-value").textContent = height ? height + " cm" : "—";
@@ -95,6 +96,21 @@ function showMetrics() {
   $("height-label").textContent = height ? "Edit" : "Add";
   $("height-label").setAttribute("aria-label", height ? "Edit height, currently " + height + " centimeters" : "Add your height for BMI");
   setValue("bmi-value", bmi(latest?.weight, height));
+}
+
+function showRate() {
+  const rate = calculateRate(state.entries, today);
+  const line = $("rate-detail");
+  line.hidden = !state.entries.length;
+  line.classList.toggle("is-pending", !rate);
+  if (!rate) {
+    line.textContent = "Your weekly trend shows after " + RATE_MIN_ENTRIES + " weigh-ins over " + RATE_MIN_SPAN / 7 + " weeks.";
+    return;
+  }
+  const strong = document.createElement("strong");
+  strong.textContent = !rate.clear ? "No clear change"
+    : (rate.perWeek < 0 ? "Down " : "Up ") + oneDecimal(Math.abs(rate.perWeek)) + " kg a week";
+  line.replaceChildren(strong, " over the last " + RATE_DAYS / 7 + " weeks");
 }
 
 function syncEntryForm(force = false) {
