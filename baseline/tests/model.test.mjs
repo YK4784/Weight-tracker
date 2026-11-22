@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { CM_PER_IN, FORECAST_MAX_DAYS, KG_PER_LB, NOTE_MAX_LENGTH, averageChanges, formatAmount, formatWeight, fromTenths, heightParts, normalizeUnits, toTenths, weightParts, bmi, calculateRate, calculateTrend, cleanNote, dateOf, dayOf, forecastGoal, goalProgress, groupByMonth, normalizeGoal, normalizeState, noteLength, overallRate, recentRange, saveWeight, shiftDate, validDate } from "../dist/model.mjs";
+import { CM_PER_IN, FORECAST_MAX_DAYS, KG_PER_LB, NOTE_MAX_LENGTH, averageChanges, formatAmount, formatWeight, fromTenths, heightParts, normalizeUnits, toTenths, weightParts, bmi, calculateRate, calculateTrend, cleanNote, dateOf, dayOf, forecastGoal, goalProgress, groupByMonth, monthlyReports, normalizeGoal, normalizeReminder, validTimeZone, normalizeState, noteLength, overallRate, recentRange, saveWeight, shiftDate, validDate } from "../dist/model.mjs";
 
 const first = dayOf("2026-03-01");
 const entry = (index, weight) => ({ date: dateOf(first + index), weight });
@@ -441,4 +441,95 @@ test("rates and changes round to 0.1 of the unit shown", () => {
   const goal = { weight: lb(150), startDate: entries[0].date, startWeight: lb(160), rate: null, milestones: 10 };
   const trend = calculateTrend(entries, end);
   assert.equal(formatAmount(overallRate(goal, trend.current.average, end, "lb"), "lb"), "0.3 lb", "the average trails the weight");
+});
+
+// Daily weigh-ins from 1 Sep 2026, down 0.2 kg a day. Once the window is full
+// the average on day d is 80 − d / 5 + 1.3.
+const autumn = Array.from({ length: 83 }, (_, i) => ({ date: dateOf(dayOf("2026-09-01") + i), weight: 80 - i / 5 }));
+
+test("each month runs from the average as it began to the average on its last day", () => {
+  const reports = monthlyReports(autumn, "2026-11-22");
+  assert.deepEqual(reports.map(report => [report.month, report.partial, report.count, report.through]), [
+    ["2026-11", true, 22, "2026-11-22"],
+    ["2026-10", false, 31, "2026-10-31"],
+    ["2026-09", false, 30, "2026-09-30"]
+  ]);
+  const [november, october, september] = reports;
+  assert.deepEqual(september.start, { date: "2026-09-01", average: 80 }, "the first month starts at its first weigh-in");
+  assert.deepEqual(october.start, { date: "2026-09-30", average: 75.5 }, "later months start where the one before ended");
+  assert.equal(october.start.average, september.end.average);
+  assert.deepEqual(november.end, { date: "2026-11-22", average: 64.9 });
+  assert.deepEqual(reports.map(report => report.change), [-4.4, -6.2, -4.5]);
+  assert.equal(reports.reduce((sum, report) => sum + report.change, 0).toFixed(1), (64.9 - 80).toFixed(1), "the changes add up");
+  assert.deepEqual(reports.map(report => report.rate), Array(3).fill({ perWeek: -1.4, clear: true, count: 21 }));
+  assert.deepEqual(september.low, { date: "2026-09-30", weight: 74.2 });
+  assert.deepEqual(reports.map(report => report.milestones), [[], [], []], "no goal, no milestones");
+});
+
+test("a month without weigh-ins has no figures, and gaps change where months start and end", () => {
+  // 1–10 Sep, then nothing until 5 Nov.
+  const log = [...autumn.slice(0, 10), ...autumn.slice(65)];
+  const [november, october, september] = monthlyReports(log, "2026-11-22");
+  assert.deepEqual(september.end, { date: "2026-09-23", average: 78.2 }, "the average ran out 13 days after the last weigh-in, when only that one was left");
+  assert.deepEqual(october, {
+    month: "2026-10", first: "2026-10-01", through: "2026-10-31", partial: false, count: 0,
+    start: null, end: null, change: null, rate: null, low: null, milestones: []
+  });
+  assert.equal(november.start.date, "2026-11-05", "no average on 31 Oct, so November starts at its first weigh-in");
+  assert.equal(november.rate.perWeek, -1.4);
+});
+
+test("the month in progress runs through today, even before its first weigh-in", () => {
+  const log = autumn.slice(0, 61); // Through 31 Oct.
+  const [november, october] = monthlyReports([...log, { date: "2026-11-04", weight: 50 }], "2026-11-03");
+  assert.deepEqual([november.partial, november.count, november.through, november.start], [true, 0, "2026-11-03", null], "weigh-ins after today are left out");
+  assert.equal(october.partial, false);
+  assert.deepEqual(monthlyReports([], "2026-11-03"), []);
+  assert.deepEqual(monthlyReports([{ date: "2026-11-04", weight: 50 }], "2026-11-03"), []);
+});
+
+test("a month needs two days with an average for a change, and 8 weigh-ins for a trend", () => {
+  const [only] = monthlyReports([{ date: "2026-11-30", weight: 70 }], "2026-11-30");
+  assert.deepEqual([only.start, only.end, only.change, only.rate], [{ date: "2026-11-30", average: 70 }, { date: "2026-11-30", average: 70 }, null, null]);
+  assert.deepEqual(only.low, { date: "2026-11-30", weight: 70 });
+  // The trend is as it stood on the month's last day, not today.
+  const [, october] = monthlyReports([...autumn.slice(55, 61), ...autumn.slice(61, 80)], "2026-11-19");
+  assert.equal(october.rate, null, "6 weigh-ins by 31 Oct");
+});
+
+test("monthly changes use the averages as shown, and the low goes to the most recent tie", () => {
+  // 70.04 and 69.96 both show as 70.0 kg, but 154.4 and 154.2 lb.
+  const log = [{ date: "2026-10-31", weight: 70.04 }, { date: "2026-11-01", weight: 69.88 }, { date: "2026-11-02", weight: 69.88 }, { date: "2026-11-03", weight: 70.13 }];
+  const [kg] = monthlyReports(log.slice(0, 2), "2026-11-01");
+  assert.equal(kg.change, 0);
+  const [lb] = monthlyReports(log.slice(0, 2), "2026-11-01", "lb");
+  assert.equal(formatAmount(lb.change, "lb"), "0.2 lb");
+  assert.deepEqual(monthlyReports(log, "2026-11-03")[0].low, { date: "2026-11-02", weight: 69.88 });
+});
+
+test("with a goal, each month lists the milestones its average first reached", () => {
+  // 80 to 64 kg in milestones of 2 kg: 78, 76 … 64.
+  const goal = { weight: 64, startDate: "2026-09-01", startWeight: 80, rate: null, milestones: 8 };
+  assert.deepEqual(monthlyReports(autumn, "2026-11-22", "kg", goal).map(report => report.milestones), [[6, 7], [3, 4, 5], [1, 2]]);
+  // Counting starts on the start date, so October takes the milestones its first day was already past.
+  const later = { ...goal, startDate: "2026-10-01" };
+  assert.deepEqual(monthlyReports(autumn, "2026-11-22", "kg", later).map(report => report.milestones), [[6, 7], [1, 2, 3, 4, 5], []]);
+  // Down past milestone 1 in September, back above it in October, past it again in November.
+  const log = [77, 79, 77.5].flatMap((weight, month) => Array.from({ length: 14 }, (_, i) => ({ date: "2026-" + String(month + 9).padStart(2, "0") + "-" + String(i + 1).padStart(2, "0"), weight })));
+  assert.deepEqual(monthlyReports(log, "2026-11-22", "kg", goal).map(report => report.milestones), [[], [], [1]]);
+  assert.deepEqual(monthlyReports(autumn, "2026-11-22", "kg", { ...goal, weight: 80 }).map(report => report.milestones), [[], [], []], "staying at a weight has no milestones");
+});
+
+test("a reminder needs an hour, a real time zone and a device, and survives normalizing", () => {
+  const reminder = { hour: 8, timeZone: "Europe/London", devices: ["https://fcm.googleapis.com/1", "https://fcm.googleapis.com/1", "", 5, "https://web.push.apple.com/2"] };
+  assert.deepEqual(normalizeReminder(reminder), { hour: 8, timeZone: "Europe/London", devices: ["https://fcm.googleapis.com/1", "https://web.push.apple.com/2"] });
+  assert.deepEqual(normalizeState({ reminder }).reminder.devices.length, 2);
+  assert.equal(normalizeState({ reminder }).started, false, "a reminder alone doesn't start a log");
+  for (const change of [{ hour: 24 }, { hour: 7.5 }, { timeZone: "Nowhere/Town" }, { timeZone: "../etc" }, { devices: [] }, { devices: "x" }]) {
+    assert.equal(normalizeReminder({ ...reminder, ...change }), null, JSON.stringify(change));
+  }
+  assert.equal(normalizeState(null).reminder, null);
+  assert.equal(validTimeZone("America/Argentina/Buenos_Aires"), true);
+  assert.equal(validTimeZone("Etc/GMT-14"), true);
+  assert.equal(validTimeZone("x".repeat(65)), false);
 });

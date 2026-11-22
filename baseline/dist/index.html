@@ -6,9 +6,11 @@
   <meta name="color-scheme" content="light dark">
   <meta name="theme-color" content="#f6f5f1" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#121315" media="(prefers-color-scheme: dark)">
-  <meta name="description" content="Keep a daily weight log, follow your 14-day moving average, track progress toward a goal weight and calculate your BMI with Baseline.">
+  <meta name="description" content="Keep a daily weight log, follow your 14-day moving average, track progress toward a goal weight, review each month and calculate your BMI with Baseline.">
   <title>Baseline</title>
   <link rel="icon" href="./mark.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+  <link rel="manifest" href="./manifest.webmanifest">
   <link rel="preload" href="./fonts/funnel-sans-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="./styles.css">
   <script type="module" src="./app.mjs"></script>
@@ -59,6 +61,10 @@
       </div>
       <button class="button secondary quick-log" id="quick-log" type="button">Log a weigh-in</button>
     </div>
+    <nav class="nav log-tabs" id="log-tabs" aria-label="Weight log" hidden>
+      <a id="entries-link" href="#weight-log">Entries</a>
+      <a id="months-link" href="#monthly-summary">Monthly summary</a>
+    </nav>
 
     <div id="overview-view">
       <div class="top">
@@ -76,6 +82,7 @@
             <div class="fact"><dt>Goal</dt><dd><span class="fact-value" id="goal-value">—</span><button class="text-button" type="button" data-goal id="goal-label">Set</button></dd></div>
             <div class="fact"><dt>Height</dt><dd><span class="fact-value" id="height-value">—</span><button class="text-button height-link" type="button" data-profile id="height-label">Add</button></dd></div>
             <div class="fact"><dt>BMI</dt><dd><span class="fact-value" id="bmi-value">—</span></dd></div>
+            <div class="fact"><dt>Reminder</dt><dd><span class="fact-value" id="reminder-value">Off</span><span class="fact-note" id="reminder-detail"></span><button class="text-button" type="button" data-reminder id="reminder-label">Set</button></dd></div>
           </dl>
         </section>
 
@@ -160,11 +167,10 @@
       </section>
     </div>
 
-    <section class="entries" aria-labelledby="entries-title">
+    <section class="entries" id="entries" aria-labelledby="entries-title">
       <div class="section-head">
         <h2 id="entries-title">Recent entries</h2>
         <a class="text-link" href="#weight-log" id="view-log">All entries</a>
-        <span id="log-count" class="entry-count" hidden></span>
       </div>
       <div class="table-wrap">
         <table id="entry-table">
@@ -173,6 +179,13 @@
       </div>
       <p id="table-empty" class="table-empty" hidden>Your entries will appear here after your first weigh-in.</p>
       <div class="pagination" id="pagination" hidden><span id="page-count"></span><div><button type="button" id="prev-page" class="small-button">Newer</button><button type="button" id="next-page" class="small-button">Older</button></div></div>
+    </section>
+
+    <section class="months" id="months" aria-labelledby="months-title" hidden>
+      <h2 class="sr-only" id="months-title">Monthly summary</h2>
+      <ol class="month-list" id="month-list"></ol>
+      <p class="table-empty" id="months-empty" hidden>Your monthly summary will appear here after your first weigh-in.</p>
+      <p class="note" id="months-note">Each month starts with the 14-day average as it began and ends with the average on its last day, so it picks up where the month before ended. When the log starts partway through a month, or has a break of more than two weeks, a date shows which day an average comes from. The weekly trend is as it stood on the month’s last day, and milestones show in the month your average first reached them.</p>
     </section>
     <p class="storage-status" id="storage-status"></p>
   </main>
@@ -232,6 +245,17 @@
       </div>
       <p class="goal-preview" id="goal-preview" aria-live="polite"></p>
       <div class="dialog-actions edit-actions"><button class="danger-link" type="button" id="clear-goal">Remove goal</button><button class="button primary" type="submit">Save goal</button></div>
+    </form>
+  </dialog>
+  <dialog id="reminder-dialog" aria-labelledby="reminder-title">
+    <div class="dialog-heading"><h2 id="reminder-title">Daily reminder</h2><button class="icon-button" data-close type="button" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="./icons.svg#close"/></svg></button></div>
+    <p class="dialog-detail">If you haven’t logged a weigh-in by this time, Baseline sends you a notification.</p>
+    <form id="reminder-form">
+      <label class="field-label" for="reminder-hour">Time</label>
+      <div class="input-frame select-frame"><select id="reminder-hour" name="hour" aria-describedby="reminder-zone"></select></div>
+      <p class="field-hint" id="reminder-zone"></p>
+      <p class="dialog-note" id="reminder-status" aria-live="polite" hidden></p>
+      <div class="dialog-actions edit-actions"><button class="text-button" type="button" id="clear-reminder">Turn off reminders</button><button class="button primary" type="submit" id="save-reminder">Turn on reminders</button></div>
     </form>
   </dialog>
   <dialog id="edit-dialog" aria-labelledby="edit-title">

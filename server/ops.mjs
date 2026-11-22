@@ -1,4 +1,5 @@
-import { GOAL_MAX_MILESTONES, GOAL_MAX_RATE, GOAL_MIN_RATE, HEIGHT_UNITS, NOTE_MAX_LENGTH, WEIGHT_UNITS, cleanNote, dateOf, dayOf, noteLength, normalizeState, roundHeight, roundRate, roundWeight, validDate } from "../baseline/dist/model.mjs";
+import { GOAL_MAX_MILESTONES, GOAL_MAX_RATE, GOAL_MIN_RATE, HEIGHT_UNITS, NOTE_MAX_LENGTH, WEIGHT_UNITS, cleanNote, dateOf, dayOf, noteLength, normalizeState, roundHeight, roundRate, roundWeight, validDate, validTimeZone } from "../baseline/dist/model.mjs";
+import { parseSubscription } from "./push.mjs";
 
 export const MAX_IMPORT_ENTRIES = 20_000;
 
@@ -44,6 +45,17 @@ export function parseOp(body, now = new Date()) {
       return WEIGHT_UNITS.includes(units?.weight) && HEIGHT_UNITS.includes(units.height)
         ? { op: body.op, units: { weight: units.weight, height: units.height } } : null;
     }
+    // A daily reminder at a whole hour in the account's time zone. The
+    // subscription, when given, adds the device it came from (see push.mjs).
+    case "set-reminder": {
+      if (!Number.isInteger(body.hour) || body.hour < 0 || body.hour > 23 || !validTimeZone(body.timeZone)) return null;
+      const change = { op: body.op, hour: body.hour, timeZone: body.timeZone };
+      if (body.subscription === undefined) return change;
+      const subscription = parseSubscription(body.subscription);
+      return subscription ? { ...change, subscription } : null;
+    }
+    // Turns reminders off on every device.
+    case "clear-reminder":
     case "clear-goal":
     case "start":
       return { op: body.op };

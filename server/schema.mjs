@@ -48,5 +48,23 @@ export const schema = [
   // and pounds, and "ft" is feet and inches.
   `ALTER TABLE profiles
     ADD COLUMN IF NOT EXISTS weight_unit text NOT NULL DEFAULT 'kg' CHECK (weight_unit IN ('kg', 'lb', 'st')),
-    ADD COLUMN IF NOT EXISTS height_unit text NOT NULL DEFAULT 'cm' CHECK (height_unit IN ('cm', 'ft'))`
+    ADD COLUMN IF NOT EXISTS height_unit text NOT NULL DEFAULT 'cm' CHECK (height_unit IN ('cm', 'ft'))`,
+  // The daily reminder (see normalizeReminder in model.mjs): an hour in the
+  // account's time zone, null when off. reminded_on is the local date of the
+  // last reminder sent, so a day never gets two.
+  `ALTER TABLE profiles
+    ADD COLUMN IF NOT EXISTS reminder_hour smallint CHECK (reminder_hour BETWEEN 0 AND 23),
+    ADD COLUMN IF NOT EXISTS time_zone text CHECK (char_length(time_zone) BETWEEN 1 AND 64),
+    ADD COLUMN IF NOT EXISTS reminded_on date`,
+  // The devices that get reminders, one push subscription each (see
+  // parseSubscription in push.mjs). A device belongs to the account that last
+  // turned reminders on with it.
+  `CREATE TABLE IF NOT EXISTS push_subscriptions (
+    endpoint text PRIMARY KEY CHECK (char_length(endpoint) <= 2048),
+    user_id text NOT NULL,
+    p256dh text NOT NULL,
+    auth text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS push_subscriptions_user_id ON push_subscriptions (user_id)`
 ];

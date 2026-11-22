@@ -1,5 +1,16 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
-  "outputDirectory": "baseline/dist"
+  "outputDirectory": "baseline/dist",
+  "functions": {
+    "api/remind.mjs": {
+      "experimentalTriggers": [{ "type": "schedule/v1beta" }]
+    }
+  },
+  "schedules": {
+    "weigh-in-reminders": {
+      "schedule": "0 * * * *",
+      "function": "api/remind"
+    }
+  }
 }

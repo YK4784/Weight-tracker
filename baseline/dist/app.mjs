@@ -1,7 +1,8 @@
-import { CM_PER_IN, FORECAST_MAX_DAYS, GOAL_MILESTONES, KG_PER_LB, OVERALL_MIN_DAYS, RATE_DAYS, RATE_MIN_ENTRIES, RATE_MIN_SPAN, WINDOW_DAYS, averageChanges, bmi, calculateRate, calculateTrend, cleanNote, dateOf, dayOf, forecastGoal, formatAmount, formatWeight, fromTenths, goalProgress, groupByMonth, heightParts, localToday, normalizeGoal, normalizeState, oneDecimal, overallRate, positive, prettyDate, recentRange, roundHeight, roundWeight, saveWeight, shiftDate, spokenHeight, spokenWeight, toTenths, validDate, weightParts } from "./model.mjs";
+import { CM_PER_IN, FORECAST_MAX_DAYS, GOAL_MILESTONES, KG_PER_LB, OVERALL_MIN_DAYS, RATE_DAYS, RATE_MIN_ENTRIES, RATE_MIN_SPAN, WINDOW_DAYS, averageChanges, bmi, calculateRate, calculateTrend, cleanNote, dateOf, dayOf, forecastGoal, formatAmount, formatWeight, fromTenths, goalProgress, groupByMonth, heightParts, localToday, monthlyReports, normalizeGoal, normalizeState, oneDecimal, overallRate, positive, prettyDate, recentRange, roundHeight, roundWeight, saveWeight, shiftDate, spokenHeight, spokenWeight, toTenths, validDate, weightParts } from "./model.mjs";
 import { TrendChart } from "./chart.mjs";
 import { claimLegacyLog, storageKeyFor } from "./account.mjs";
 import { AuthSetupError, startClerk } from "./auth.mjs";
+import { PUSH_PUBLIC_KEY } from "./config.mjs";
 
 const $ = id => document.getElementById(id);
 const PAGE_SIZE = 15;
@@ -26,6 +27,8 @@ let editingDate = null;
 let autoFill = true; // The log form shows the weigh-in on its date until the user types in it.
 let fieldUnits = null; // The units the inputs are set up for, which follow state.units.
 let toastTimer;
+let worker = null; // The service worker's registration, which receives reminders. Null until it's ready or where there is none.
+let deviceEndpoint = null; // This device's push subscription, if it has one.
 
 function notify(message) {
   clearTimeout(toastTimer);
@@ -135,6 +138,7 @@ function showMetrics() {
   $("height-label").setAttribute("aria-label", height ? "Edit height, currently " + spokenHeight(height, state.units.height) : "Add your height for BMI");
   setValue("bmi-value", bmi(latest?.weight, height));
   showGoal();
+  showReminder();
 }
 
 // Up to two decimals, as the target rate is entered, and at least one.
@@ -292,15 +296,21 @@ function daysAgo(days) {
   return days === 0 ? "Today" : days === 1 ? "Yesterday" : days + " days ago";
 }
 
-// One label and value in a row of figures, styled like the facts.
-function figure(label, value, note = "") {
+// One label and value in a row of figures, styled like the facts. A null
+// value shows a quiet dash, read out as `missing`. A `quiet` value is a word
+// rather than a figure, such as "No clear change".
+function figure(label, value, note = "", missing = "", quiet = false) {
   const item = document.createElement("div");
   item.className = "fact";
   const term = document.createElement("dt");
   term.textContent = label;
   const number = document.createElement("span");
   number.className = "fact-value";
-  number.textContent = value;
+  number.classList.toggle("is-empty", value === null || quiet);
+  if (value === null) {
+    number.innerHTML = '<span aria-hidden="true">—</span><span class="sr-only"></span>';
+    number.lastChild.textContent = missing;
+  } else number.textContent = value;
   const detail = document.createElement("dd");
   detail.append(number);
   if (note) {
@@ -377,8 +387,6 @@ function showTable(isLog) {
   const rows = readings.slice(Math.max(0, total - offset - (isLog ? PAGE_SIZE : 5)), total - offset).reverse();
   $("entries-title").textContent = isLog ? "All entries" : "Recent entries";
   $("view-log").hidden = isLog || !total;
-  $("log-count").hidden = !isLog;
-  $("log-count").textContent = total + (total === 1 ? " entry" : " entries");
   $("action-heading").hidden = !total;
   const table = $("entry-table");
   for (const body of [...table.tBodies]) body.remove();
@@ -393,24 +401,132 @@ function showTable(isLog) {
   $("next-page").disabled = page >= pages - 1;
 }
 
-function onLogPage() { return location.hash === "#weight-log"; }
+// A clear weekly trend as a signed figure: "−0.4 kg/wk".
+function signedRateAmount(perWeek) {
+  return (perWeek < 0 ? "−" : "+") + amount(perWeek) + "/wk";
+}
+
+// The milestones a month's average first reached: "Reached milestones 3 to 5
+// of 10." They are always consecutive, and the last one is the goal itself.
+function milestoneNote(indices) {
+  const count = progress.milestones.length;
+  const goal = indices.at(-1) === count;
+  const steps = goal ? indices.slice(0, -1) : indices;
+  const parts = [];
+  if (steps.length) {
+    parts.push((steps.length === 1 ? "milestone " + steps[0] : "milestones " + steps[0] + (steps.length === 2 ? " and " : " to ") + steps.at(-1)) + " of " + count);
+  }
+  if (goal) parts.push("your goal of " + weight(progress.goal));
+  return "Reached " + parts.join(steps.length > 1 ? ", and " : " and ") + ".";
+}
+
+const monthName = report => prettyDate(report.first, "month");
+
+// A run of months without weigh-ins, newest first, as one line. `before` is
+// the month with weigh-ins that came before them.
+function gapText(run, before) {
+  if (run[0].partial) return run.length === 1 ? "No weigh-ins yet in " + monthName(run[0]) + "." : "No weigh-ins since " + monthName(before) + ".";
+  if (run.length === 1) return "No weigh-ins in " + monthName(run[0]) + ".";
+  const [newest, oldest] = [run[0], run.at(-1)];
+  // The year once, unless the run crosses into a new one.
+  const from = newest.first.slice(0, 4) === oldest.first.slice(0, 4) ? prettyDate(oldest.first, "monthName") : monthName(oldest);
+  return "No weigh-ins " + (run.length === 2 ? "in " + from + " and " : "from " + from + " to ") + monthName(newest) + ".";
+}
+
+function monthItem(report) {
+  const item = document.createElement("li");
+  item.className = "month";
+  const head = document.createElement("div");
+  head.className = "month-head";
+  const title = document.createElement("h3");
+  title.textContent = monthName(report);
+  const detail = document.createElement("p");
+  detail.className = "month-detail";
+  const count = !report.count ? "No weigh-ins" : report.count + (report.count === 1 ? " weigh-in" : " weigh-ins");
+  detail.textContent = (report.partial ? "Partial month · " : "") + count;
+  head.append(title, detail);
+  // Figures and the milestone note share a column beside the month's name.
+  const body = document.createElement("div");
+  body.className = "month-body";
+  item.append(head, body);
+  if (report.count) {
+    const { start, end, change, rate, low } = report;
+    const figures = document.createElement("dl");
+    figures.className = "figures month-figures";
+    figures.append(
+      figure("Start average", weight(start.average), start.date < report.first ? "" : prettyDate(start.date)),
+      figure("End average", weight(end.average), end.date === report.through ? "" : prettyDate(end.date)),
+      figure("Change", change === null ? null : signedAmount(change), "", "Not enough weigh-ins"),
+      figure("Weekly trend", !rate ? null : rate.clear ? signedRateAmount(rate.perWeek) : "No clear change", "", "Not enough weigh-ins", rate && !rate.clear),
+      figure("Lowest weigh-in", weight(low.weight), prettyDate(low.date))
+    );
+    body.append(figures);
+  }
+  if (report.milestones.length) {
+    const note = document.createElement("p");
+    note.className = "month-note";
+    note.textContent = milestoneNote(report.milestones);
+    body.append(note);
+  }
+  return item;
+}
+
+// Newest month first. Months without weigh-ins (or milestones) share a line.
+function showMonths() {
+  const reports = monthlyReports(state.entries, today, unit(), state.goal);
+  const items = [];
+  for (let index = 0; index < reports.length;) {
+    const report = reports[index];
+    if (report.count || report.milestones.length) {
+      items.push(monthItem(report));
+      index++;
+      continue;
+    }
+    const run = [];
+    while (index < reports.length && !reports[index].count && !reports[index].milestones.length) run.push(reports[index++]);
+    const gap = document.createElement("li");
+    gap.className = "month-gap";
+    gap.textContent = gapText(run, reports[index]);
+    items.push(gap);
+  }
+  $("month-list").replaceChildren(...items);
+  $("month-list").hidden = !reports.length;
+  $("months-empty").hidden = reports.length > 0;
+  $("months-note").hidden = !reports.length;
+}
+
+const VIEWS = { "#weight-log": "entries", "#monthly-summary": "months" };
+// "overview", or one of the log's views: "entries" or "months".
+function currentView() { return VIEWS[location.hash] ?? "overview"; }
+
+function markCurrent(links, current) {
+  for (const id of links) {
+    if (id === current) $(id).setAttribute("aria-current", "page");
+    else $(id).removeAttribute("aria-current");
+  }
+}
 
 function showPage() {
-  const isLog = onLogPage();
+  const view = currentView();
+  const isLog = view !== "overview";
   document.body.dataset.view = isLog ? "log" : "overview";
-  document.title = isLog ? "Weight log · Baseline" : "Baseline";
+  document.title = view === "months" ? "Monthly summary · Baseline" : isLog ? "Weight log · Baseline" : "Baseline";
   // The overview is a page for today, so today's date is its heading.
   $("page-title").textContent = isLog ? "Weight log" : prettyDate(today, "day");
   $("overview-view").hidden = isLog;
-  $("overview-link").toggleAttribute("aria-current", !isLog);
-  $("log-link").toggleAttribute("aria-current", isLog);
-  $(isLog ? "log-link" : "overview-link").setAttribute("aria-current", "page");
+  $("log-tabs").hidden = !isLog;
+  $("entries").hidden = view === "months";
+  $("months").hidden = view !== "months";
+  markCurrent(["overview-link", "log-link"], isLog ? "log-link" : "overview-link");
+  markCurrent(["entries-link", "months-link"], view === "months" ? "months-link" : "entries-link");
   const first = trend.readings[0];
   const last = trend.readings.at(-1);
+  const total = trend.readings.length;
   $("heading-detail").textContent = !isLog || !first ? ""
-    : first === last ? prettyDate(first.date, "full")
-    : prettyDate(first.date, "full") + " – " + prettyDate(last.date, "full");
-  showTable(isLog);
+    : (first === last ? prettyDate(first.date, "full") : prettyDate(first.date, "full") + " – " + prettyDate(last.date, "full")) +
+      " · " + total + (total === 1 ? " entry" : " entries");
+  if (view === "months") showMonths();
+  else showTable(isLog);
   if (!isLog) drawChart();
 }
 
@@ -567,7 +683,7 @@ async function startAuth() {
 }
 
 function focusEntry() {
-  if (onLogPage()) {
+  if (currentView() !== "overview") {
     window.addEventListener("hashchange", focusEntry, { once: true });
     location.hash = "overview";
     return;
@@ -754,6 +870,104 @@ function previewGoal() {
   preview.textContent = text;
 }
 
+// Reminders are push notifications (see sw.js and server/reminders.mjs). The
+// hour and time zone belong to the account; each device that turns reminders
+// on adds its own push subscription.
+const hourFormat = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
+const hourLabel = hour => hourFormat.format(new Date(2026, 0, 1, hour));
+const deviceZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
+// "America/New_York" reads as "New York".
+const zoneName = zone => zone.split("/").at(-1).replaceAll("_", " ");
+const onThisDevice = () => Boolean(deviceEndpoint && state.reminder?.devices.includes(deviceEndpoint));
+const devicesText = count => count === 1 ? "1 other device" : count + " other devices";
+
+function showReminder() {
+  const reminder = state.reminder;
+  $("reminder-value").textContent = reminder ? hourLabel(reminder.hour) : "Off";
+  $("reminder-value").classList.toggle("is-empty", !reminder);
+  // One short note at most; the dialog has the details.
+  $("reminder-detail").textContent = !reminder ? "" : !onThisDevice() ? "Not this device"
+    : reminder.timeZone !== deviceZone() ? zoneName(reminder.timeZone) + " time" : "";
+  $("reminder-label").textContent = reminder ? "Edit" : "Set";
+  $("reminder-label").setAttribute("aria-label", reminder ? "Edit your daily reminder at " + hourLabel(reminder.hour) : "Set a daily reminder");
+  if ($("reminder-dialog").open) showReminderStatus();
+}
+
+// Whether this device can get reminders: "ready", "blocked" (notifications are
+// turned off for the site), "home-screen" (an iPhone or iPad, where push needs
+// Baseline on the Home Screen) or "unsupported".
+function reminderAccess() {
+  if (!worker?.pushManager || !("Notification" in window)) {
+    const apple = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    return apple && !navigator.standalone ? "home-screen" : "unsupported";
+  }
+  return Notification.permission === "denied" ? "blocked" : "ready";
+}
+
+const blockedText = "Notifications are blocked for Baseline in this browser. Allow them in its site settings, then try again.";
+
+function showReminderStatus(message = "") {
+  const reminder = state.reminder;
+  const access = reminderAccess();
+  const others = reminder ? reminder.devices.length - (onThisDevice() ? 1 : 0) : 0;
+  const zone = deviceZone();
+  $("reminder-zone").textContent = zoneName(zone) + " time";
+  const lines = [];
+  if (reminder && reminder.timeZone !== zone) lines.push("Your reminder is at " + hourLabel(reminder.hour) + " " + zoneName(reminder.timeZone) + " time. Saving changes it to " + zoneName(zone) + " time.");
+  if (message) lines.push(message);
+  else if (access === "home-screen") lines.push("On iPhone and iPad, reminders need Baseline on your Home Screen. In Safari, tap Share, then Add to Home Screen, and open Baseline from there.");
+  else if (access === "unsupported") lines.push("This browser can’t show notifications, so reminders can’t reach this device.");
+  else if (access === "blocked") lines.push(blockedText);
+  else if (reminder && !onThisDevice()) lines.push("Reminders go to " + devicesText(others) + ". Saving adds this one.");
+  else if (others) lines.push("Reminders also go to " + devicesText(others) + ".");
+  $("reminder-status").textContent = lines.join(" ");
+  $("reminder-status").hidden = !lines.length;
+  $("save-reminder").textContent = reminder ? "Save reminder" : "Turn on reminders";
+  // Without notifications here, only the time of reminders already on elsewhere can change.
+  $("save-reminder").disabled = !reminder && access !== "ready";
+  $("clear-reminder").hidden = !reminder;
+}
+
+function openReminder() {
+  const select = $("reminder-hour");
+  if (!select.options.length) select.append(...Array.from({ length: 24 }, (_, hour) => new Option(hourLabel(hour), String(hour))));
+  select.value = String(state.reminder?.hour ?? 8);
+  showReminderStatus();
+  $("reminder-dialog").showModal();
+  select.focus();
+}
+
+const pushKey = Uint8Array.from(atob(PUSH_PUBLIC_KEY.replaceAll("-", "+").replaceAll("_", "/")), char => char.charCodeAt(0));
+
+// This device's push subscription, made with Baseline's key. A subscription
+// made with another key can't receive Baseline's messages, so it's replaced.
+async function subscribeDevice() {
+  let subscription = await worker.pushManager.getSubscription();
+  const key = subscription?.options?.applicationServerKey;
+  if (subscription && key && new Uint8Array(key).join() !== pushKey.join()) {
+    await subscription.unsubscribe();
+    subscription = null;
+  }
+  subscription ??= await worker.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: pushKey });
+  deviceEndpoint = subscription.endpoint;
+  return subscription.toJSON();
+}
+
+// Registers the service worker that shows reminders, and finds out whether
+// this device already has a push subscription.
+async function startWorker() {
+  if (!("serviceWorker" in navigator)) return;
+  try {
+    await navigator.serviceWorker.register("./sw.js");
+    worker = await navigator.serviceWorker.ready;
+    deviceEndpoint = (await worker.pushManager?.getSubscription())?.endpoint ?? null;
+  } catch (error) {
+    console.warn("Reminders aren't available in this browser.", error);
+    worker = null;
+  }
+  if (state) showReminder();
+}
+
 function previewBmi() {
   const latest = trend.readings.at(-1);
   $("profile-bmi").textContent = oneDecimal(bmi(latest?.weight, readHeight()));
@@ -866,6 +1080,43 @@ $("clear-goal").addEventListener("click", async () => {
   $("goal-dialog").close();
   if (await changeState(current => ({ ...current, goal: null }), { op: "clear-goal" })) notify("Goal removed.");
 });
+for (const button of document.querySelectorAll("[data-reminder]")) button.addEventListener("click", openReminder);
+$("reminder-form").addEventListener("submit", async event => {
+  event.preventDefault();
+  const hour = Number($("reminder-hour").value);
+  const timeZone = deviceZone();
+  let subscription;
+  if (reminderAccess() === "ready") {
+    // Safari only asks for permission straight from a tap, so this comes before anything else is awaited.
+    const permission = Notification.permission === "granted" ? "granted" : await Notification.requestPermission();
+    if (permission !== "granted") {
+      showReminderStatus(permission === "denied" ? blockedText : "Allow notifications when your browser asks, so reminders can reach this device.");
+      return;
+    }
+    try {
+      subscription = await subscribeDevice();
+    } catch (error) {
+      console.error(error);
+      showReminderStatus("This device couldn’t sign up for notifications. Check your connection and try again.");
+      return;
+    }
+  } else if (!state.reminder) return;
+  $("reminder-dialog").close();
+  const added = subscription ? [subscription.endpoint] : [];
+  if (await changeState(current => ({ ...current, reminder: { hour, timeZone, devices: [...(current.reminder?.devices ?? []), ...added] } }),
+    { op: "set-reminder", hour, timeZone, ...(subscription && { subscription }) })) {
+    notify("You’ll get a reminder at " + hourLabel(hour) + " on days you haven’t weighed in.");
+  }
+});
+$("clear-reminder").addEventListener("click", async () => {
+  $("reminder-dialog").close();
+  if (!await changeState(current => ({ ...current, reminder: null }), { op: "clear-reminder" })) return;
+  notify("Reminders turned off.");
+  // The server has forgotten every device, so this one starts afresh next time.
+  try { await (await worker?.pushManager?.getSubscription())?.unsubscribe(); } catch { /* Harmless: the server no longer sends to it. */ }
+  deviceEndpoint = null;
+  if (state) showReminder();
+});
 for (const id of ["profile-height", "profile-height-in"]) $(id).addEventListener("input", previewBmi);
 $("weight-units").addEventListener("click", event => {
   const choice = event.target.closest("[data-unit]")?.dataset.unit;
@@ -956,4 +1207,5 @@ document.addEventListener("visibilitychange", () => {
 });
 window.addEventListener("focus", syncDay);
 startAuth();
+startWorker();
 scheduleMidnight();

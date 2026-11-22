@@ -37,6 +37,7 @@ export function prettyDate(date, kind = "short") {
       day: { weekday: "long", month: "long", day: "numeric" },
       monthYear: { year: "numeric", month: "short" },
       month: { year: "numeric", month: "long" },
+      monthName: { month: "long" },
       long: { weekday: "long", year: "numeric", month: "long", day: "numeric" }
     };
     dateFormats.set(kind, new Intl.DateTimeFormat("en-US", { ...choices[kind], timeZone: "UTC" }));
@@ -169,6 +170,26 @@ function shortNote(value) {
   return note && noteLength(note) > NOTE_MAX_LENGTH ? [...note].slice(0, NOTE_MAX_LENGTH).join("").trim() : note;
 }
 
+// An IANA time zone the runtime knows, such as "Europe/London".
+export function validTimeZone(value) {
+  if (typeof value !== "string" || value.length > 64 || !/^[A-Za-z][A-Za-z0-9_+\-/]*$/.test(value)) return false;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// A daily weigh-in reminder: the hour (0–23) in the account's time zone, and
+// the push endpoints of the devices that get it. Null when reminders are off,
+// which includes when no device is left to send them to.
+export function normalizeReminder(value) {
+  if (!Number.isInteger(value?.hour) || value.hour < 0 || value.hour > 23 || !validTimeZone(value.timeZone)) return null;
+  const devices = [...new Set((Array.isArray(value.devices) ? value.devices : []).filter(device => typeof device === "string" && device))];
+  return devices.length ? { hour: value.hour, timeZone: value.timeZone, devices } : null;
+}
+
 export function normalizeState(value) {
   const byDate = new Map();
   for (const item of Array.isArray(value?.entries) ? value.entries : []) {
@@ -180,7 +201,8 @@ export function normalizeState(value) {
   const height = positive(value?.height) && value.height >= .1 && value.height <= 400 ? value.height : null;
   const goal = normalizeGoal(value?.goal);
   const units = normalizeUnits(value?.units);
-  return { version: 1, started: Boolean(value?.started || entries.length || height || goal), height, goal, units, entries };
+  const reminder = normalizeReminder(value?.reminder);
+  return { version: 1, started: Boolean(value?.started || entries.length || height || goal), height, goal, units, reminder, entries };
 }
 
 // Adds or replaces the weigh-in on `date`. Leaving out `note` keeps the note
@@ -375,6 +397,85 @@ export function overallRate(goal, average, throughDate, unit = "kg") {
   const days = dayOf(throughDate) - dayOf(goal.startDate);
   if (days < OVERALL_MIN_DAYS) return null;
   return weeklyTenths((average - goal.startWeight) / days, unit);
+}
+
+// The last day of a calendar month ("YYYY-MM"), and the month after it.
+function lastOfMonth(month) {
+  const [year, number] = month.split("-").map(Number);
+  return dateOf(Date.UTC(year, number, 0) / DAY_MS);
+}
+
+function monthAfter(month) {
+  return dateOf(dayOf(lastOfMonth(month)) + 1).slice(0, 7);
+}
+
+// The day the 14-day average, as shown, first reached each milestone of `goal`,
+// counting from the goal's start date, as a Map from milestone index to day.
+// Each milestone is listed once, even if the average later moved back past it.
+function milestoneDays(trend, goal, unit) {
+  const days = new Map();
+  if (!goal) return days;
+  const from = dayOf(goal.startDate);
+  let reached = 0;
+  for (const point of trend.days) {
+    if (point.day < from) continue;
+    const { completed } = goalProgress(goal, point.average, unit);
+    for (; reached < completed; reached++) days.set(reached + 1, point.day);
+  }
+  return days;
+}
+
+// A summary of each calendar month from the first weigh-in's through today's,
+// newest first. The month in progress is `partial` and runs through today.
+// - `start` is the 14-day average as the month began, on the last day of the
+//   month before, so each month picks up where the one before it ended. Without
+//   an average that day, it is the average on the month's first weigh-in.
+// - `end` is the average on the month's last day, or the last average in the
+//   month if the average had run out by then.
+// - `change` compares them as shown, to 0.1 of `unit`, in kg. It needs them on
+//   different days.
+// - `rate` is calculateRate on the month's last day.
+// - `low` is the month's lowest weigh-in. A tie goes to the most recent.
+// - `milestones` lists, with a goal, the milestones the average first reached
+//   that month (see milestoneDays).
+// A month without weigh-ins has a `count` of 0 and no figures, but it can
+// still have milestones, since the average moves as old weigh-ins leave it.
+export function monthlyReports(entries, today, unit = "kg", goal = null) {
+  const logged = entries.filter(entry => entry.date <= today);
+  if (!logged.length) return [];
+  const trend = calculateTrend(logged, today);
+  const byDay = new Map(trend.days.map(point => [point.day, point]));
+  const reachedOn = [...milestoneDays(trend, goal, unit)];
+  const shown = point => ({ date: point.date, average: point.average });
+  const reports = [];
+  const current = today.slice(0, 7);
+  let next = 0;
+  for (let month = logged[0].date.slice(0, 7); month <= current; month = monthAfter(month)) {
+    const first = month + "-01";
+    const firstDay = dayOf(first);
+    const lastDay = Math.min(dayOf(lastOfMonth(month)), dayOf(today));
+    const weighIns = [];
+    while (next < logged.length && logged[next].date.slice(0, 7) === month) weighIns.push(logged[next++]);
+    const report = {
+      month, first, through: dateOf(lastDay), partial: month === current, count: weighIns.length,
+      start: null, end: null, change: null, rate: null, low: null,
+      milestones: reachedOn.filter(([, day]) => day >= firstDay && day <= lastDay).map(([index]) => index)
+    };
+    reports.push(report);
+    if (!weighIns.length) continue;
+    const start = byDay.get(firstDay - 1) ?? byDay.get(dayOf(weighIns[0].date));
+    let endDay = lastDay;
+    while (!byDay.has(endDay)) endDay--;
+    const end = byDay.get(endDay);
+    report.start = shown(start);
+    report.end = shown(end);
+    if (start.day !== end.day) report.change = fromTenths(toTenths(end.average, unit) - toTenths(start.average, unit), unit);
+    report.rate = calculateRate(logged, report.through, unit);
+    let low = weighIns[0];
+    for (const entry of weighIns) if (entry.weight <= low.weight) low = entry;
+    report.low = { date: low.date, weight: low.weight };
+  }
+  return reports.reverse();
 }
 
 export const FORECAST_MAX_DAYS = 5 * 365;

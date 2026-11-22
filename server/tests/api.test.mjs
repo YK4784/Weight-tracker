@@ -144,3 +144,24 @@ test("goals with a bad field are rejected", () => {
   assert.equal(parseOp({ op: "set-goal" }, NOW), null);
   assert.equal(parseOp({ op: "set-goal", goal: "60" }, NOW), null);
 });
+
+const SUBSCRIPTION = {
+  endpoint: "https://fcm.googleapis.com/fcm/send/abc123",
+  expirationTime: null,
+  keys: { p256dh: Buffer.from([4, ...new Array(64).fill(7)]).toString("base64url"), auth: Buffer.alloc(16, 9).toString("base64url") }
+};
+
+test("a reminder is a whole hour in a real time zone, and can bring this device's subscription", () => {
+  assert.deepEqual(parseOp({ op: "set-reminder", hour: 8, timeZone: "Europe/London", extra: 1 }, NOW), { op: "set-reminder", hour: 8, timeZone: "Europe/London" });
+  assert.deepEqual(parseOp({ op: "set-reminder", hour: 0, timeZone: "UTC", subscription: SUBSCRIPTION }, NOW), {
+    op: "set-reminder", hour: 0, timeZone: "UTC",
+    subscription: { endpoint: SUBSCRIPTION.endpoint, p256dh: SUBSCRIPTION.keys.p256dh, auth: SUBSCRIPTION.keys.auth }
+  });
+  for (const change of [{ hour: 24 }, { hour: -1 }, { hour: 8.5 }, { hour: "8" }, { hour: undefined }, { timeZone: "Mars/Olympus" }, { timeZone: "" }, { timeZone: 0 }]) {
+    assert.equal(parseOp({ op: "set-reminder", hour: 8, timeZone: "Europe/London", ...change }, NOW), null, JSON.stringify(change));
+  }
+  for (const subscription of [{ ...SUBSCRIPTION, endpoint: "https://example.com/collect" }, { ...SUBSCRIPTION, keys: {} }, null, "sub"]) {
+    assert.equal(parseOp({ op: "set-reminder", hour: 8, timeZone: "UTC", subscription }, NOW), null, JSON.stringify(subscription)?.slice(0, 60));
+  }
+  assert.deepEqual(parseOp({ op: "clear-reminder", hour: 8 }, NOW), { op: "clear-reminder" });
+});

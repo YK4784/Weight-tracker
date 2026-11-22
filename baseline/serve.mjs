@@ -9,7 +9,10 @@ const { values } = parseArgs({ options: {
   port: { type: "string", default: process.env.PORT || "4173" }
 } });
 const root = fileURLToPath(new URL("./dist/", import.meta.url));
-const types = { ".html": "text/html; charset=utf-8", ".css": "text/css", ".mjs": "text/javascript", ".svg": "image/svg+xml", ".woff2": "font/woff2", ".txt": "text/plain" };
+const types = {
+  ".html": "text/html; charset=utf-8", ".css": "text/css", ".mjs": "text/javascript", ".js": "text/javascript", ".svg": "image/svg+xml",
+  ".png": "image/png", ".webmanifest": "application/manifest+json", ".woff2": "font/woff2", ".txt": "text/plain"
+};
 
 // DATABASE_URL and friends come from .env.local, which `vercel env pull` writes.
 try { process.loadEnvFile(fileURLToPath(new URL("../.env.local", import.meta.url))); } catch { /* No local env file. */ }
