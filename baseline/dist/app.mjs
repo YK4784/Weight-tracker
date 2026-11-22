@@ -10,9 +10,11 @@ let today = localToday();
 let clerk;
 let mounted = null; // Which Clerk component is on the page: "sign-in" or "user".
 let account = null; // { id, email } of the signed-in user.
-let storageKey = null;
-let state = null; // The signed-in account's log. Null while signed out.
-let sessionOnly = false;
+let session = null; // The open log. Replies meant for an earlier one are ignored.
+let state = null; // The log on screen. Null while signed out or loading.
+let saved = null; // The log as the server last returned it.
+let queue = Promise.resolve(); // Changes reach the server one at a time, in order.
+let unsaved = 0; // Changes sent and not yet answered.
 let demo;
 let trend;
 let range = "30";
@@ -21,45 +23,48 @@ let editingDate = null;
 let autoWeight = true;
 let toastTimer;
 
-function readState() {
-  return normalizeState(JSON.parse(localStorage.getItem(storageKey)));
-}
-
 function notify(message) {
   clearTimeout(toastTimer);
   $("toast").textContent = message;
   toastTimer = setTimeout(() => { $("toast").textContent = ""; }, 3600);
 }
 
-// Start a transaction from the latest browser state so edits from another
-// open tab survive. Keep the current session usable if storage is unavailable.
-async function changeState(change) {
-  const key = storageKey;
-  if (!key) return;
-  const commit = () => {
-    if (storageKey !== key) return; // Signed out or switched accounts meanwhile.
-    let current = state;
-    if (!sessionOnly) {
-      try { current = readState(); } catch { sessionOnly = true; }
-    }
-    const next = normalizeState(change(current));
-    if (!sessionOnly) {
-      try { localStorage.setItem(key, JSON.stringify(next)); } catch { sessionOnly = true; }
-    }
-    state = next;
+// Reads the log, or applies one change to it on the server (see server/ops.mjs).
+// Resolves to { log, ... } as the server returns it.
+async function sendLog(change = null) {
+  const token = await clerk.session?.getToken();
+  if (!token) throw new Error("Not signed in.");
+  const response = await fetch("/api/log", {
+    method: change ? "POST" : "GET",
+    headers: { Authorization: "Bearer " + token, ...(change && { "Content-Type": "application/json" }) },
+    body: change ? JSON.stringify(change) : undefined,
+    cache: "no-store"
+  });
+  if (!response.ok) throw new Error("The log request failed with status " + response.status + ".");
+  return response.json();
+}
+
+// Shows a change at once, then saves it. Once nothing else is on its way, the
+// server's copy replaces the screen. A failed save falls back to the server's copy.
+// Resolves to the server's reply, or null if the change wasn't saved.
+async function changeState(change, request) {
+  const current = session;
+  state = normalizeState(change(state));
+  render();
+  unsaved++;
+  const reply = queue.then(() => sendLog(request));
+  queue = reply.catch(() => {});
+  let result = null;
+  try { result = await reply; } catch (error) { console.error(error); }
+  if (session !== current) return null;
+  unsaved--;
+  if (result) saved = normalizeState(result.log);
+  if (!result || !unsaved) {
+    state = saved;
     render();
-  };
-  if (!sessionOnly) {
-    try {
-      if (navigator.locks) {
-        await navigator.locks.request(key, commit);
-        return;
-      }
-    } catch (error) {
-      if (error.name !== "SecurityError" && error.name !== "NotAllowedError") throw error;
-    }
   }
-  commit();
+  if (!result) notify("Couldn’t save that change. Check your connection and try again.");
+  return result;
 }
 
 function icon(name) {
@@ -175,21 +180,20 @@ function render() {
 }
 
 function showStorageStatus() {
-  $("storage-status").textContent = sessionOnly
-    ? "Browser storage is unavailable, so changes last only for this session."
-    : "Your log" + (account.email ? " for " + account.email : "") + " is stored only in this browser.";
+  $("storage-status").textContent = (account.email ? "Signed in as " + account.email + ". " : "") + "Your log is saved to your account.";
 }
 
-// Signed out, the page shows one of these in place of the app.
-const authViews = ["auth-loading", "auth-setup", "auth-error", "sign-in"];
+// Until a log is open, the page shows one of these in place of the app.
+const authViews = ["auth-loading", "auth-setup", "auth-error", "sign-in", "log-loading", "log-error"];
 
 function showAuth(view) {
   for (const id of authViews) $(id).hidden = id !== view;
   $("auth-note").hidden = view !== "sign-in";
-  $("auth").setAttribute("aria-busy", String(view === "auth-loading"));
+  $("auth").setAttribute("aria-busy", String(view.endsWith("-loading")));
   $("auth").hidden = false;
   $("main").hidden = true;
-  $("account-bar").hidden = true;
+  $("account-bar").hidden = !account;
+  $("main-nav").hidden = true;
   document.title = view === "sign-in" ? "Sign in · Baseline" : "Baseline";
 }
 
@@ -197,15 +201,44 @@ function emailOf(user) {
   return user.primaryEmailAddress?.emailAddress ?? "";
 }
 
-function openLog(user) {
-  account = { id: user.id, email: emailOf(user) };
-  storageKey = storageKeyFor(user.id);
-  sessionOnly = false;
-  try { claimLegacyLog(localStorage, user.id); } catch { /* Leave the old log where it is. */ }
-  try { state = readState(); } catch {
-    state = normalizeState(null);
-    sessionOnly = true;
+// Logs from before accounts were saved online live in this browser. The first
+// time an account's online log is empty, the browser's log moves into it.
+async function importBrowserLog(result, userId) {
+  if (normalizeState(result.log).started) return result;
+  const key = storageKeyFor(userId);
+  let local;
+  try {
+    claimLegacyLog(localStorage, userId);
+    local = normalizeState(JSON.parse(localStorage.getItem(key)));
+  } catch {
+    return result;
   }
+  if (!local.started) return result;
+  const imported = await sendLog({ op: "import", log: local });
+  if (imported.imported) {
+    try { localStorage.removeItem(key); } catch { /* Harmless: the account is no longer empty, so it won't import again. */ }
+  }
+  return imported;
+}
+
+async function openLog(user) {
+  const current = session = {};
+  account = { id: user.id, email: emailOf(user) };
+  state = saved = null;
+  queue = Promise.resolve();
+  unsaved = 0;
+  showAuth("log-loading");
+  let result;
+  try {
+    result = await importBrowserLog(await sendLog(), user.id);
+  } catch (error) {
+    if (session !== current) return;
+    console.error(error);
+    showAuth("log-error");
+    return;
+  }
+  if (session !== current) return;
+  saved = state = normalizeState(result.log);
   today = localToday();
   page = 0;
   editingDate = null;
@@ -213,14 +246,27 @@ function openLog(user) {
   $("entry-date").value = today;
   $("auth").hidden = true;
   $("main").hidden = false;
-  $("account-bar").hidden = false;
+  $("main-nav").hidden = false;
+  render();
+}
+
+// Picks up changes made in other tabs or on other devices.
+async function refreshLog() {
+  if (!state || unsaved) return;
+  const current = session;
+  let result;
+  try { result = await sendLog(); } catch { return; }
+  if (session !== current || unsaved) return;
+  const log = normalizeState(result.log);
+  if (JSON.stringify(log) === JSON.stringify(saved)) return;
+  saved = state = log;
   render();
 }
 
 function closeLog() {
   account = null;
-  storageKey = null;
-  state = null;
+  session = null;
+  state = saved = null;
   for (const dialog of document.querySelectorAll("dialog[open]")) dialog.close();
   clearTimeout(toastTimer);
   $("toast").textContent = "";
@@ -239,7 +285,7 @@ function showSignedIn(user) {
 }
 
 function showSignedOut() {
-  if (state) closeLog();
+  if (account) closeLog();
   // Clerk's sign-in steps live in the hash ("#/factor-one"), so drop the app's own views from it.
   if (location.hash && !location.hash.startsWith("#/")) history.replaceState(null, "", location.pathname + location.search);
   showAuth("sign-in");
@@ -338,8 +384,9 @@ $("entry-form").addEventListener("submit", async event => {
   if (!validDate(date) || date > today || !positive(weight)) return;
   const updating = state.entries.some(entry => entry.date === date);
   autoWeight = true;
-  await changeState(current => saveWeight(current, date, weight));
-  notify((updating ? "Weigh-in updated" : "Weigh-in saved") + " for " + prettyDate(date) + ".");
+  if (await changeState(current => saveWeight(current, date, weight), { op: "save-weight", date, weight })) {
+    notify((updating ? "Weigh-in updated" : "Weigh-in saved") + " for " + prettyDate(date) + ".");
+  }
 });
 $("ranges").addEventListener("click", event => {
   const button = event.target.closest("[data-range]");
@@ -358,12 +405,11 @@ $("profile-form").addEventListener("submit", async event => {
   event.preventDefault();
   const height = $("profile-height").valueAsNumber;
   if (!positive(height)) return;
-  await changeState(current => ({ ...current, started: true, height }));
   $("profile-dialog").close();
-  notify("Height saved.");
+  if (await changeState(current => ({ ...current, started: true, height }), { op: "set-height", height })) notify("Height saved.");
 });
-$("start-log").addEventListener("click", async () => {
-  await changeState(current => ({ ...current, started: true }));
+$("start-log").addEventListener("click", () => {
+  changeState(current => ({ ...current, started: true }), { op: "start" });
   focusEntry();
 });
 
@@ -385,13 +431,11 @@ $("edit-form").addEventListener("submit", async event => {
   const date = editingDate;
   const weight = $("edit-weight").valueAsNumber;
   if (!date || !positive(weight)) return;
-  let found = false;
-  await changeState(current => {
-    found = current.entries.some(entry => entry.date === date);
-    return found ? saveWeight(current, date, weight) : current;
-  });
   $("edit-dialog").close();
-  notify(found ? "Weigh-in updated." : "This weigh-in has already been removed.");
+  const result = await changeState(
+    current => current.entries.some(entry => entry.date === date) ? saveWeight(current, date, weight) : current,
+    { op: "update-weight", date, weight });
+  if (result) notify(result.found ? "Weigh-in updated." : "This weigh-in has already been removed.");
 });
 $("delete-entry").addEventListener("click", () => {
   $("edit-form").hidden = true;
@@ -405,9 +449,10 @@ $("keep-entry").addEventListener("click", () => {
 });
 $("confirm-delete").addEventListener("click", async () => {
   const date = editingDate;
-  await changeState(current => ({ ...current, entries: current.entries.filter(item => item.date !== date) }));
   $("edit-dialog").close();
-  notify("Weigh-in deleted.");
+  if (await changeState(current => ({ ...current, entries: current.entries.filter(item => item.date !== date) }), { op: "delete-weight", date })) {
+    notify("Weigh-in deleted.");
+  }
 });
 $("edit-dialog").addEventListener("close", () => { editingDate = null; });
 for (const button of document.querySelectorAll("[data-close]")) button.addEventListener("click", () => button.closest("dialog").close());
@@ -431,12 +476,12 @@ document.querySelector(".skip-link").addEventListener("click", event => {
 // Signed out, the wordmark's "#overview" would land in Clerk's hash routes.
 document.querySelector(".wordmark").addEventListener("click", event => { if (!state) event.preventDefault(); });
 $("auth-retry").addEventListener("click", () => location.reload());
-window.addEventListener("storage", event => {
-  if (!storageKey || (event.key !== storageKey && event.key !== null)) return;
-  try { state = readState(); } catch { sessionOnly = true; }
-  render();
+$("log-retry").addEventListener("click", () => { if (clerk.user) openLog(clerk.user); });
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) return;
+  syncDay();
+  refreshLog();
 });
-document.addEventListener("visibilitychange", () => { if (!document.hidden) syncDay(); });
 window.addEventListener("focus", syncDay);
 startAuth();
 scheduleMidnight();

@@ -11,7 +11,37 @@ const { values } = parseArgs({ options: {
 const root = fileURLToPath(new URL("./dist/", import.meta.url));
 const types = { ".html": "text/html; charset=utf-8", ".css": "text/css", ".mjs": "text/javascript", ".svg": "image/svg+xml", ".woff2": "font/woff2", ".txt": "text/plain" };
 
+// DATABASE_URL and friends come from .env.local, which `vercel env pull` writes.
+try { process.loadEnvFile(fileURLToPath(new URL("../.env.local", import.meta.url))); } catch { /* No local env file. */ }
+
+// Runs the same function Vercel serves at /api/log. It's loaded on first use,
+// so the static app still works before `npm install`.
+let api;
+async function forwardToApi(request, response) {
+  try {
+    api ??= (await import("../api/log.mjs")).default;
+  } catch (error) {
+    api = undefined;
+    console.error(error);
+    response.writeHead(500, { "Content-Type": "application/json" }).end(JSON.stringify({ error: "The API couldn't start. Run npm install." }));
+    return;
+  }
+  const chunks = [];
+  for await (const chunk of request) chunks.push(chunk);
+  const result = await api.fetch(new Request("http://" + request.headers.host + request.url, {
+    method: request.method,
+    headers: Object.entries(request.headers).flatMap(([name, value]) => [value].flat().map(item => [name, item])),
+    body: ["GET", "HEAD"].includes(request.method) ? undefined : Buffer.concat(chunks)
+  }));
+  response.writeHead(result.status, Object.fromEntries(result.headers));
+  response.end(Buffer.from(await result.arrayBuffer()));
+}
+
 const server = createServer(async (request, response) => {
+  if (request.url === "/api/log" || request.url.startsWith("/api/log?")) {
+    await forwardToApi(request, response);
+    return;
+  }
   if (!["GET", "HEAD"].includes(request.method)) {
     response.writeHead(405, { Allow: "GET, HEAD" }).end();
     return;

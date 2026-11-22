@@ -19,7 +19,7 @@
     <div class="wrap masthead-inner">
       <a class="wordmark" href="#overview">Baseline</a>
       <div class="masthead-actions" id="account-bar" hidden>
-        <nav class="nav" aria-label="Main">
+        <nav class="nav" id="main-nav" aria-label="Main">
           <a id="overview-link" href="#overview" aria-current="page">Overview</a>
           <a id="log-link" href="#weight-log">Log</a>
         </nav>
@@ -40,9 +40,15 @@
         <p>Check your connection, then try again.</p>
         <button class="button secondary" type="button" id="auth-retry">Try again</button>
       </div>
+      <div class="auth-message" id="log-loading" hidden><p>Loading your log…</p></div>
+      <div class="auth-message" id="log-error" hidden>
+        <h1>Couldn’t load your log</h1>
+        <p>Check your connection, then try again.</p>
+        <button class="button secondary" type="button" id="log-retry">Try again</button>
+      </div>
     </div>
     <div class="sign-in" id="sign-in" hidden><div id="sign-in-card"></div></div>
-    <p class="auth-note" id="auth-note" hidden>Your weight log stays in this browser, and each account keeps its own log.</p>
+    <p class="auth-note" id="auth-note" hidden>Your weight log is saved to your account, so it’s there on any device you sign in on.</p>
   </main>
 
   <main class="wrap page" id="main" tabindex="-1" hidden>

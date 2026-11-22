@@ -93,7 +93,7 @@ a { color: inherit; }
 .auth-message .button { margin-top: 20px; }
 .auth-message code { padding: 1px 5px; border-radius: 4px; background: var(--accent-wash); color: var(--ink); font: .9375em ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: nowrap; }
 /* Only shows when loading takes long enough to notice. */
-#auth-loading p { color: var(--ink-3); animation: fade-in .2s .5s both; }
+#auth-loading p, #log-loading p { color: var(--ink-3); animation: fade-in .2s .5s both; }
 @keyframes fade-in { from { opacity: 0; } }
 .sign-in { display: flex; justify-content: center; }
 .auth-note { max-width: 25rem; margin: 20px auto 0; color: var(--ink-3); font-size: .875rem; text-align: center; text-wrap: pretty; }
