@@ -16,15 +16,18 @@ export function createStore(url = process.env.DATABASE_URL) {
     switch (change?.op) {
       case undefined:
         return [];
+      // A change without a note keeps the note already on that date (see parseOp).
       case "save-weight":
         return [
           sql`INSERT INTO profiles (user_id, started) VALUES (${userId}, true)
               ON CONFLICT (user_id) DO UPDATE SET started = true, updated_at = now()`,
-          sql`INSERT INTO weigh_ins (user_id, date, weight_kg) VALUES (${userId}, ${change.date}::date, ${change.weight})
-              ON CONFLICT (user_id, date) DO UPDATE SET weight_kg = excluded.weight_kg, updated_at = now()`
+          sql`INSERT INTO weigh_ins (user_id, date, weight_kg, note) VALUES (${userId}, ${change.date}::date, ${change.weight}, ${change.note ?? null}::text)
+              ON CONFLICT (user_id, date) DO UPDATE SET weight_kg = excluded.weight_kg,
+                note = CASE WHEN ${change.note === undefined}::boolean THEN weigh_ins.note ELSE excluded.note END, updated_at = now()`
         ];
       case "update-weight":
-        return [sql`UPDATE weigh_ins SET weight_kg = ${change.weight}, updated_at = now()
+        return [sql`UPDATE weigh_ins SET weight_kg = ${change.weight},
+                      note = CASE WHEN ${change.note === undefined}::boolean THEN note ELSE ${change.note ?? null}::text END, updated_at = now()
                     WHERE user_id = ${userId} AND date = ${change.date}::date RETURNING 1`];
       case "delete-weight":
         return [sql`DELETE FROM weigh_ins WHERE user_id = ${userId} AND date = ${change.date}::date`];
@@ -40,6 +43,10 @@ export function createStore(url = process.env.DATABASE_URL) {
             goal_start_kg = excluded.goal_start_kg, goal_rate_kg_week = excluded.goal_rate_kg_week,
             goal_milestones = excluded.goal_milestones, updated_at = now()`];
       }
+      case "set-units":
+        return [sql`INSERT INTO profiles (user_id, started, weight_unit, height_unit) VALUES (${userId}, true, ${change.units.weight}, ${change.units.height})
+                    ON CONFLICT (user_id) DO UPDATE SET started = true, weight_unit = excluded.weight_unit, height_unit = excluded.height_unit,
+                      updated_at = now()`];
       case "clear-goal":
         return [sql`UPDATE profiles SET goal_kg = NULL, goal_start_date = NULL, goal_start_kg = NULL, goal_rate_kg_week = NULL,
                       goal_milestones = NULL, updated_at = now()
@@ -59,9 +66,10 @@ export function createStore(url = process.env.DATABASE_URL) {
             ON CONFLICT (user_id) DO NOTHING
             RETURNING 1
           ), entries AS (
-            INSERT INTO weigh_ins (user_id, date, weight_kg)
-            SELECT ${userId}, t.date, t.weight
-            FROM empty, unnest(${change.entries.map(entry => entry.date)}::date[], ${change.entries.map(entry => entry.weight)}::numeric[]) AS t(date, weight)
+            INSERT INTO weigh_ins (user_id, date, weight_kg, note)
+            SELECT ${userId}, t.date, t.weight, t.note
+            FROM empty, unnest(${change.entries.map(entry => entry.date)}::date[], ${change.entries.map(entry => entry.weight)}::numeric[],
+                               ${change.entries.map(entry => entry.note)}::text[]) AS t(date, weight, note)
             ON CONFLICT (user_id, date) DO NOTHING
             RETURNING 1
           )
@@ -80,9 +88,9 @@ export function createStore(url = process.env.DATABASE_URL) {
         ...queries,
         sql`SELECT started, height_cm::float8 AS height, goal_kg::float8 AS goal_weight,
                    to_char(goal_start_date, 'YYYY-MM-DD') AS goal_start_date, goal_start_kg::float8 AS goal_start_weight,
-                   goal_rate_kg_week::float8 AS goal_rate, goal_milestones
+                   goal_rate_kg_week::float8 AS goal_rate, goal_milestones, weight_unit, height_unit
             FROM profiles WHERE user_id = ${userId}`,
-        sql`SELECT to_char(date, 'YYYY-MM-DD') AS date, weight_kg::float8 AS weight
+        sql`SELECT to_char(date, 'YYYY-MM-DD') AS date, weight_kg::float8 AS weight, note
             FROM weigh_ins WHERE user_id = ${userId} ORDER BY date`
       ]);
       const [profile] = results.at(-2);
@@ -90,7 +98,8 @@ export function createStore(url = process.env.DATABASE_URL) {
         weight: profile.goal_weight, startDate: profile.goal_start_date, startWeight: profile.goal_start_weight,
         rate: profile.goal_rate, milestones: profile.goal_milestones
       };
-      const result = { log: { started: Boolean(profile?.started), height: profile?.height ?? null, goal, entries: results.at(-1) } };
+      const units = { weight: profile?.weight_unit ?? "kg", height: profile?.height_unit ?? "cm" };
+      const result = { log: { started: Boolean(profile?.started), height: profile?.height ?? null, goal, units, entries: results.at(-1) } };
       if (change?.op === "update-weight") result.found = results[0].length > 0;
       if (change?.op === "import") result.imported = results[0][0]?.imported > 0;
       return result;

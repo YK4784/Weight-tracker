@@ -114,8 +114,9 @@ body[data-view="log"] .button.quick-log { display: inline-flex; }
 .eyebrow { font-size: 1rem; font-weight: 600; color: var(--ink-2); }
 .hero { display: flex; align-items: baseline; gap: 12px; margin-top: 2px; font-size: clamp(5.5rem, 14vw + 1rem, 9rem); font-weight: 700; line-height: 1; letter-spacing: -.045em; }
 .hero-unit { font-size: clamp(1.5rem, 1.8vw + 1rem, 2rem); font-weight: 600; letter-spacing: 0; color: var(--ink-2); }
+/* Stones and pounds are two numbers, so they get a smaller size to fit a phone. */
+body[data-weight-unit="st"] .hero:not(.is-empty) { font-size: clamp(3.5rem, 9vw + 1rem, 7rem); }
 .hero.is-empty { font-size: 3.5rem; font-weight: 500; color: var(--ink-3); }
-.hero.is-empty .hero-unit { display: none; }
 .hero-note { margin-top: 10px; color: var(--ink-2); }
 .hero-rate { margin-top: 4px; color: var(--ink-2); }
 .hero-rate strong { font-weight: 700; color: var(--ink); }
@@ -138,7 +139,17 @@ body[data-view="log"] .button.quick-log { display: inline-flex; }
 .entry-panel { padding: 24px; border: 1px solid var(--rule); border-radius: 14px; background: var(--surface); }
 .entry-panel h2 { margin-bottom: 18px; font-size: 1.25rem; font-weight: 700; letter-spacing: -.01em; }
 .field-label { display: block; margin-bottom: 6px; font-weight: 600; }
-.input-frame + .field-label { margin-top: 16px; }
+:is(.input-frame, .split-field) + :is(.field-label, .field-head) { margin-top: 16px; }
+.field-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 6px; }
+.field-head .field-label { margin-bottom: 0; }
+/* Units, chosen like the chart's ranges. */
+.unit-switch { display: flex; gap: 2px; margin-right: -8px; }
+.unit-switch button { padding: 2px 8px; border-radius: 6px; color: var(--ink-3); font-weight: 700; }
+.unit-switch button:hover { color: var(--ink); }
+.unit-switch button[aria-pressed="true"] { color: var(--ink); text-decoration: underline 2px var(--accent); text-underline-offset: 6px; }
+/* A weight in stones and pounds, or a height in feet and inches, takes two inputs. */
+.split-field { display: flex; gap: 8px; }
+.split-field > .input-frame { flex: 1 1 0; }
 .input-frame { position: relative; display: flex; align-items: center; min-width: 0; border: 1px solid var(--field-border); border-radius: 8px; background: var(--surface); }
 .input-frame:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-wash); }
 .input-frame input { width: 100%; min-width: 0; min-height: 46px; margin: 0; padding: 10px 12px; border: 0; outline: none; background: transparent; font-size: 1.0625rem; font-variant-numeric: tabular-nums; }
@@ -223,6 +234,7 @@ body[data-view="log"] .button.quick-log { display: inline-flex; }
 .chart-tooltip strong { display: block; margin-bottom: 4px; font-weight: 700; }
 .tip-row { display: flex; align-items: center; gap: 8px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .tip-row b { color: var(--ink); font-weight: 700; }
+.tip-note { max-width: 15rem; margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--rule); color: var(--ink-2); overflow-wrap: anywhere; }
 .chart-empty { position: absolute; inset: 0; display: grid; place-content: center; padding: 20px; color: var(--ink-3); text-align: center; }
 .note { max-width: 68ch; margin-top: 14px; color: var(--ink-3); font-size: .875rem; }
 
@@ -243,6 +255,12 @@ th:last-child, td:last-child { padding-right: 0; }
 .rate-cell { color: var(--ink-2); }
 .dash { color: var(--ink-3); }
 .row-action { width: 48px; text-align: right; }
+/* A note runs the width of the table on its own line under its weigh-in. */
+tr.has-note td { height: 44px; padding-bottom: 0; border-bottom: 0; }
+.note-row td { height: auto; padding-block: 0 12px; color: var(--ink-2); font-size: .9375rem; white-space: normal; overflow-wrap: anywhere; text-wrap: pretty; }
+/* Month headings on the log page. */
+.month-row th { padding: 28px 0 8px; border-bottom: 1px solid var(--rule); color: var(--ink); font-size: 1rem; font-weight: 700; }
+tbody:first-of-type .month-row th { padding-top: 20px; }
 .icon-button { display: inline-grid; place-items: center; width: 36px; height: 36px; border-radius: 8px; color: var(--ink-3); }
 .icon-button:hover { background: var(--accent-wash); color: var(--accent); }
 .short-label { display: none; }
@@ -266,6 +284,7 @@ dialog h2 { font-size: 1.25rem; font-weight: 700; letter-spacing: -.01em; }
 .bmi-preview { display: flex; align-items: baseline; justify-content: space-between; margin-top: 16px; padding: 12px 14px; border-radius: 8px; background: var(--paper); }
 .bmi-preview strong { font-size: 1.25rem; }
 .field-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 12px; margin-top: 16px; }
+body[data-weight-unit="st"] .start-row { grid-template-columns: minmax(0, 1fr); }
 .field-hint { margin-top: 6px; color: var(--ink-3); font-size: .875rem; text-wrap: pretty; }
 .optional { font-weight: 400; color: var(--ink-3); }
 .goal-preview { margin-top: 18px; padding: 12px 14px; border-radius: 8px; background: var(--paper); color: var(--ink-2); text-wrap: pretty; }
@@ -305,7 +324,10 @@ dialog h2 { font-size: 1.25rem; font-weight: 700; letter-spacing: -.01em; }
   th, td { padding-inline: 6px; }
   th { font-size: .8125rem; }
   td { height: 50px; font-size: .9375rem; }
+  tr.has-note td { height: 42px; }
+  .note-row td { font-size: .875rem; }
   .table-unit { margin-left: 2px; font-size: .8125rem; }
+  .table-unit.after-stones { display: none; }
   .long-label { display: none; }
   .rate-cell.unclear { display: inline-block; white-space: normal; }
   .short-label { display: inline; }
@@ -318,4 +340,6 @@ dialog h2 { font-size: 1.25rem; font-weight: 700; letter-spacing: -.01em; }
   .nav { gap: 0; }
   .nav a { padding-inline: 8px; }
   th, td { padding-inline: 4px; }
+  /* Headings wrap only when a table would otherwise be too wide, as with stones. */
+  th { vertical-align: bottom; white-space: normal; }
 }

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { FORECAST_MAX_DAYS, averageChanges, bmi, calculateRate, calculateTrend, dateOf, dayOf, forecastGoal, goalProgress, normalizeGoal, normalizeState, overallRate, recentRange, saveWeight, shiftDate, validDate } from "../dist/model.mjs";
+import { CM_PER_IN, FORECAST_MAX_DAYS, KG_PER_LB, NOTE_MAX_LENGTH, averageChanges, formatAmount, formatWeight, fromTenths, heightParts, normalizeUnits, toTenths, weightParts, bmi, calculateRate, calculateTrend, cleanNote, dateOf, dayOf, forecastGoal, goalProgress, groupByMonth, normalizeGoal, normalizeState, noteLength, overallRate, recentRange, saveWeight, shiftDate, validDate } from "../dist/model.mjs";
 
 const first = dayOf("2026-03-01");
 const entry = (index, weight) => ({ date: dateOf(first + index), weight });
@@ -136,8 +136,8 @@ test("scale noise around a flat weight is not a clear change", () => {
 const goalOf = (startWeight, weight, milestones = 10, rate = null) => ({ weight, startDate: "2026-11-01", startWeight, rate, milestones });
 
 test("a goal survives normalizing, rounded like weights, and starts the log", () => {
-  const state = normalizeState({ goal: { weight: 60.04, startDate: "2026-09-13", startWeight: 66.06, rate: 0.504, milestones: 8 } });
-  assert.deepEqual(state.goal, { weight: 60, startDate: "2026-09-13", startWeight: 66.1, rate: 0.5, milestones: 8 });
+  const state = normalizeState({ goal: { weight: 60.044, startDate: "2026-09-13", startWeight: 66.056, rate: 0.5004, milestones: 8 } });
+  assert.deepEqual(state.goal, { weight: 60.04, startDate: "2026-09-13", startWeight: 66.06, rate: 0.5, milestones: 8 });
   assert.equal(state.started, true);
   assert.equal(normalizeState({}).goal, null);
   assert.equal(normalizeState({ started: false }).started, false);
@@ -321,4 +321,124 @@ test("the weekly trend for an earlier row uses only the weigh-ins up to that dat
   const log = [...daily(21, i => 80 - i / 10), ...daily(31, i => 70 + i).slice(21)];
   assert.deepEqual(calculateRate(log, dateOf(first + 20)), { perWeek: -0.7, clear: true, count: 21 });
   assert.equal(calculateRate(log, dateOf(first + 12)), null);
+});
+
+test("a note is one trimmed line of text, and anything else is no note", () => {
+  assert.equal(cleanNote("  after   travel \n\t(home)\r\n"), "after travel (home)");
+  assert.equal(cleanNote("a\u0000b\u007fc\u2028d"), "a b c d");
+  assert.equal(cleanNote("bad \ud800 half"), "bad half");
+  for (const value of ["", "   \n ", null, undefined, 5, {}, ["note"]]) assert.equal(cleanNote(value), null, JSON.stringify(value));
+  assert.equal(noteLength("🙂 ok"), 4);
+});
+
+test("notes survive normalizing, and a note that is too long is cut", () => {
+  const state = normalizeState({ entries: [
+    { date: "2026-11-02", weight: 80, note: " after  travel " }, { date: "2026-11-01", weight: 81 },
+    { date: "2026-11-03", weight: 79, note: "🙂".repeat(NOTE_MAX_LENGTH + 5) }, { date: "2026-11-04", weight: 79, note: 12 }
+  ] });
+  assert.deepEqual(state.entries.map(entry => entry.note), [null, "after travel", "🙂".repeat(NOTE_MAX_LENGTH), null]);
+  assert.deepEqual(normalizeState(state), state);
+});
+
+test("saving a weight keeps the date's note unless a note is given", () => {
+  let state = saveWeight(normalizeState(null), "2026-11-01", 80, "after travel");
+  state = saveWeight(state, "2026-11-01", 79.8);
+  assert.deepEqual(state.entries, [{ date: "2026-11-01", weight: 79.8, note: "after travel" }]);
+  assert.equal(saveWeight(state, "2026-11-01", 79.8, "new scale").entries[0].note, "new scale");
+  assert.equal(saveWeight(state, "2026-11-01", 79.8, null).entries[0].note, null);
+  assert.equal(saveWeight(state, "2026-11-01", 79.8, "").entries[0].note, null);
+  assert.equal(saveWeight(state, "2026-11-02", 79.6).entries[1].note, null, "a new date starts without a note");
+});
+
+test("trend points carry the weigh-in's note", () => {
+  const { days } = calculateTrend([{ date: "2026-11-01", weight: 80, note: "after travel" }, { date: "2026-11-03", weight: 79, note: null }], "2026-11-03");
+  assert.deepEqual(days.map(point => point.note), ["after travel", null, null]);
+});
+
+test("rows are grouped by calendar month in the order given", () => {
+  const rows = ["2026-11-02", "2026-11-01", "2026-10-31", "2026-10-01", "2025-10-31"].map(date => ({ date }));
+  assert.deepEqual(groupByMonth(rows).map(group => [group.month, group.rows.length]), [["2026-11", 2], ["2026-10", 2], ["2025-10", 1]]);
+  assert.deepEqual(groupByMonth([]), []);
+});
+
+const lb = pounds => Math.round(pounds * KG_PER_LB * 100) / 100; // As stored.
+
+test("weights show one decimal of kg, pounds, or stones and pounds", () => {
+  assert.equal(formatWeight(61.55), "61.6 kg");
+  assert.equal(formatWeight(68.04, "lb"), "150.0 lb");
+  assert.equal(formatWeight(lb(135.8), "st"), "9 st 9.8 lb");
+  assert.equal(formatWeight(139.96 * KG_PER_LB, "st"), "10 st 0.0 lb", "rounds before splitting off stones");
+  assert.equal(formatWeight(lb(4409.2), "lb"), "4,409.2 lb");
+  assert.equal(formatWeight(null, "lb"), "—");
+  assert.deepEqual(weightParts(lb(135.8), "st"), [["9", "st"], ["9.8", "lb"]]);
+  assert.equal(formatAmount(-0.23), "0.2 kg");
+  assert.equal(formatAmount(-lb(2.4), "st"), "2.4 lb", "changes in stones mode are in pounds");
+});
+
+test("every weight entered to 0.1 lb reads back the same", () => {
+  for (let tenths = 1; tenths <= 44092; tenths++) assert.equal(toTenths(lb(tenths / 10), "lb"), tenths, String(tenths / 10));
+});
+
+test("a weight in kg with one decimal and the same weight in tenths of kg agree", () => {
+  for (const kg of [0.1, 61.25, 61.35, 99.95, 2000]) {
+    assert.equal(toTenths(kg), Math.round(kg * 10));
+    assert.equal(fromTenths(toTenths(kg)), Math.round(kg * 10) / 10);
+  }
+});
+
+test("heights show centimeters, or feet and inches to 0.1 in, and survive storing to 0.1 cm", () => {
+  assert.deepEqual(heightParts(172), [["172", "cm"]]);
+  assert.deepEqual(heightParts(172.5), [["172.5", "cm"]]);
+  assert.deepEqual(heightParts(177.8, "ft"), [["5", "ft"], ["10", "in"]]);
+  assert.deepEqual(heightParts(172, "ft"), [["5", "ft"], ["7.7", "in"]]);
+  assert.deepEqual(heightParts(182.9, "ft"), [["6", "ft"], ["0", "in"]]);
+  for (let tenths = 120; tenths <= 1570; tenths++) {
+    const cm = Math.round(tenths / 10 * CM_PER_IN * 10) / 10;
+    assert.equal(Math.round(cm / CM_PER_IN * 10), tenths, String(tenths / 10));
+  }
+});
+
+test("units default to kg and cm", () => {
+  assert.deepEqual(normalizeUnits(undefined), { weight: "kg", height: "cm" });
+  assert.deepEqual(normalizeUnits({ weight: "st", height: "ft" }), { weight: "st", height: "ft" });
+  assert.deepEqual(normalizeUnits({ weight: "stone", height: 5 }), { weight: "kg", height: "cm" });
+  assert.deepEqual(normalizeState({ units: { weight: "lb" } }).units, { weight: "lb", height: "cm" });
+  assert.equal(normalizeState({ units: { weight: "lb" } }).started, false, "units alone don't start a log");
+});
+
+test("weights are kept to 0.01 kg and averaged exactly", () => {
+  const state = normalizeState({ entries: [{ date: "2026-11-01", weight: 150 * KG_PER_LB }, { date: "2026-11-02", weight: 151 * KG_PER_LB }] });
+  assert.deepEqual(state.entries.map(entry => entry.weight), [68.04, 68.49]);
+  const { current } = calculateTrend(state.entries, "2026-11-02");
+  assert.equal(current.average, 68.265);
+  assert.equal(formatWeight(current.average, "lb"), "150.5 lb");
+});
+
+test("progress in pounds works in tenths of a pound", () => {
+  const goal = { weight: lb(150), startDate: "2026-11-01", startWeight: lb(160), rate: null, milestones: 4 };
+  const progress = goalProgress(goal, lb(155.04), "lb");
+  assert.deepEqual(progress.milestones.map(m => formatWeight(m.weight, "lb")), ["157.5 lb", "155.0 lb", "152.5 lb", "150.0 lb"]);
+  assert.equal(formatWeight(progress.current, "lb"), "155.0 lb");
+  assert.equal(progress.completed, 2, "155.0 lb as shown reaches milestone 2");
+  assert.equal(progress.overall, 0.5);
+  assert.equal(formatAmount(progress.toGo, "lb"), "5.0 lb");
+  assert.equal(formatAmount(progress.next.toGo, "lb"), "2.5 lb");
+  // In kg the same average reads 70.3 against a 70.3 milestone, so it counts too; in pounds a hair short does not.
+  assert.equal(goalProgress(goal, lb(155.06), "lb").completed, 1);
+  // A milestone is never smaller than 0.1 lb.
+  assert.equal(goalProgress({ ...goal, weight: lb(159.8), milestones: 10 }, lb(160), "lb").milestones.length, 2);
+});
+
+test("rates and changes round to 0.1 of the unit shown", () => {
+  // Losing half a pound a week, every day for three weeks.
+  const entries = Array.from({ length: 21 }, (_, i) => entry(i, lb(160 - i / 14)));
+  const end = entries.at(-1).date;
+  const rate = calculateRate(entries, end, "lb");
+  assert.equal(formatAmount(rate.perWeek, "lb"), "0.5 lb");
+  assert.equal(calculateRate(entries, end).perWeek, -0.2, "the same log reads 0.2 kg in kg");
+  const changes = averageChanges(calculateTrend(entries, end), "st");
+  assert.equal(formatAmount(changes[0].change, "st"), "0.5 lb");
+  const goal = { weight: lb(150), startDate: entries[0].date, startWeight: lb(160), rate: null, milestones: 10 };
+  const trend = calculateTrend(entries, end);
+  assert.equal(formatAmount(overallRate(goal, trend.current.average, end, "lb"), "lb"), "0.3 lb", "the average trails the weight");
 });

@@ -64,7 +64,7 @@
       <div class="top">
         <section class="summary" aria-labelledby="avg-title">
           <h2 class="eyebrow" id="avg-title">14-day average</h2>
-          <p class="hero"><span id="avg-value">—</span><span class="hero-unit">kg</span></p>
+          <p class="hero is-empty" id="hero">—</p>
           <p class="hero-note" id="avg-detail"></p>
           <p class="hero-rate" id="rate-detail" hidden></p>
           <div class="goal-progress" id="goal-progress" hidden>
@@ -88,8 +88,20 @@
               <div class="date-field"><input id="entry-date" name="date" type="date" required><svg class="icon input-icon" aria-hidden="true"><use href="./icons.svg#calendar"/></svg></div>
               <button class="date-step" type="button" id="next-day" aria-label="Next day" aria-controls="entry-date"><svg class="icon" aria-hidden="true"><use href="./icons.svg#chevron-right"/></svg></button>
             </div>
-            <label class="field-label" for="entry-weight">Weight</label>
-            <div class="input-frame"><input id="entry-weight" name="weight" type="number" inputmode="decimal" placeholder="0.0" min="0.1" max="2000" step="0.1" aria-describedby="entry-unit" required><span class="input-unit" id="entry-unit">kg</span></div>
+            <div class="field-head">
+              <label class="field-label" for="entry-weight">Weight</label>
+              <div class="unit-switch" id="weight-units" role="group" aria-label="Weight unit">
+                <button type="button" data-unit="kg" aria-pressed="true">kg<span class="sr-only"> (kilograms)</span></button>
+                <button type="button" data-unit="lb" aria-pressed="false">lb<span class="sr-only"> (pounds)</span></button>
+                <button type="button" data-unit="st" aria-pressed="false">st<span class="sr-only"> (stones and pounds)</span></button>
+              </div>
+            </div>
+            <div class="split-field">
+              <div class="input-frame"><input id="entry-weight" name="weight" type="number" inputmode="decimal" placeholder="0.0" min="0.1" max="2000" step="0.1" aria-describedby="entry-weight-unit" required><span class="input-unit" id="entry-weight-unit">kg</span></div>
+              <div class="input-frame" hidden><input id="entry-weight-lb" name="pounds" type="number" inputmode="decimal" placeholder="0.0" min="0" max="13.9" step="0.1" aria-label="Pounds"><span class="input-unit" aria-hidden="true">lb</span></div>
+            </div>
+            <label class="field-label" for="entry-note">Note <span class="optional">(optional)</span></label>
+            <div class="input-frame"><input id="entry-note" name="note" type="text" maxlength="100" placeholder="e.g. after travel" autocomplete="off"></div>
             <button class="button primary save-button" type="submit"><span id="save-label">Save entry</span></button>
             <p id="entry-hint" class="form-hint"></p>
             <span class="sr-only" role="status" id="date-announce"></span>
@@ -139,7 +151,7 @@
         </div>
         <div class="legend"><span><i class="key-line"></i>14-day average</span><span><i class="key-dot"></i>Daily weigh-in</span><span id="legend-goal" hidden><i class="key-goal"></i>Goal</span></div>
         <div class="chart-wrap" id="chart-wrap" tabindex="0" role="group" aria-label="Weight trend chart. Use the left and right arrow keys to inspect days.">
-          <svg id="trend-chart" role="img" aria-label="Weight trend in kilograms"></svg>
+          <svg id="trend-chart" role="img" aria-label="Weight trend"></svg>
           <div class="chart-tooltip" id="chart-tooltip" hidden></div>
           <div class="chart-empty" id="chart-empty" hidden></div>
         </div>
@@ -155,9 +167,8 @@
         <span id="log-count" class="entry-count" hidden></span>
       </div>
       <div class="table-wrap">
-        <table>
+        <table id="entry-table">
           <thead><tr><th scope="col">Date</th><th scope="col" class="num">Weight</th><th scope="col" class="num"><span class="long-label">14-day average</span><span class="short-label">14-day avg.</span></th><th scope="col" class="num"><span class="long-label">Weekly trend</span><span class="short-label">Per week</span></th><th scope="col" class="row-action" id="action-heading" hidden><span class="sr-only">Edit entry</span></th></tr></thead>
-          <tbody id="entry-rows"></tbody>
         </table>
       </div>
       <p id="table-empty" class="table-empty" hidden>Your entries will appear here after your first weigh-in.</p>
@@ -170,8 +181,17 @@
     <div class="dialog-heading"><h2 id="profile-title">Your height</h2><button class="icon-button" data-close type="button" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="./icons.svg#close"/></svg></button></div>
     <p class="dialog-detail" id="profile-description">Your height and latest weight are used to calculate BMI.</p>
     <form id="profile-form">
-      <label class="field-label" for="profile-height">Height</label>
-      <div class="input-frame"><input type="number" inputmode="decimal" min="0.1" max="400" step="0.1" id="profile-height" name="height" placeholder="e.g. 178" aria-describedby="height-unit" required><span class="input-unit" id="height-unit">cm</span></div>
+      <div class="field-head">
+        <label class="field-label" for="profile-height">Height</label>
+        <div class="unit-switch" id="height-units" role="group" aria-label="Height unit">
+          <button type="button" data-unit="cm" aria-pressed="true">cm<span class="sr-only"> (centimeters)</span></button>
+          <button type="button" data-unit="ft" aria-pressed="false">ft<span class="sr-only"> (feet and inches)</span></button>
+        </div>
+      </div>
+      <div class="split-field">
+        <div class="input-frame"><input type="number" inputmode="decimal" min="0.1" max="400" step="0.1" id="profile-height" name="height" placeholder="e.g. 178" aria-describedby="height-unit" required><span class="input-unit" id="height-unit">cm</span></div>
+        <div class="input-frame" hidden><input id="profile-height-in" name="inches" type="number" inputmode="decimal" placeholder="0" min="0" max="11.9" step="0.1" aria-label="Inches"><span class="input-unit" aria-hidden="true">in</span></div>
+      </div>
       <div class="bmi-preview"><span>BMI</span><strong id="profile-bmi" aria-live="polite">—</strong></div>
       <p class="formula">BMI = weight (kg) ÷ height (m)². <a href="https://www.cdc.gov/bmi/about/index.html" target="_blank" rel="noopener noreferrer">About BMI</a></p>
       <div class="dialog-actions"><button class="button secondary" type="button" data-close>Cancel</button><button class="button primary" type="submit">Save height</button></div>
@@ -182,15 +202,21 @@
     <p class="dialog-detail">Progress is measured with your 14-day average, so one heavy or light day doesn’t move it much.</p>
     <form id="goal-form">
       <label class="field-label" for="goal-weight">Goal weight</label>
-      <div class="input-frame"><input id="goal-weight" name="goal" type="number" inputmode="decimal" placeholder="0.0" min="0.1" max="2000" step="0.1" aria-describedby="goal-unit" required><span class="input-unit" id="goal-unit">kg</span></div>
-      <div class="field-row">
+      <div class="split-field">
+        <div class="input-frame"><input id="goal-weight" name="goal" type="number" inputmode="decimal" placeholder="0.0" min="0.1" max="2000" step="0.1" aria-describedby="goal-weight-unit" required><span class="input-unit" id="goal-weight-unit">kg</span></div>
+        <div class="input-frame" hidden><input id="goal-weight-lb" name="pounds" type="number" inputmode="decimal" placeholder="0.0" min="0" max="13.9" step="0.1" aria-label="Pounds"><span class="input-unit" aria-hidden="true">lb</span></div>
+      </div>
+      <div class="field-row start-row">
         <div>
           <label class="field-label" for="goal-start-date">Start date</label>
           <div class="input-frame date-frame"><div class="date-field"><input id="goal-start-date" name="start-date" type="date" required><svg class="icon input-icon" aria-hidden="true"><use href="./icons.svg#calendar"/></svg></div></div>
         </div>
         <div>
           <label class="field-label" for="goal-start-weight">Start weight</label>
-          <div class="input-frame"><input id="goal-start-weight" name="start-weight" type="number" inputmode="decimal" placeholder="0.0" min="0.1" max="2000" step="0.1" aria-describedby="goal-start-unit goal-start-hint" required><span class="input-unit" id="goal-start-unit">kg</span></div>
+          <div class="split-field">
+            <div class="input-frame"><input id="goal-start-weight" name="start-weight" type="number" inputmode="decimal" placeholder="0.0" min="0.1" max="2000" step="0.1" aria-describedby="goal-start-weight-unit goal-start-hint" required><span class="input-unit" id="goal-start-weight-unit">kg</span></div>
+            <div class="input-frame" hidden><input id="goal-start-weight-lb" name="pounds" type="number" inputmode="decimal" placeholder="0.0" min="0" max="13.9" step="0.1" aria-label="Pounds"><span class="input-unit" aria-hidden="true">lb</span></div>
+          </div>
         </div>
       </div>
       <p class="field-hint" id="goal-start-hint"></p>
@@ -213,7 +239,12 @@
     <p class="dialog-detail" id="edit-date-label"></p>
     <form id="edit-form">
       <label class="field-label" for="edit-weight">Weight</label>
-      <div class="input-frame"><input id="edit-weight" name="weight" type="number" inputmode="decimal" min="0.1" max="2000" step="0.1" aria-describedby="edit-unit" required><span class="input-unit" id="edit-unit">kg</span></div>
+      <div class="split-field">
+        <div class="input-frame"><input id="edit-weight" name="weight" type="number" inputmode="decimal" placeholder="0.0" min="0.1" max="2000" step="0.1" aria-describedby="edit-weight-unit" required><span class="input-unit" id="edit-weight-unit">kg</span></div>
+        <div class="input-frame" hidden><input id="edit-weight-lb" name="pounds" type="number" inputmode="decimal" placeholder="0.0" min="0" max="13.9" step="0.1" aria-label="Pounds"><span class="input-unit" aria-hidden="true">lb</span></div>
+      </div>
+      <label class="field-label" for="edit-note">Note <span class="optional">(optional)</span></label>
+      <div class="input-frame"><input id="edit-note" name="note" type="text" maxlength="100" placeholder="e.g. after travel" autocomplete="off"></div>
       <div class="dialog-actions edit-actions"><button class="danger-link" type="button" id="delete-entry">Delete entry</button><button class="button primary" type="submit">Save changes</button></div>
     </form>
     <div id="delete-confirm" hidden><p class="dialog-detail">Delete this weigh-in and recalculate the trend?</p><div class="dialog-actions"><button class="button secondary" type="button" id="keep-entry">Keep entry</button><button class="button danger" type="button" id="confirm-delete">Delete weigh-in</button></div></div>

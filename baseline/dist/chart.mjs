@@ -1,4 +1,4 @@
-import { dateOf, dayOf, oneDecimal, prettyDate } from "./model.mjs";
+import { KG_PER_LB, dateOf, dayOf, formatWeight, prettyDate, spokenWeight, weightParts } from "./model.mjs";
 
 const NS = "http://www.w3.org/2000/svg";
 
@@ -12,9 +12,14 @@ function svg(name, attributes = {}, content) {
 
 const coord = value => Math.round(value * 100) / 100;
 
+// Roughly how wide a label is: digits at `digit` px, a point at `point` px,
+// and letters and spaces (as in "9 st 12") at 4.5 px.
+const textWidth = (text, digit, point = digit) => [...text].reduce((sum, char) => sum + (char === "." ? point : /\d/.test(char) ? digit : 4.5), 0);
+
 // The y-axis range: every plotted average and weigh-in, and the goal (null for
-// none) so its line stays on screen, with some room above and below.
-export function yDomain(points, goal = null) {
+// none) so its line stays on screen, with some room above and below. The grid
+// step is a round number, or the one of `steps` nearest a quarter of the range.
+export function yDomain(points, goal = null, steps = null) {
   let low = goal ?? Infinity;
   let high = goal ?? -Infinity;
   for (const point of points) {
@@ -25,10 +30,27 @@ export function yDomain(points, goal = null) {
   const bottom = Math.max(0, low - pad);
   const top = high + pad;
   const target = (top - bottom) / 4;
+  if (steps) return { bottom, top, step: steps.reduce((best, n) => Math.abs(Math.log(n / target)) < Math.abs(Math.log(best / target)) ? n : best) };
   const power = 10 ** Math.floor(Math.log10(target));
   const factors = [1, 2, 2.5, 5, 10];
   const step = factors.reduce((best, n) => Math.abs(n - target / power) < Math.abs(best - target / power) ? n : best) * power;
   return { bottom, top, step };
+}
+
+// Grid steps in pounds for stones: whole pounds, then half a stone and stones.
+const STONE_STEPS = [0.5, 1, 2, 7, 14, 28, 70, 140];
+
+// A grid label in pounds, written as stones and pounds: "9 st 10", "10 st".
+export function stoneTick(pounds) {
+  const stones = Math.floor((pounds + 1e-9) / 14);
+  const rest = Number((pounds - stones * 14).toFixed(2));
+  return stones + " st" + (rest ? " " + rest : "");
+}
+
+// The value printed beside a line: "61.8", or "9 st 9.8" for stones.
+function lineLabel(kg, unit) {
+  const parts = weightParts(kg, unit);
+  return parts.length > 1 ? parts[0].join(" ") + " " + parts[1][0] : parts[0][0];
 }
 
 // Where to put a label centered at `y` so it stays `gap` away from another label
@@ -64,12 +86,14 @@ export class TrendChart {
     this.resize.observe(this.wrap);
   }
 
-  // `goal` is the goal weight in kg, or null without one.
-  update(trend, range, today, goal = null) {
+  // `goal` is the goal weight in kg, or null without one. The chart plots in
+  // `unit`, with stones on a scale of pounds.
+  update(trend, range, today, goal = null, unit = "kg") {
     this.trend = trend;
     this.range = range;
     this.today = today;
     this.goal = Number.isFinite(goal) ? goal : null;
+    this.unit = unit;
     this.draw();
   }
 
@@ -93,26 +117,36 @@ export class TrendChart {
     }
 
     const compact = width < 480;
+    const unit = this.unit;
+    const stones = unit === "st";
+    // The scale is in kg or pounds; `y` takes kg.
+    const scale = unit === "kg" ? 1 : 1 / KG_PER_LB;
     const goal = this.goal;
-    const { bottom, top, step } = yDomain(this.points, goal);
+    const { bottom, top, step } = yDomain(this.points.map(p => ({ average: p.average * scale, weight: p.weight === null ? null : p.weight * scale })),
+      goal === null ? null : goal * scale, stones ? STONE_STEPS : null);
     const last = this.points.at(-1);
-    const endLabel = oneDecimal(last.average);
-    const goalLabel = goal === null ? "" : oneDecimal(goal);
-    const left = Math.max(compact ? 30 : 38, String(Math.floor(top)).length * 8 + 14);
-    const right = width - (Math.max(endLabel.length, goalLabel.length) * 8.5 + 18);
+    const endLabel = lineLabel(last.average, unit);
+    const goalLabel = goal === null ? "" : lineLabel(goal, unit);
+    const ticks = [];
+    for (let tick = Math.ceil((bottom - 1e-8) / step) * step; tick <= top + 1e-8; tick += step) {
+      ticks.push({ value: tick, label: stones ? stoneTick(tick) : String(Number(tick.toFixed(2))) });
+    }
+    const left = Math.max(compact ? 30 : 38, Math.max(...ticks.map(tick => textWidth(tick.label, 8, 3.5))) + 14);
+    const right = width - (Math.max(textWidth(endLabel, 8.5), textWidth(goalLabel, 8.5)) + 18);
     const ceiling = 24;
     const floor = height - 30;
     const x = day => start === end ? (left + right) / 2 : left + (day - start) / (end - start) * (right - left);
-    const y = value => floor - (value - bottom) / (top - bottom) * (floor - ceiling);
+    const y = kg => floor - (kg * scale - bottom) / (top - bottom) * (floor - ceiling);
     this.axes = { start, end, left, right, ceiling, floor, x, y };
     const fragment = document.createDocumentFragment();
 
-    fragment.append(svg("text", { x: left - 12, y: 12, "text-anchor": "end" }, "kg"));
-    for (let tick = Math.ceil((bottom - 1e-8) / step) * step; tick <= top + 1e-8; tick += step) {
-      const yy = coord(y(tick)) + .5;
+    // Stone labels name their own units.
+    if (!stones) fragment.append(svg("text", { x: left - 12, y: 12, "text-anchor": "end" }, unit));
+    for (const tick of ticks) {
+      const yy = coord(y(tick.value / scale)) + .5;
       fragment.append(
         svg("line", { class: "grid", x1: left, x2: width, y1: yy, y2: yy }),
-        svg("text", { x: left - 12, y: yy + 4, "text-anchor": "end" }, String(Number(tick.toFixed(2))))
+        svg("text", { x: left - 12, y: yy + 4, "text-anchor": "end" }, tick.label)
       );
     }
     const tickCount = Math.min(end - start + 1, width < 360 ? 3 : compact ? 4 : width < 680 ? 5 : 7);
@@ -167,7 +201,7 @@ export class TrendChart {
     this.cursor = svg("g", { visibility: "hidden", "pointer-events": "none" });
     fragment.append(this.cursor);
     this.canvas.append(fragment);
-    this.canvas.setAttribute("aria-label", "Daily weights and 14-day moving averages, " + prettyDate(dateOf(start), "full") + " through " + prettyDate(this.today, "full") + ". Last plotted average " + endLabel + " kilograms." + (goal === null ? "" : " Goal " + goalLabel + " kilograms."));
+    this.canvas.setAttribute("aria-label", "Daily weights and 14-day moving averages, " + prettyDate(dateOf(start), "full") + " through " + prettyDate(this.today, "full") + ". Last plotted average " + spokenWeight(last.average, unit) + "." + (goal === null ? "" : " Goal " + spokenWeight(goal, unit) + "."));
   }
 
   inspectPointer(event) {
@@ -205,16 +239,25 @@ export class TrendChart {
     this.cursor.append(svg("circle", { class: "cursor-avg", cx: xx, cy: coord(y(point.average)), r: 5 }));
     this.cursor.setAttribute("visibility", "visible");
     const heading = prettyDate(point.date, "full");
-    const daily = point.weight === null ? null : oneDecimal(point.weight) + " kg";
-    const mean = oneDecimal(point.average) + " kg";
+    const daily = point.weight === null ? null : formatWeight(point.weight, this.unit);
+    const mean = formatWeight(point.average, this.unit);
     this.tooltip.innerHTML = "<strong>" + heading + "</strong>" +
       '<div class="tip-row"><i class="key-line"></i><b>' + mean + "</b>14-day average</div>" +
       '<div class="tip-row"><i class="key-dot"></i>' + (daily ? "<b>" + daily + "</b>weigh-in" : "No weigh-in") + "</div>";
+    if (point.note) {
+      const note = document.createElement("p");
+      note.className = "tip-note";
+      note.textContent = point.note;
+      this.tooltip.append(note);
+    }
     this.tooltip.hidden = false;
     const tipWidth = this.tooltip.offsetWidth;
     this.tooltip.style.left = Math.max(0, Math.min(this.wrap.clientWidth - tipWidth, xx + tipWidth + 14 < this.wrap.clientWidth ? xx + 14 : xx - tipWidth - 14)) + "px";
     this.tooltip.style.top = Math.max(0, Math.min(floor - this.tooltip.offsetHeight, y(point.average) - this.tooltip.offsetHeight / 2)) + "px";
-    if (announce) this.announce.textContent = heading + ". 14-day average " + mean + ". " + (daily ? "Weigh-in " + daily + "." : "No weigh-in.");
+    if (announce) {
+      const weighIn = point.weight === null ? "No weigh-in." : "Weigh-in " + spokenWeight(point.weight, this.unit) + ".";
+      this.announce.textContent = heading + ". 14-day average " + spokenWeight(point.average, this.unit) + ". " + weighIn + (point.note ? " Note: " + point.note : "");
+    }
   }
 
   hideTooltip() {

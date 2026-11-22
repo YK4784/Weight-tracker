@@ -1,4 +1,4 @@
-import { FORECAST_MAX_DAYS, GOAL_MILESTONES, OVERALL_MIN_DAYS, RATE_DAYS, RATE_MIN_ENTRIES, RATE_MIN_SPAN, WINDOW_DAYS, averageChanges, bmi, calculateRate, calculateTrend, dateOf, dayOf, forecastGoal, goalProgress, localToday, normalizeGoal, normalizeState, oneDecimal, overallRate, positive, prettyDate, recentRange, saveWeight, shiftDate, validDate } from "./model.mjs";
+import { CM_PER_IN, FORECAST_MAX_DAYS, GOAL_MILESTONES, KG_PER_LB, OVERALL_MIN_DAYS, RATE_DAYS, RATE_MIN_ENTRIES, RATE_MIN_SPAN, WINDOW_DAYS, averageChanges, bmi, calculateRate, calculateTrend, cleanNote, dateOf, dayOf, forecastGoal, formatAmount, formatWeight, fromTenths, goalProgress, groupByMonth, heightParts, localToday, normalizeGoal, normalizeState, oneDecimal, overallRate, positive, prettyDate, recentRange, roundHeight, roundWeight, saveWeight, shiftDate, spokenHeight, spokenWeight, toTenths, validDate, weightParts } from "./model.mjs";
 import { TrendChart } from "./chart.mjs";
 import { claimLegacyLog, storageKeyFor } from "./account.mjs";
 import { AuthSetupError, startClerk } from "./auth.mjs";
@@ -23,7 +23,8 @@ let startWeightFrom = "average"; // Where the goal dialog's start weight came fr
 let range = "30";
 let page = 0;
 let editingDate = null;
-let autoWeight = true;
+let autoFill = true; // The log form shows the weigh-in on its date until the user types in it.
+let fieldUnits = null; // The units the inputs are set up for, which follow state.units.
 let toastTimer;
 
 function notify(message) {
@@ -78,42 +79,72 @@ function shortDate(date) {
   return date.slice(0, 4) === today.slice(0, 4) ? prettyDate(date) : prettyDate(date, "full");
 }
 
+// Weights are stored in kg and shown in the user's unit (see weightParts).
+const unit = () => state.units.weight;
+// "61.6 kg", "135.8 lb" or "9 st 9.8 lb".
+const weight = kg => formatWeight(kg, unit());
+// A change in weight without its sign: kg, or pounds for stones too.
+const amount = kg => formatAmount(kg, unit());
+const rateUnit = () => unit() === "kg" ? "kg" : "lb";
+const perUnit = kg => unit() === "kg" ? kg : kg / KG_PER_LB;
+// A weight in a table: numbers with small units. Phones leave out the "lb"
+// after stones to fit ("9 st 9.8").
+const weightCell = kg => weightParts(kg, unit()).map(([number, name], index) => number + '<span class="table-unit' + (index ? " after-stones" : "") + '">' + name + "</span>").join(" ");
+
 // Missing values show a quiet dash instead of a big bold one.
-function setValue(id, value, unit = "") {
-  const empty = !Number.isFinite(value);
-  $(id).textContent = empty ? "—" : oneDecimal(value) + unit;
-  $(id).classList.toggle("is-empty", empty);
+function setText(id, text) {
+  $(id).textContent = text ?? "—";
+  $(id).classList.toggle("is-empty", text == null);
+}
+
+function setValue(id, value) {
+  setText(id, Number.isFinite(value) ? oneDecimal(value) : null);
+}
+
+function setWeight(id, kg) {
+  setText(id, Number.isFinite(kg) ? weight(kg) : null);
+}
+
+function showHero(average) {
+  const hero = $("hero");
+  hero.classList.toggle("is-empty", !Number.isFinite(average));
+  if (!Number.isFinite(average)) {
+    hero.textContent = "—";
+    return;
+  }
+  hero.replaceChildren(...weightParts(average, unit()).flatMap(([number, name]) => {
+    const unitSpan = document.createElement("span");
+    unitSpan.className = "hero-unit";
+    unitSpan.textContent = name;
+    return [number, unitSpan];
+  }));
 }
 
 function showMetrics() {
   const latest = trend.readings.at(-1);
   const height = state.height;
-  setValue("avg-value", trend.current?.average);
-  document.querySelector(".hero").classList.toggle("is-empty", !trend.current);
+  showHero(trend.current?.average);
   const count = trend.current?.count ?? 0;
   $("avg-detail").textContent = count ? "From " + count + (count === 1 ? " weigh-in" : " weigh-ins") + " in the last 14 days" : "No weigh-ins in the last 14 days";
   showRate();
   showFigures();
-  setValue("weight-value", latest?.weight, " kg");
+  setWeight("weight-value", latest?.weight);
   $("weight-detail").textContent = latest ? shortDate(latest.date) : "";
-  $("height-value").textContent = height ? height + " cm" : "—";
-  $("height-value").classList.toggle("is-empty", !height);
+  setText("height-value", height ? heightParts(height, state.units.height).map(part => part.join(" ")).join(" ") : null);
   $("height-label").textContent = height ? "Edit" : "Add";
-  $("height-label").setAttribute("aria-label", height ? "Edit height, currently " + height + " centimeters" : "Add your height for BMI");
+  $("height-label").setAttribute("aria-label", height ? "Edit height, currently " + spokenHeight(height, state.units.height) : "Add your height for BMI");
   setValue("bmi-value", bmi(latest?.weight, height));
   showGoal();
 }
-
-const kg = value => oneDecimal(value) + " kg";
 
 // Up to two decimals, as the target rate is entered, and at least one.
 const rateFormat = new Intl.NumberFormat("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 2 });
 
 function showGoal() {
   const goal = state.goal;
-  setValue("goal-value", goal?.weight, " kg");
+  setWeight("goal-value", goal?.weight);
   $("goal-label").textContent = goal ? "Edit" : "Set";
-  $("goal-label").setAttribute("aria-label", goal ? "Edit your goal of " + oneDecimal(goal.weight) + " kilograms" : "Set a goal weight");
+  $("goal-label").setAttribute("aria-label", goal ? "Edit your goal of " + spokenWeight(goal.weight, unit()) : "Set a goal weight");
   showProgress();
   showForecast();
 }
@@ -133,13 +164,13 @@ function showProgress() {
   $("progress-track").hidden = current === null || direction === "maintain";
   note.classList.toggle("is-pending", current === null);
   if (current === null) {
-    note.textContent = "Log a weigh-in to see your progress toward " + kg(progress.goal) + ".";
+    note.textContent = "Log a weigh-in to see your progress toward " + weight(progress.goal) + ".";
     return;
   }
   if (direction === "maintain") {
     const off = progress.difference;
-    if (off === 0) writeLine(note, "At your goal", " of " + kg(progress.goal));
-    else writeLine(note, kg(Math.abs(off)) + (off > 0 ? " above" : " below"), " your goal of " + kg(progress.goal));
+    if (off === 0) writeLine(note, "At your goal", " of " + weight(progress.goal));
+    else writeLine(note, amount(off) + (off > 0 ? " above" : " below"), " your goal of " + weight(progress.goal));
     return;
   }
   const count = progress.milestones.length;
@@ -153,20 +184,20 @@ function showProgress() {
   const losing = direction === "lose";
   if (progress.reached) {
     const past = Math.abs(progress.difference);
-    writeLine(note, "Goal reached", past ? " · " + kg(past) + (losing ? " below " : " above ") + kg(progress.goal) : "");
+    writeLine(note, "Goal reached", past ? " · " + amount(past) + (losing ? " below " : " above ") + weight(progress.goal) : "");
     return;
   }
   const details = [];
-  if (progress.behindStart) details.push(kg(progress.behindStart) + (losing ? " above" : " below") + " where you started");
+  if (progress.behindStart) details.push(amount(progress.behindStart) + (losing ? " above" : " below") + " where you started");
   else {
-    if (progress.next.index < count) details.push(kg(progress.next.toGo) + " to milestone " + progress.next.index + " of " + count);
+    if (progress.next.index < count) details.push(amount(progress.next.toGo) + " to milestone " + progress.next.index + " of " + count);
     details.push(Math.floor(progress.overall * 100) + "% of the way");
   }
-  writeLine(note, kg(progress.toGo) + " to go", details.map(text => " · " + text).join(""));
+  writeLine(note, amount(progress.toGo) + " to go", details.map(text => " · " + text).join(""));
 }
 
 function signedRate(perWeek) {
-  return (perWeek < 0 ? "−" : perWeek > 0 ? "+" : "") + rateFormat.format(Math.abs(perWeek)) + " kg/wk";
+  return (perWeek < 0 ? "−" : perWeek > 0 ? "+" : "") + rateFormat.format(Math.abs(perUnit(perWeek))) + " " + rateUnit() + "/wk";
 }
 
 function setRate(id, text, empty = false) {
@@ -192,7 +223,7 @@ function showForecast() {
   if (!open) return;
   const goal = state.goal;
   const sign = progress.direction === "lose" ? -1 : 1;
-  const overall = overallRate(goal, trend.current.average, today);
+  const overall = overallRate(goal, trend.current.average, today, unit());
   const source = rateSource ?? (goal.rate ? "committed" : "current");
   for (const input of $("rate-choice").querySelectorAll("input")) input.checked = input.value === source;
 
@@ -226,17 +257,17 @@ function showForecast() {
     return;
   }
   const last = rows.at(-1);
-  const pace = "At " + rateFormat.format(Math.abs(perWeek)) + " kg a week, ";
-  if (!last.date) lead.textContent = pace + kg(progress.goal) + " is more than " + FORECAST_MAX_DAYS / 365 + " years away.";
-  else if (!last.days) lead.textContent = pace + "you’d reach " + kg(progress.goal) + " any day now.";
+  const pace = "At " + rateFormat.format(Math.abs(perUnit(perWeek))) + " " + rateUnit() + " a week, ";
+  if (!last.date) lead.textContent = pace + weight(progress.goal) + " is more than " + FORECAST_MAX_DAYS / 365 + " years away.";
+  else if (!last.days) lead.textContent = pace + "you’d reach " + weight(progress.goal) + " any day now.";
   else {
     const strong = document.createElement("strong");
     strong.textContent = shortDate(last.date);
-    lead.replaceChildren(pace + "you’d reach " + kg(progress.goal) + " around ", strong, ", in " + duration(last.days) + ".");
+    lead.replaceChildren(pace + "you’d reach " + weight(progress.goal) + " around ", strong, ", in " + duration(last.days) + ".");
   }
   const count = progress.milestones.length;
   $("forecast-rows").innerHTML = rows.map(row => "<tr><td>" + (row.index === count ? "Goal" : row.index + " of " + count) + "</td>" +
-    '<td class="num">' + oneDecimal(row.weight) + '<span class="table-unit">kg</span></td><td class="num">' + expected(row) + "</td></tr>").join("");
+    '<td class="num">' + weightCell(row.weight) + '</td><td class="num">' + expected(row) + "</td></tr>").join("");
 }
 
 function showRate() {
@@ -249,12 +280,12 @@ function showRate() {
   }
   const strong = document.createElement("strong");
   strong.textContent = !weeklyRate.clear ? "No clear change"
-    : (weeklyRate.perWeek < 0 ? "Down " : "Up ") + oneDecimal(Math.abs(weeklyRate.perWeek)) + " kg a week";
+    : (weeklyRate.perWeek < 0 ? "Down " : "Up ") + amount(weeklyRate.perWeek) + " a week";
   line.replaceChildren(strong, " over the last " + RATE_DAYS / 7 + " weeks");
 }
 
-function signedKg(value) {
-  return (value < 0 ? "−" : value > 0 ? "+" : "") + kg(Math.abs(value));
+function signedAmount(kg) {
+  return (kg < 0 ? "−" : kg > 0 ? "+" : "") + amount(kg);
 }
 
 function daysAgo(days) {
@@ -287,25 +318,24 @@ function figure(label, value, note = "") {
 function showFigures() {
   $("trend-figures").hidden = !trend.current;
   if (!trend.current) return;
-  const changes = averageChanges(trend);
+  const changes = averageChanges(trend, unit());
   $("change-figures").hidden = !changes.length;
   $("change-pending").hidden = changes.length > 0;
-  $("change-figures").replaceChildren(...changes.map(({ days, change }) => figure(days === null ? "All-time change" : days + "-day change", signedKg(change))));
+  $("change-figures").replaceChildren(...changes.map(({ days, change }) => figure(days === null ? "All-time change" : days + "-day change", signedAmount(change))));
   const recent = recentRange(state.entries, today);
   $("range-figures").hidden = !recent;
   $("range-figures").replaceChildren(...!recent ? [] : [
-    figure("Highest in " + WINDOW_DAYS + " days", kg(recent.high.weight), daysAgo(recent.high.daysAgo)),
-    figure("Lowest in " + WINDOW_DAYS + " days", kg(recent.low.weight), daysAgo(recent.low.daysAgo))
+    figure("Highest in " + WINDOW_DAYS + " days", weight(recent.high.weight), daysAgo(recent.high.daysAgo)),
+    figure("Lowest in " + WINDOW_DAYS + " days", weight(recent.low.weight), daysAgo(recent.low.daysAgo))
   ]);
 }
 
-function syncEntryForm(force = false) {
-  const input = $("entry-weight");
+function syncEntryForm() {
   const date = $("entry-date").value;
   const entry = state.entries.find(item => item.date === date);
-  if (force || autoWeight) {
-    input.value = entry ? entry.weight.toFixed(1) : "";
-    autoWeight = true;
+  if (autoFill) {
+    writeWeight("entry-weight", entry?.weight);
+    $("entry-note").value = entry?.note ?? "";
   }
   // aria-disabled keeps the button focusable when repeated presses reach today.
   $("next-day").setAttribute("aria-disabled", String(validDate(date) && date >= today));
@@ -319,9 +349,25 @@ function syncEntryForm(force = false) {
 function rateCell(rate) {
   if (!rate) return '<span class="dash" aria-hidden="true">—</span><span class="sr-only">Not enough weigh-ins</span>';
   if (!rate.clear) return '<span class="rate-cell unclear">No clear change</span>';
-  return '<span class="rate-cell">' + (rate.perWeek < 0 ? "−" : "+") + oneDecimal(Math.abs(rate.perWeek)) + '</span><span class="table-unit">kg<span class="long-label">/wk</span></span>';
+  const [number, name] = amount(rate.perWeek).split(" ");
+  return '<span class="rate-cell">' + (rate.perWeek < 0 ? "−" : "+") + number + '</span><span class="table-unit">' + name + '<span class="long-label">/wk</span></span>';
 }
 
+const escapeHtml = text => text.replace(/[&<>"']/g, char => "&#" + char.charCodeAt(0) + ";");
+
+// A weigh-in's row, and its note on a row of its own underneath.
+function entryRows(point) {
+  const date = prettyDate(point.date, "full");
+  const row = "<tr" + (point.note ? ' class="has-note"' : "") + '><td><time datetime="' + point.date + '"><span class="long-label">' + (point.date.slice(0, 4) === today.slice(0, 4) ? prettyDate(point.date, "weekday") : date) + '</span><span class="short-label">' + shortDate(point.date) + '</span></time></td>' +
+    '<td class="num entry-weight">' + weightCell(point.weight) + "</td>" +
+    '<td class="num">' + weightCell(point.average) + "</td>" +
+    '<td class="num">' + rateCell(calculateRate(state.entries, point.date, unit())) + "</td>" +
+    '<td class="row-action"><button type="button" class="icon-button" data-edit="' + point.date + '" aria-label="Edit weigh-in for ' + date + '">' + icon("pencil") + "</button></td></tr>";
+  return point.note ? row + '<tr class="note-row"><td colspan="5"><span class="sr-only">Note: </span>' + escapeHtml(point.note) + "</td></tr>" : row;
+}
+
+// The log page groups each page's rows by month. A month that carries over
+// from the previous page gets its heading again.
 function showTable(isLog) {
   const readings = trend.readings;
   const total = readings.length;
@@ -333,16 +379,13 @@ function showTable(isLog) {
   $("view-log").hidden = isLog || !total;
   $("log-count").hidden = !isLog;
   $("log-count").textContent = total + (total === 1 ? " entry" : " entries");
-  const canEdit = total > 0;
-  $("action-heading").hidden = !canEdit;
-  $("entry-rows").innerHTML = rows.map(point => {
-    const date = prettyDate(point.date, "full");
-    const action = canEdit ? '<td class="row-action"><button type="button" class="icon-button" data-edit="' + point.date + '" aria-label="Edit weigh-in for ' + date + '">' + icon("pencil") + "</button></td>" : "";
-    return '<tr><td><time datetime="' + point.date + '"><span class="long-label">' + (point.date.slice(0, 4) === today.slice(0, 4) ? prettyDate(point.date, "weekday") : date) + '</span><span class="short-label">' + shortDate(point.date) + '</span></time></td>' +
-      '<td class="num entry-weight">' + oneDecimal(point.weight) + '<span class="table-unit">kg</span></td>' +
-      '<td class="num">' + oneDecimal(point.average) + '<span class="table-unit">kg</span></td>' +
-      '<td class="num">' + rateCell(calculateRate(state.entries, point.date)) + "</td>" + action + "</tr>";
-  }).join("");
+  $("action-heading").hidden = !total;
+  const table = $("entry-table");
+  for (const body of [...table.tBodies]) body.remove();
+  const groups = isLog ? groupByMonth(rows) : [{ month: null, rows }];
+  table.insertAdjacentHTML("beforeend", groups.map(group => "<tbody>" +
+    (group.month ? '<tr class="month-row"><th scope="rowgroup" colspan="5">' + prettyDate(group.month + "-01", "month") + "</th></tr>" : "") +
+    group.rows.map(entryRows).join("") + "</tbody>").join(""));
   $("table-empty").hidden = total > 0;
   $("pagination").hidden = !isLog || pages <= 1;
   $("page-count").textContent = "Page " + (page + 1) + " of " + pages;
@@ -373,14 +416,15 @@ function showPage() {
 
 function drawChart() {
   $("legend-goal").hidden = !state.goal;
-  chart.update(trend, range, today, state.goal?.weight ?? null);
+  chart.update(trend, range, today, state.goal?.weight ?? null, unit());
 }
 
 function render() {
   trend = calculateTrend(state.entries, today);
-  weeklyRate = calculateRate(state.entries, today);
-  progress = goalProgress(state.goal, trend.current?.average);
+  weeklyRate = calculateRate(state.entries, today, unit());
+  progress = goalProgress(state.goal, trend.current?.average, unit());
   $("entry-date").max = today;
+  applyUnits();
   showMetrics();
   syncEntryForm();
   showPage();
@@ -450,7 +494,7 @@ async function openLog(user) {
   today = localToday();
   page = 0;
   editingDate = null;
-  autoWeight = true;
+  autoFill = true;
   rateSource = null;
   $("entry-date").value = today;
   $("auth").hidden = true;
@@ -534,8 +578,110 @@ function focusEntry() {
   });
 }
 
+// Weight inputs: a main input in kg, pounds or stones, and a pounds input
+// (id + "-lb") that shows only for stones. Heights work the same way, with an
+// inches input for feet. The inputs use `fieldUnits`, which applyUnits keeps
+// in step with the saved units, converting anything already typed.
+const WEIGHT_FIELDS = ["entry-weight", "edit-weight", "goal-weight", "goal-start-weight"];
+
+// The weight typed into a field, in kg, or NaN. A field that still shows
+// `stored` as it was filled in returns it unchanged, so saving again never
+// rounds away hundredths that another unit needed.
+function readWeight(id, stored) {
+  const weightUnit = fieldUnits.weight;
+  const main = $(id).valueAsNumber;
+  const pounds = $(id + "-lb").valueAsNumber;
+  const kg = weightUnit === "kg" ? main
+    : weightUnit === "lb" ? main * KG_PER_LB
+    : Number.isNaN(main) && Number.isNaN(pounds) ? NaN : ((main || 0) * 14 + (pounds || 0)) * KG_PER_LB;
+  return Number.isFinite(stored) && Number.isFinite(kg) && toTenths(kg, weightUnit) === toTenths(stored, weightUnit) ? stored : kg;
+}
+
+function writeWeight(id, kg) {
+  const parts = Number.isFinite(kg) ? weightParts(kg, fieldUnits.weight).map(([number]) => number.replaceAll(",", "")) : [];
+  $(id).value = parts[0] ?? "";
+  $(id + "-lb").value = parts[1] ?? "";
+}
+
+function readHeight(stored) {
+  const heightUnit = fieldUnits.height;
+  const main = $("profile-height").valueAsNumber;
+  const inches = $("profile-height-in").valueAsNumber;
+  const cm = heightUnit === "cm" ? main
+    : Number.isNaN(main) && Number.isNaN(inches) ? NaN : ((main || 0) * 12 + (inches || 0)) * CM_PER_IN;
+  const shown = value => heightParts(value, heightUnit).flat().join(" ");
+  return Number.isFinite(stored) && Number.isFinite(cm) && cm > 0 && shown(cm) === shown(stored) ? stored : cm;
+}
+
+function writeHeight(cm) {
+  const parts = Number.isFinite(cm) ? heightParts(cm, fieldUnits.height).map(([number]) => number) : [];
+  $("profile-height").value = parts[0] ?? "";
+  $("profile-height-in").value = parts[1] ?? "";
+}
+
+// The target rate is typed to 0.01 kg or lb a week.
+function readRate(stored) {
+  const weightUnit = fieldUnits.weight;
+  const value = $("goal-rate").valueAsNumber;
+  if (!Number.isFinite(value)) return null;
+  const toUnit = kg => weightUnit === "kg" ? kg : kg / KG_PER_LB;
+  if (stored && Math.round(toUnit(stored) * 100) === Math.round(value * 100)) return stored;
+  return weightUnit === "kg" ? value : value * KG_PER_LB;
+}
+
+function writeRate(kg) {
+  $("goal-rate").value = kg ? String(Math.round((fieldUnits.weight === "kg" ? kg : kg / KG_PER_LB) * 100) / 100) : "";
+}
+
+function setInput(id, attributes) {
+  for (const [name, value] of Object.entries(attributes)) $(id).setAttribute(name, value);
+}
+
+// Sets the inputs up for the saved units. Anything typed is converted, so it
+// still means the same weight or height.
+function applyUnits() {
+  const { weight: weightUnit, height: heightUnit } = state.units;
+  for (const button of document.querySelectorAll("#weight-units [data-unit]")) button.setAttribute("aria-pressed", String(button.dataset.unit === weightUnit));
+  for (const button of document.querySelectorAll("#height-units [data-unit]")) button.setAttribute("aria-pressed", String(button.dataset.unit === heightUnit));
+  document.body.dataset.weightUnit = weightUnit;
+  const previous = fieldUnits;
+  if (previous?.weight !== weightUnit) {
+    const weights = previous ? WEIGHT_FIELDS.map(id => readWeight(id)) : [];
+    const rate = previous ? readRate() : null;
+    fieldUnits = { ...fieldUnits, weight: weightUnit };
+    const stones = weightUnit === "st";
+    for (const id of WEIGHT_FIELDS) {
+      setInput(id, stones ? { min: 0, max: 314, step: 1, placeholder: "0", inputmode: "numeric" }
+        : { min: 0.1, max: weightUnit === "kg" ? 2000 : 4409.2, step: 0.1, placeholder: "0.0", inputmode: "decimal" });
+      $(id + "-unit").textContent = weightUnit;
+      $(id + "-lb").parentElement.hidden = !stones;
+    }
+    WEIGHT_FIELDS.forEach((id, index) => writeWeight(id, weights[index]));
+    $("goal-rate-unit").textContent = rateUnit() + "/wk";
+    setInput("goal-rate", weightUnit === "kg" ? { max: 5, placeholder: "e.g. 0.5" } : { max: 11, placeholder: "e.g. 1" });
+    writeRate(rate);
+  }
+  if (previous?.height !== heightUnit) {
+    const height = previous ? readHeight() : NaN;
+    fieldUnits = { ...fieldUnits, height: heightUnit };
+    const feet = heightUnit === "ft";
+    setInput("profile-height", feet ? { min: 0, max: 13, step: 1, placeholder: "e.g. 5", inputmode: "numeric" }
+      : { min: 0.1, max: 400, step: 0.1, placeholder: "e.g. 178", inputmode: "decimal" });
+    $("height-unit").textContent = heightUnit;
+    $("profile-height-in").parentElement.hidden = !feet;
+    writeHeight(height);
+  }
+}
+
+const unitNames = { kg: "kilograms", lb: "pounds", st: "stones and pounds", cm: "centimeters", ft: "feet and inches" };
+
+async function changeUnits(units, message) {
+  if (units.weight === state.units.weight && units.height === state.units.height) return;
+  if (await changeState(current => ({ ...current, started: true, units }), { op: "set-units", units })) notify(message);
+}
+
 function openProfile() {
-  $("profile-height").value = state.height ?? "";
+  writeHeight(state.height);
   $("profile-description").textContent = trend.readings.length
     ? "Your height and latest weight are used to calculate BMI."
     : "Your height and latest weight are used to calculate BMI. Your BMI will appear after your first weigh-in.";
@@ -547,13 +693,13 @@ function openProfile() {
 function openGoal(focusId = "goal-weight") {
   const goal = state.goal;
   $("goal-title").textContent = goal ? "Edit your goal" : "Set a goal";
-  $("goal-weight").value = goal ? goal.weight.toFixed(1) : "";
+  writeWeight("goal-weight", goal?.weight);
   $("goal-start-date").max = today;
   $("goal-start-date").value = goal?.startDate ?? today;
-  $("goal-rate").value = goal?.rate ?? "";
+  writeRate(goal?.rate);
   $("goal-milestones").value = goal?.milestones ?? GOAL_MILESTONES;
   startWeightFrom = goal ? "saved" : "average";
-  if (goal) $("goal-start-weight").value = goal.startWeight.toFixed(1);
+  if (goal) writeWeight("goal-start-weight", goal.startWeight);
   else fillStartWeight();
   $("clear-goal").hidden = !goal;
   showStartHint();
@@ -566,7 +712,7 @@ function openGoal(focusId = "goal-weight") {
 function fillStartWeight() {
   const date = $("goal-start-date").value;
   const average = validDate(date) ? calculateTrend(state.entries, date).current?.average : undefined;
-  $("goal-start-weight").value = Number.isFinite(average) ? average.toFixed(1) : "";
+  writeWeight("goal-start-weight", average);
 }
 
 function showStartHint() {
@@ -578,12 +724,12 @@ function showStartHint() {
 }
 
 function readGoal() {
-  const rate = $("goal-rate").valueAsNumber;
+  const saved = state.goal;
   return normalizeGoal({
-    weight: $("goal-weight").valueAsNumber,
+    weight: readWeight("goal-weight", saved?.weight),
     startDate: $("goal-start-date").value,
-    startWeight: $("goal-start-weight").valueAsNumber,
-    rate: Number.isFinite(rate) ? rate : null,
+    startWeight: readWeight("goal-start-weight", saved?.startWeight),
+    rate: readRate(saved?.rate),
     milestones: $("goal-milestones").valueAsNumber
   });
 }
@@ -593,29 +739,30 @@ function previewGoal() {
   const goal = readGoal();
   preview.hidden = !goal;
   if (!goal) return;
-  const plan = goalProgress(goal, goal.startWeight);
+  const plan = goalProgress(goal, goal.startWeight, unit());
   if (plan.direction === "maintain") {
-    preview.textContent = "Stay at " + kg(plan.goal) + ".";
+    preview.textContent = "Stay at " + weight(plan.goal) + ".";
     return;
   }
-  const tenths = Math.round(Math.abs(plan.goal - plan.start) * 10);
+  // The distance in tenths of the unit shown.
+  const tenths = Math.abs(toTenths(plan.goal, unit()) - toTenths(plan.start, unit()));
   const count = plan.milestones.length;
-  let text = (plan.direction === "lose" ? "Lose " : "Gain ") + kg(tenths / 10);
-  if (count > 1) text += " in " + count + " milestones of " + (tenths % count ? "about " : "") + kg(tenths / count / 10);
+  let text = (plan.direction === "lose" ? "Lose " : "Gain ") + amount(fromTenths(tenths, unit()));
+  if (count > 1) text += " in " + count + " milestones of " + (tenths % count ? "about " : "") + amount(fromTenths(tenths / count, unit()));
   text += ".";
-  if (goal.rate) text += " At " + rateFormat.format(goal.rate) + " kg a week, that’s " + duration(Math.round(tenths / 10 / goal.rate * 7)) + ".";
+  if (goal.rate) text += " At " + rateFormat.format(perUnit(goal.rate)) + " " + rateUnit() + " a week, that’s " + duration(Math.round(fromTenths(tenths, unit()) / goal.rate * 7)) + ".";
   preview.textContent = text;
 }
 
 function previewBmi() {
   const latest = trend.readings.at(-1);
-  $("profile-bmi").textContent = oneDecimal(bmi(latest?.weight, $("profile-height").valueAsNumber));
+  $("profile-bmi").textContent = oneDecimal(bmi(latest?.weight, readHeight()));
 }
 
 function syncDay() {
   const now = localToday();
   if (now === today) return;
-  if ($("entry-date").value === today && autoWeight) $("entry-date").value = now;
+  if ($("entry-date").value === today && autoFill) $("entry-date").value = now;
   today = now;
   if (state) render();
 }
@@ -627,7 +774,7 @@ function scheduleMidnight() {
 }
 
 function dateChanged() {
-  if (state.entries.some(item => item.date === $("entry-date").value)) autoWeight = true;
+  if (state.entries.some(item => item.date === $("entry-date").value)) autoFill = true;
   syncEntryForm();
 }
 
@@ -647,17 +794,20 @@ $("prev-day").addEventListener("click", () => stepDate(-1));
 $("next-day").addEventListener("click", () => {
   if ($("next-day").getAttribute("aria-disabled") !== "true") stepDate(1);
 });
-$("entry-weight").addEventListener("input", () => { autoWeight = false; });
+for (const id of ["entry-weight", "entry-weight-lb", "entry-note"]) $(id).addEventListener("input", () => { autoFill = false; });
 $("entry-form").addEventListener("submit", async event => {
   event.preventDefault();
   syncDay();
   const date = $("entry-date").value;
-  const weight = $("entry-weight").valueAsNumber;
+  const existing = state.entries.find(entry => entry.date === date);
+  const weight = roundWeight(readWeight("entry-weight", existing?.weight));
+  // The form shows the date's note, so an empty field removes it.
+  const note = cleanNote($("entry-note").value);
   if (!validDate(date) || date > today || !positive(weight)) return;
-  const updating = state.entries.some(entry => entry.date === date);
-  autoWeight = true;
+  const updating = Boolean(existing);
+  autoFill = true;
   const before = progress;
-  if (await changeState(current => saveWeight(current, date, weight), { op: "save-weight", date, weight })) {
+  if (await changeState(current => saveWeight(current, date, weight, note), { op: "save-weight", date, weight, note })) {
     notify((updating ? "Weigh-in updated" : "Weigh-in saved") + " for " + prettyDate(date) + "." + celebrate(before, progress));
   }
 });
@@ -699,7 +849,7 @@ $("goal-start-date").addEventListener("change", () => {
   showStartHint();
   previewGoal();
 });
-$("goal-start-weight").addEventListener("input", () => {
+for (const id of ["goal-start-weight", "goal-start-weight-lb"]) $(id).addEventListener("input", () => {
   startWeightFrom = "typed";
   showStartHint();
 });
@@ -716,23 +866,32 @@ $("clear-goal").addEventListener("click", async () => {
   $("goal-dialog").close();
   if (await changeState(current => ({ ...current, goal: null }), { op: "clear-goal" })) notify("Goal removed.");
 });
-$("profile-height").addEventListener("input", previewBmi);
+for (const id of ["profile-height", "profile-height-in"]) $(id).addEventListener("input", previewBmi);
+$("weight-units").addEventListener("click", event => {
+  const choice = event.target.closest("[data-unit]")?.dataset.unit;
+  if (choice) changeUnits({ ...state.units, weight: choice }, "Weights now show in " + unitNames[choice] + ".");
+});
+$("height-units").addEventListener("click", event => {
+  const choice = event.target.closest("[data-unit]")?.dataset.unit;
+  if (choice) changeUnits({ ...state.units, height: choice }, "Your height now shows in " + unitNames[choice] + ".");
+});
 $("profile-form").addEventListener("submit", async event => {
   event.preventDefault();
-  const height = $("profile-height").valueAsNumber;
+  const height = roundHeight(readHeight(state.height));
   if (!positive(height)) return;
   $("profile-dialog").close();
   if (await changeState(current => ({ ...current, started: true, height }), { op: "set-height", height })) notify("Height saved.");
 });
 
-$("entry-rows").addEventListener("click", event => {
+$("entry-table").addEventListener("click", event => {
   const button = event.target.closest("button[data-edit]");
   if (!button) return;
   const entry = state.entries.find(item => item.date === button.dataset.edit);
   if (!entry) return;
   editingDate = entry.date;
   $("edit-date-label").textContent = prettyDate(entry.date, "long");
-  $("edit-weight").value = entry.weight.toFixed(1);
+  writeWeight("edit-weight", entry.weight);
+  $("edit-note").value = entry.note ?? "";
   $("edit-form").hidden = false;
   $("delete-confirm").hidden = true;
   $("edit-dialog").showModal();
@@ -741,12 +900,13 @@ $("entry-rows").addEventListener("click", event => {
 $("edit-form").addEventListener("submit", async event => {
   event.preventDefault();
   const date = editingDate;
-  const weight = $("edit-weight").valueAsNumber;
+  const weight = roundWeight(readWeight("edit-weight", state.entries.find(entry => entry.date === date)?.weight));
+  const note = cleanNote($("edit-note").value);
   if (!date || !positive(weight)) return;
   $("edit-dialog").close();
   const result = await changeState(
-    current => current.entries.some(entry => entry.date === date) ? saveWeight(current, date, weight) : current,
-    { op: "update-weight", date, weight });
+    current => current.entries.some(entry => entry.date === date) ? saveWeight(current, date, weight, note) : current,
+    { op: "update-weight", date, weight, note });
   if (result) notify(result.found ? "Weigh-in updated." : "This weigh-in has already been removed.");
 });
 $("delete-entry").addEventListener("click", () => {
