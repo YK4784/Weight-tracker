@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { CM_PER_IN, FORECAST_MAX_DAYS, KG_PER_LB, NOTE_MAX_LENGTH, averageChanges, formatAmount, formatWeight, fromTenths, heightParts, normalizeUnits, toTenths, weightParts, bmi, calculateRate, calculateTrend, cleanNote, dateOf, dayOf, forecastGoal, goalProgress, groupByMonth, monthlyReports, normalizeGoal, normalizeReminder, validTimeZone, normalizeState, noteLength, overallRate, recentRange, saveWeight, shiftDate, validDate } from "../dist/model.mjs";
+import { CM_PER_IN, FORECAST_MAX_DAYS, KG_PER_LB, NOTE_MAX_LENGTH, averageChanges, bodyFat, bodyFatChange, bodyFatHistory, formatWaist, roundWaist, saveWaist, spokenWaist, validWaist, waistParts, formatAmount, formatWeight, fromTenths, heightParts, normalizeUnits, toTenths, weightParts, bmi, calculateRate, calculateTrend, cleanNote, dateOf, dayOf, forecastGoal, goalProgress, groupByMonth, monthlyReports, normalizeGoal, normalizeReminder, validTimeZone, normalizeState, noteLength, overallRate, recentRange, saveWeight, shiftDate, validDate } from "../dist/model.mjs";
 
 const first = dayOf("2026-03-01");
 const entry = (index, weight) => ({ date: dateOf(first + index), weight });
@@ -532,4 +532,78 @@ test("a reminder needs an hour, a real time zone and a device, and survives norm
   assert.equal(validTimeZone("America/Argentina/Buenos_Aires"), true);
   assert.equal(validTimeZone("Etc/GMT-14"), true);
   assert.equal(validTimeZone("x".repeat(65)), false);
+});
+
+// The Army's worked examples (ALARACT 046/2023, table B-5), in pounds and inches.
+const pounds = lb => lb * KG_PER_LB;
+const inches = value => value * CM_PER_IN;
+
+test("body fat follows the Army's one-site formula for men and for women", () => {
+  assert.ok(Math.abs(bodyFat(pounds(210), inches(35), "male") - 17.48) < 1e-9, "man, 210 lb and a 35 in waist");
+  assert.ok(Math.abs(bodyFat(pounds(165), inches(30), "female") - 26.475) < 1e-9, "woman, 165 lb and a 30 in waist");
+  assert.ok(bodyFat(pounds(200), inches(36), "male") < bodyFat(pounds(190), inches(36), "male"), "more weight on the same waist is less fat");
+});
+
+test("body fat needs a weight, a waist and a sex, and stays empty outside 0 to 100%", () => {
+  for (const [weight, waist, sex] of [[null, 90, "male"], [80, null, "male"], [80, 90, null], [80, 90, "other"], [0, 90, "female"]]) {
+    assert.equal(bodyFat(weight, waist, sex), null, JSON.stringify([weight, waist, sex]));
+  }
+  assert.equal(bodyFat(80, 34, "male"), null, "a 34 in waist typed as centimeters");
+  assert.equal(bodyFat(80, inches(90), "male"), null, "a 90 cm waist typed as inches");
+});
+
+test("waists are kept to 0.01 cm, one a day, and read back in inches as entered", () => {
+  const state = normalizeState({ sex: "female", waists: [
+    { date: "2026-11-02", waist: 80.004 }, { date: "2026-11-01", waist: 82 }, { date: "2026-11-02", waist: 79.996 },
+    { date: "2026-11-03", waist: 9.99 }, { date: "2026-11-04", waist: 400.1 }, { date: "bad", waist: 80 }, { date: "2026-11-05", waist: "80" }
+  ] });
+  assert.deepEqual(state.waists, [{ date: "2026-11-01", waist: 82 }, { date: "2026-11-02", waist: 80 }]);
+  assert.equal(state.sex, "female");
+  assert.equal(state.started, true, "a waist starts a log");
+  assert.deepEqual(normalizeState(state), state);
+  assert.equal(normalizeState({ sex: "x" }).sex, null);
+  assert.equal(normalizeState({ sex: "male" }).started, false, "a sex alone doesn't start a log");
+  assert.deepEqual(normalizeState(null).waists, []);
+  for (const value of [34.1, 32.5, 40.7]) assert.equal(formatWaist(roundWaist(inches(value)), "ft"), value.toFixed(1) + " in", value + " in");
+  assert.deepEqual(waistParts(86.55), [["86.6", "cm"]]);
+  assert.equal(formatWaist(86, "cm"), "86.0 cm");
+  assert.equal(formatWaist(null), "—");
+  assert.equal(spokenWaist(inches(34), "ft"), "34.0 inches");
+  assert.equal(validWaist(10) && validWaist(400), true);
+  assert.equal(validWaist(9.99) || validWaist(400.01) || validWaist(NaN), false);
+});
+
+test("saving a waist replaces that date's measurement and sets the formula", () => {
+  let state = saveWaist(normalizeState(null), "2026-11-01", 90, "male");
+  state = saveWaist(state, "2026-11-08", 89, "male");
+  state = saveWaist(state, "2026-11-01", 91.5, "female");
+  assert.deepEqual(state.waists, [{ date: "2026-11-01", waist: 91.5 }, { date: "2026-11-08", waist: 89 }]);
+  assert.equal(state.sex, "female");
+  assert.throws(() => saveWaist(state, "2026-11-02", 90, null));
+  assert.throws(() => saveWaist(state, "2026-11-02", 5, "male"));
+});
+
+test("each waist's estimate uses the 14-day average on its date", () => {
+  const entries = [entry(0, 90), entry(1, 92), entry(10, 88), entry(30, 85)];
+  const waists = [{ date: dateOf(first + 1), waist: 100 }, { date: dateOf(first + 10), waist: 98 }, { date: dateOf(first + 27), waist: 97 }, { date: dateOf(first + 40), waist: 96 }];
+  const history = bodyFatHistory(entries, waists, "male", dateOf(first + 35));
+  assert.equal(history.length, 3, "a measurement after today is left out");
+  assert.equal(history[0].weight, 91, "the average of days 0 and 1");
+  assert.equal(history[0].bodyFat, bodyFat(91, 100, "male"));
+  assert.equal(history[1].weight, 90, "days 0, 1 and 10");
+  assert.equal(history[2].weight, null, "no weigh-ins in the 14 days up to day 27");
+  assert.equal(history[2].bodyFat, null);
+  assert.equal(bodyFatHistory(entries, waists, null, dateOf(first + 35))[0].bodyFat, null, "no estimate without a sex");
+  assert.deepEqual(bodyFatHistory(entries, [], "male", dateOf(first + 35)), []);
+  assert.equal(bodyFatHistory([], waists, "male", dateOf(first + 35))[0].weight, null, "no weigh-ins at all");
+});
+
+test("the body fat change compares the first and latest estimates as shown", () => {
+  const point = (day, value) => ({ date: dateOf(first + day), day: first + day, waist: 90, weight: 80, bodyFat: value });
+  assert.equal(bodyFatChange([point(0, 24.26), { ...point(5, null) }]), null, "one estimate");
+  const change = bodyFatChange([point(0, 24.26), point(5, null), point(9, 23.04), point(20, 22.15)]);
+  assert.equal(change.from.day, first);
+  assert.equal(change.to.day, first + 20);
+  assert.equal(change.change, -2.1, "22.2 − 24.3, not 22.15 − 24.26");
+  assert.equal(bodyFatChange([point(0, 22), point(1, 22.04)]).change, 0);
 });

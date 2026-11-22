@@ -1,12 +1,14 @@
-import { CM_PER_IN, FORECAST_MAX_DAYS, GOAL_MILESTONES, KG_PER_LB, OVERALL_MIN_DAYS, RATE_DAYS, RATE_MIN_ENTRIES, RATE_MIN_SPAN, WINDOW_DAYS, averageChanges, bmi, calculateRate, calculateTrend, cleanNote, dateOf, dayOf, forecastGoal, formatAmount, formatWeight, fromTenths, goalProgress, groupByMonth, heightParts, localToday, monthlyReports, normalizeGoal, normalizeState, oneDecimal, overallRate, positive, prettyDate, recentRange, roundHeight, roundWeight, saveWeight, shiftDate, spokenHeight, spokenWeight, toTenths, validDate, weightParts } from "./model.mjs";
-import { TrendChart } from "./chart.mjs";
+import { CM_PER_IN, FORECAST_MAX_DAYS, GOAL_MILESTONES, KG_PER_LB, OVERALL_MIN_DAYS, RATE_DAYS, RATE_MIN_ENTRIES, RATE_MIN_SPAN, SEXES, WINDOW_DAYS, averageChanges, bmi, bodyFat, bodyFatChange, bodyFatHistory, calculateRate, calculateTrend, cleanNote, dateOf, dayOf, forecastGoal, formatAmount, formatWaist, formatWeight, fromTenths, goalProgress, groupByMonth, heightParts, localToday, monthlyReports, normalizeGoal, normalizeState, oneDecimal, overallRate, positive, prettyDate, recentRange, roundHeight, roundWaist, roundWeight, saveWaist, saveWeight, shiftDate, spokenHeight, spokenWeight, toTenths, validDate, validWaist, waistParts, waistTenths, weightParts } from "./model.mjs";
+import { BodyFatChart, TrendChart } from "./chart.mjs";
 import { claimLegacyLog, storageKeyFor } from "./account.mjs";
 import { AuthSetupError, startClerk } from "./auth.mjs";
 import { PUSH_PUBLIC_KEY } from "./config.mjs";
 
 const $ = id => document.getElementById(id);
 const PAGE_SIZE = 15;
+const WAIST_ROWS = 5; // Waist measurements listed before "Show all".
 const chart = new TrendChart();
+const fatChart = new BodyFatChart();
 let today = localToday();
 let clerk;
 let mounted = null; // Which Clerk component is on the page: "sign-in" or "user".
@@ -19,6 +21,10 @@ let unsaved = 0; // Changes sent and not yet answered.
 let trend;
 let weeklyRate; // calculateRate for today, or null.
 let progress; // goalProgress for today's average, or null without a goal.
+let fat = []; // bodyFatHistory through today: each waist measurement and its estimate.
+let allWaists = false; // Whether the body fat table lists every measurement.
+let waistAutoFill = true; // The waist dialog shows the measurement on its date until the user types in it.
+let deletingWaist = null; // The date of the waist measurement waiting for the user to confirm its deletion.
 let rateSource = null; // The rate the forecast uses. Null picks one from the goal.
 let startWeightFrom = "average"; // Where the goal dialog's start weight came from: "average", "saved" or "typed".
 let range = "30";
@@ -137,8 +143,35 @@ function showMetrics() {
   $("height-label").textContent = height ? "Edit" : "Add";
   $("height-label").setAttribute("aria-label", height ? "Edit height, currently " + spokenHeight(height, state.units.height) : "Add your height for BMI");
   setValue("bmi-value", bmi(latest?.weight, height));
+  showFatFact();
   showGoal();
   showReminder();
+}
+
+// Body fat as shown, to 0.1 of a percent: "24.3%".
+const percent = value => oneDecimal(value) + "%";
+
+function signedPercent(change) {
+  return (change < 0 ? "−" : change > 0 ? "+" : "") + percent(Math.abs(change));
+}
+
+// Waists follow the height unit: centimeters, or inches for feet and inches.
+const waist = cm => formatWaist(cm, state.units.height);
+
+// A change in waist between two measurements as shown: "−3.0 cm".
+function waistChange(from, to) {
+  const tenths = waistTenths(to, state.units.height) - waistTenths(from, state.units.height);
+  return (tenths < 0 ? "−" : tenths > 0 ? "+" : "") + oneDecimal(Math.abs(tenths) / 10) + " " + waistParts(to, state.units.height)[0][1];
+}
+
+// The latest waist measurement's estimate, among the facts. The section at the
+// bottom of the overview has the rest.
+function showFatFact() {
+  const latest = fat.at(-1);
+  setText("fat-value", latest?.bodyFat == null ? null : percent(latest.bodyFat));
+  $("fat-detail").textContent = latest ? shortDate(latest.date) : "";
+  $("fat-label").textContent = latest ? "Update" : "Add";
+  $("fat-label").setAttribute("aria-label", latest ? "Log a new waist measurement for body fat" : "Add a waist measurement to estimate body fat");
 }
 
 // Up to two decimals, as the target rate is entered, and at least one.
@@ -365,10 +398,21 @@ function rateCell(rate) {
 
 const escapeHtml = text => text.replace(/[&<>"']/g, char => "&#" + char.charCodeAt(0) + ";");
 
+// A table's date: the weekday this year, and shorter on phones.
+function dateCell(date) {
+  return '<td><time datetime="' + date + '"><span class="long-label">' + (date.slice(0, 4) === today.slice(0, 4) ? prettyDate(date, "weekday") : prettyDate(date, "full")) +
+    '</span><span class="short-label">' + shortDate(date) + "</span></time></td>";
+}
+
+// A quiet dash in a table, with what it means for screen readers.
+function dashCell(meaning) {
+  return '<span class="dash" aria-hidden="true">—</span><span class="sr-only">' + meaning + "</span>";
+}
+
 // A weigh-in's row, and its note on a row of its own underneath.
 function entryRows(point) {
   const date = prettyDate(point.date, "full");
-  const row = "<tr" + (point.note ? ' class="has-note"' : "") + '><td><time datetime="' + point.date + '"><span class="long-label">' + (point.date.slice(0, 4) === today.slice(0, 4) ? prettyDate(point.date, "weekday") : date) + '</span><span class="short-label">' + shortDate(point.date) + '</span></time></td>' +
+  const row = "<tr" + (point.note ? ' class="has-note"' : "") + ">" + dateCell(point.date) +
     '<td class="num entry-weight">' + weightCell(point.weight) + "</td>" +
     '<td class="num">' + weightCell(point.average) + "</td>" +
     '<td class="num">' + rateCell(calculateRate(state.entries, point.date, unit())) + "</td>" +
@@ -399,6 +443,47 @@ function showTable(isLog) {
   $("page-count").textContent = "Page " + (page + 1) + " of " + pages;
   $("prev-page").disabled = page === 0;
   $("next-page").disabled = page >= pages - 1;
+}
+
+// The body fat section at the bottom of the overview: the latest estimate and
+// the change since the first, a chart of every estimate, and the measurements.
+function showBodyFat() {
+  const estimates = fat.filter(point => point.bodyFat !== null);
+  const latest = estimates.at(-1);
+  const lead = $("fat-lead");
+  lead.hidden = estimates.length > 0;
+  lead.textContent = !fat.length ? "Measure your waist now and then and log it here. Baseline estimates your body fat from it and your 14-day average."
+    : !state.sex ? "Choose a formula in Log waist to see your body fat."
+    : "Your body fat shows once a waist measurement has a weigh-in in the 14 days up to it.";
+  $("fat-figures").hidden = !latest;
+  $("fat-chart-wrap").hidden = !latest;
+  if (latest) {
+    const lastWaist = fat.at(-1);
+    const change = bodyFatChange(fat);
+    $("fat-figures").replaceChildren(
+      figure("Body fat", percent(latest.bodyFat), shortDate(latest.date)),
+      figure("Waist", waist(lastWaist.waist), lastWaist === latest ? "" : shortDate(lastWaist.date)),
+      ...change ? [figure("Change since " + shortDate(change.from.date), signedPercent(change.change), waistChange(change.from.waist, change.to.waist) + " waist")] : []
+    );
+    fatChart.update(estimates, today, state.units);
+  }
+  showWaistRows();
+}
+
+// The measurements, newest first: the latest few, or all of them.
+function showWaistRows() {
+  const rows = [...fat].reverse();
+  const shown = allWaists ? rows : rows.slice(0, WAIST_ROWS);
+  $("waist-table-wrap").hidden = !rows.length;
+  $("waist-rows").innerHTML = shown.map(point => "<tr>" + dateCell(point.date) +
+    '<td class="num">' + waistParts(point.waist, state.units.height).map(([number, name]) => number + '<span class="table-unit">' + name + "</span>").join("") + "</td>" +
+    '<td class="num">' + (point.weight === null ? dashCell("No weigh-ins in the 14 days up to it") : weightCell(point.weight)) + "</td>" +
+    '<td class="num fat-cell">' + (point.bodyFat === null ? dashCell("No estimate") : percent(point.bodyFat)) + "</td>" +
+    '<td class="row-action"><button type="button" class="icon-button" data-waist-edit="' + point.date + '" aria-label="Edit waist measurement for ' + prettyDate(point.date, "full") + '">' + icon("pencil") + "</button></td></tr>").join("");
+  const more = $("waist-more");
+  more.hidden = rows.length <= WAIST_ROWS;
+  more.textContent = allWaists ? "Show fewer" : "Show all " + rows.length;
+  more.setAttribute("aria-expanded", String(allWaists));
 }
 
 // A clear weekly trend as a signed figure: "−0.4 kg/wk".
@@ -527,7 +612,12 @@ function showPage() {
       " · " + total + (total === 1 ? " entry" : " entries");
   if (view === "months") showMonths();
   else showTable(isLog);
-  if (!isLog) drawChart();
+  // Body fat sits under the recent entries, on the overview only.
+  $("body-fat").hidden = isLog;
+  if (!isLog) {
+    drawChart();
+    showBodyFat();
+  }
 }
 
 function drawChart() {
@@ -539,6 +629,7 @@ function render() {
   trend = calculateTrend(state.entries, today);
   weeklyRate = calculateRate(state.entries, today, unit());
   progress = goalProgress(state.goal, trend.current?.average, unit());
+  fat = bodyFatHistory(state.entries, state.waists, state.sex, today);
   $("entry-date").max = today;
   applyUnits();
   showMetrics();
@@ -612,6 +703,7 @@ async function openLog(user) {
   editingDate = null;
   autoFill = true;
   rateSource = null;
+  allWaists = false;
   $("entry-date").value = today;
   $("auth").hidden = true;
   $("main").hidden = false;
@@ -735,6 +827,17 @@ function writeHeight(cm) {
   $("profile-height-in").value = parts[1] ?? "";
 }
 
+// A waist is typed in centimeters or, with feet and inches for height, inches.
+function readWaist(stored) {
+  const value = $("waist-size").valueAsNumber;
+  const cm = fieldUnits.height === "cm" ? value : value * CM_PER_IN;
+  return Number.isFinite(stored) && Number.isFinite(cm) && waistTenths(cm, fieldUnits.height) === waistTenths(stored, fieldUnits.height) ? stored : cm;
+}
+
+function writeWaist(cm) {
+  $("waist-size").value = Number.isFinite(cm) ? waistParts(cm, fieldUnits.height)[0][0].replaceAll(",", "") : "";
+}
+
 // The target rate is typed to 0.01 kg or lb a week.
 function readRate(stored) {
   const weightUnit = fieldUnits.weight;
@@ -758,7 +861,7 @@ function setInput(id, attributes) {
 function applyUnits() {
   const { weight: weightUnit, height: heightUnit } = state.units;
   for (const button of document.querySelectorAll("#weight-units [data-unit]")) button.setAttribute("aria-pressed", String(button.dataset.unit === weightUnit));
-  for (const button of document.querySelectorAll("#height-units [data-unit]")) button.setAttribute("aria-pressed", String(button.dataset.unit === heightUnit));
+  for (const button of document.querySelectorAll("#height-units [data-unit], #waist-units [data-unit]")) button.setAttribute("aria-pressed", String(button.dataset.unit === heightUnit));
   document.body.dataset.weightUnit = weightUnit;
   const previous = fieldUnits;
   if (previous?.weight !== weightUnit) {
@@ -779,6 +882,7 @@ function applyUnits() {
   }
   if (previous?.height !== heightUnit) {
     const height = previous ? readHeight() : NaN;
+    const typedWaist = previous ? readWaist() : NaN;
     fieldUnits = { ...fieldUnits, height: heightUnit };
     const feet = heightUnit === "ft";
     setInput("profile-height", feet ? { min: 0, max: 13, step: 1, placeholder: "e.g. 5", inputmode: "numeric" }
@@ -786,10 +890,17 @@ function applyUnits() {
     $("height-unit").textContent = heightUnit;
     $("profile-height-in").parentElement.hidden = !feet;
     writeHeight(height);
+    // 4 to 157.4 inches stays within the 10 to 400 cm that can be saved.
+    setInput("waist-size", feet ? { min: 4, max: 157.4, placeholder: "e.g. 34" } : { min: 10, max: 400, placeholder: "e.g. 86.5" });
+    $("waist-size-unit").textContent = feet ? "in" : "cm";
+    writeWaist(typedWaist);
+    if ($("waist-dialog").open) previewFat();
   }
 }
 
 const unitNames = { kg: "kilograms", lb: "pounds", st: "stones and pounds", cm: "centimeters", ft: "feet and inches" };
+// Height and waist share a unit, so either switch changes both.
+const lengthMessage = choice => choice === "ft" ? "Height now shows in feet and inches, and waist in inches." : "Height and waist now show in centimeters.";
 
 async function changeUnits(units, message) {
   if (units.weight === state.units.weight && units.height === state.units.height) return;
@@ -868,6 +979,46 @@ function previewGoal() {
   text += ".";
   if (goal.rate) text += " At " + rateFormat.format(perUnit(goal.rate)) + " " + rateUnit() + " a week, that’s " + duration(Math.round(fromTenths(tenths, unit()) / goal.rate * 7)) + ".";
   preview.textContent = text;
+}
+
+// The waist dialog logs a measurement, or edits or deletes the one on its date.
+function openWaist(date = today) {
+  syncDay();
+  $("waist-date").max = today;
+  $("waist-date").value = date;
+  waistAutoFill = true;
+  for (const input of document.querySelectorAll('#waist-form [name="sex"]')) input.checked = input.value === state.sex;
+  $("waist-form").hidden = false;
+  $("waist-confirm").hidden = true;
+  syncWaistForm();
+  $("waist-dialog").showModal();
+  $("waist-size").focus();
+}
+
+const chosenSex = () => document.querySelector('#waist-form [name="sex"]:checked')?.value ?? null;
+
+function syncWaistForm() {
+  const existing = state.waists.find(item => item.date === $("waist-date").value);
+  if (waistAutoFill) writeWaist(existing?.waist);
+  $("waist-title").textContent = existing ? "Edit waist measurement" : "Log your waist";
+  $("save-waist").textContent = existing ? "Update waist" : "Save waist";
+  $("delete-waist").hidden = !existing;
+  previewFat();
+}
+
+// The estimate for what's in the dialog, and what it's based on.
+function previewFat() {
+  const date = $("waist-date").value;
+  const sex = chosenSex();
+  const size = readWaist(state.waists.find(item => item.date === date)?.waist);
+  const average = validDate(date) ? calculateTrend(state.entries, date).current?.average : undefined;
+  const estimate = bodyFat(average, size, sex);
+  $("waist-fat").textContent = estimate === null ? "—" : percent(estimate);
+  $("waist-hint").textContent = !validDate(date) ? ""
+    : !Number.isFinite(average) ? "No weigh-ins in the 14 days up to " + shortDate(date) + ". Your body fat shows once there is one."
+    : !sex ? "Choose the formula to see your body fat."
+    : validWaist(size) && estimate === null ? "That waist is outside what the formula covers. Check that it’s in " + (fieldUnits.height === "cm" ? "centimeters." : "inches.")
+    : "Uses your 14-day average on " + shortDate(date) + ", " + weight(average) + ".";
 }
 
 // Reminders are push notifications (see sw.js and server/reminders.mjs). The
@@ -1122,10 +1273,64 @@ $("weight-units").addEventListener("click", event => {
   const choice = event.target.closest("[data-unit]")?.dataset.unit;
   if (choice) changeUnits({ ...state.units, weight: choice }, "Weights now show in " + unitNames[choice] + ".");
 });
-$("height-units").addEventListener("click", event => {
+for (const id of ["height-units", "waist-units"]) $(id).addEventListener("click", event => {
   const choice = event.target.closest("[data-unit]")?.dataset.unit;
-  if (choice) changeUnits({ ...state.units, height: choice }, "Your height now shows in " + unitNames[choice] + ".");
+  if (choice) changeUnits({ ...state.units, height: choice }, lengthMessage(choice));
 });
+for (const button of document.querySelectorAll("[data-waist]")) button.addEventListener("click", () => openWaist());
+$("waist-table").addEventListener("click", event => {
+  const button = event.target.closest("button[data-waist-edit]");
+  if (button) openWaist(button.dataset.waistEdit);
+});
+$("waist-more").addEventListener("click", () => {
+  allWaists = !allWaists;
+  showWaistRows();
+});
+// Picking a date that has a measurement shows it, unless a waist was typed.
+$("waist-date").addEventListener("change", () => {
+  if (state.waists.some(item => item.date === $("waist-date").value)) waistAutoFill = true;
+  syncWaistForm();
+});
+$("waist-size").addEventListener("input", () => {
+  waistAutoFill = false;
+  previewFat();
+});
+$("waist-form").addEventListener("change", event => {
+  if (event.target.name === "sex") previewFat();
+});
+$("waist-form").addEventListener("submit", async event => {
+  event.preventDefault();
+  syncDay();
+  const date = $("waist-date").value;
+  const existing = state.waists.find(item => item.date === date);
+  const size = roundWaist(readWaist(existing?.waist));
+  const sex = chosenSex();
+  if (!validDate(date) || date > today || !validWaist(size) || !SEXES.includes(sex)) return;
+  $("waist-dialog").close();
+  if (await changeState(current => saveWaist(current, date, size, sex), { op: "save-waist", date, waist: size, sex })) {
+    const estimate = fat.find(point => point.date === date)?.bodyFat;
+    notify((existing ? "Waist updated" : "Waist saved") + " for " + prettyDate(date) + "." + (estimate == null ? "" : " Body fat " + percent(estimate) + "."));
+  }
+});
+$("delete-waist").addEventListener("click", () => {
+  deletingWaist = $("waist-date").value;
+  $("waist-form").hidden = true;
+  $("waist-confirm").hidden = false;
+  $("keep-waist").focus();
+});
+$("keep-waist").addEventListener("click", () => {
+  $("waist-confirm").hidden = true;
+  $("waist-form").hidden = false;
+  $("waist-size").focus();
+});
+$("confirm-waist-delete").addEventListener("click", async () => {
+  const date = deletingWaist;
+  $("waist-dialog").close();
+  if (await changeState(current => ({ ...current, waists: current.waists.filter(item => item.date !== date) }), { op: "delete-waist", date })) {
+    notify("Waist measurement deleted.");
+  }
+});
+$("waist-dialog").addEventListener("close", () => { deletingWaist = null; });
 $("profile-form").addEventListener("submit", async event => {
   event.preventDefault();
   const height = roundHeight(readHeight(state.height));

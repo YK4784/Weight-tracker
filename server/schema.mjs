@@ -66,5 +66,18 @@ export const schema = [
     auth text NOT NULL,
     created_at timestamptz NOT NULL DEFAULT now()
   )`,
-  `CREATE INDEX IF NOT EXISTS push_subscriptions_user_id ON push_subscriptions (user_id)`
+  `CREATE INDEX IF NOT EXISTS push_subscriptions_user_id ON push_subscriptions (user_id)`,
+  // Waist measurements at the navel for the body fat estimate (see bodyFat in
+  // model.mjs), one a day at most. Centimeters to 0.01, so a waist entered in
+  // inches reads back as entered (see roundWaist).
+  `CREATE TABLE IF NOT EXISTS waist_measurements (
+    user_id text NOT NULL,
+    date date NOT NULL,
+    waist_cm numeric(5, 2) NOT NULL CHECK (waist_cm >= 10 AND waist_cm <= 400),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (user_id, date)
+  )`,
+  // Which body fat formula applies. Null until the first waist is logged.
+  `ALTER TABLE profiles
+    ADD COLUMN IF NOT EXISTS sex text CHECK (sex IN ('male', 'female'))`
 ];

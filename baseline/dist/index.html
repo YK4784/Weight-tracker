@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="light dark">
   <meta name="theme-color" content="#f6f5f1" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#121315" media="(prefers-color-scheme: dark)">
-  <meta name="description" content="Keep a daily weight log, follow your 14-day moving average, track progress toward a goal weight, review each month and calculate your BMI with Baseline.">
+  <meta name="description" content="Keep a daily weight log, follow your 14-day moving average, track progress toward a goal weight, review each month, and calculate your BMI and body fat with Baseline.">
   <title>Baseline</title>
   <link rel="icon" href="./mark.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
@@ -82,6 +82,7 @@
             <div class="fact"><dt>Goal</dt><dd><span class="fact-value" id="goal-value">—</span><button class="text-button" type="button" data-goal id="goal-label">Set</button></dd></div>
             <div class="fact"><dt>Height</dt><dd><span class="fact-value" id="height-value">—</span><button class="text-button height-link" type="button" data-profile id="height-label">Add</button></dd></div>
             <div class="fact"><dt>BMI</dt><dd><span class="fact-value" id="bmi-value">—</span></dd></div>
+            <div class="fact"><dt>Body fat</dt><dd><span class="fact-value" id="fat-value">—</span><span class="fact-note" id="fat-detail"></span><button class="text-button" type="button" data-waist id="fat-label">Add</button></dd></div>
             <div class="fact"><dt>Reminder</dt><dd><span class="fact-value" id="reminder-value">Off</span><span class="fact-note" id="reminder-detail"></span><button class="text-button" type="button" data-reminder id="reminder-label">Set</button></dd></div>
           </dl>
         </section>
@@ -187,6 +188,29 @@
       <p class="table-empty" id="months-empty" hidden>Your monthly summary will appear here after your first weigh-in.</p>
       <p class="note" id="months-note">Each month starts with the 14-day average as it began and ends with the average on its last day, so it picks up where the month before ended. When the log starts partway through a month, or has a break of more than two weeks, a date shows which day an average comes from. The weekly trend is as it stood on the month’s last day, and milestones show in the month your average first reached them.</p>
     </section>
+
+    <section class="body-fat" id="body-fat" aria-labelledby="fat-title">
+      <div class="section-head">
+        <h2 id="fat-title">Body fat</h2>
+        <button class="text-button" type="button" data-waist>Log waist</button>
+      </div>
+      <p class="fat-lead" id="fat-lead" hidden></p>
+      <dl class="figures fat-figures" id="fat-figures" hidden></dl>
+      <div class="chart-wrap fat-chart" id="fat-chart-wrap" tabindex="0" role="group" aria-label="Body fat chart. Use the left and right arrow keys to inspect measurements." hidden>
+        <svg id="fat-chart" role="img" aria-label="Body fat"></svg>
+        <div class="chart-tooltip" id="fat-tooltip" hidden></div>
+        <div class="chart-empty" id="fat-chart-empty" hidden></div>
+      </div>
+      <span class="sr-only" role="status" id="fat-announce"></span>
+      <div class="table-wrap" id="waist-table-wrap" hidden>
+        <table id="waist-table">
+          <thead><tr><th scope="col">Date</th><th scope="col" class="num">Waist</th><th scope="col" class="num"><span class="long-label">14-day average</span><span class="short-label">14-day avg.</span></th><th scope="col" class="num">Body fat</th><th scope="col" class="row-action"><span class="sr-only">Edit measurement</span></th></tr></thead>
+          <tbody id="waist-rows"></tbody>
+        </table>
+      </div>
+      <button class="small-button waist-more" type="button" id="waist-more" aria-controls="waist-table" aria-expanded="false" hidden>Show all</button>
+      <p class="note">An estimate from the U.S. Army’s one-site tape formula, using your waist at the navel and your 14-day average on the day you measured. A tape estimate can be several points off a lab scan, so it’s most useful for following your own trend.</p>
+    </section>
     <p class="storage-status" id="storage-status"></p>
   </main>
 
@@ -246,6 +270,34 @@
       <p class="goal-preview" id="goal-preview" aria-live="polite"></p>
       <div class="dialog-actions edit-actions"><button class="danger-link" type="button" id="clear-goal">Remove goal</button><button class="button primary" type="submit">Save goal</button></div>
     </form>
+  </dialog>
+  <dialog id="waist-dialog" aria-labelledby="waist-title">
+    <div class="dialog-heading"><h2 id="waist-title">Log your waist</h2><button class="icon-button" data-close type="button" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="./icons.svg#close"/></svg></button></div>
+    <p class="dialog-detail">Measure around your bare waist at the navel, with the tape level and snug, after a normal breath out.</p>
+    <form id="waist-form">
+      <label class="field-label" for="waist-date">Date</label>
+      <div class="input-frame date-frame"><div class="date-field"><input id="waist-date" name="date" type="date" required><svg class="icon input-icon" aria-hidden="true"><use href="./icons.svg#calendar"/></svg></div></div>
+      <div class="field-head">
+        <label class="field-label" for="waist-size">Waist</label>
+        <div class="unit-switch" id="waist-units" role="group" aria-label="Waist unit">
+          <button type="button" data-unit="cm" aria-pressed="true">cm<span class="sr-only"> (centimeters)</span></button>
+          <button type="button" data-unit="ft" aria-pressed="false">in<span class="sr-only"> (inches)</span></button>
+        </div>
+      </div>
+      <div class="input-frame"><input id="waist-size" name="waist" type="number" inputmode="decimal" placeholder="e.g. 86.5" min="10" max="400" step="0.1" aria-describedby="waist-size-unit" required><span class="input-unit" id="waist-size-unit">cm</span></div>
+      <fieldset class="choice-group">
+        <legend class="field-label">Formula</legend>
+        <div class="choices">
+          <label class="choice"><input type="radio" name="sex" value="male" required>Male</label>
+          <label class="choice"><input type="radio" name="sex" value="female">Female</label>
+        </div>
+      </fieldset>
+      <div class="bmi-preview"><span>Body fat</span><strong id="waist-fat" aria-live="polite">—</strong></div>
+      <p class="field-hint" id="waist-hint"></p>
+      <p class="formula">Male: −26.97 − 0.12 × weight (lb) + 1.99 × waist (in). Female: −9.15 − 0.015 × weight (lb) + 1.27 × waist (in). <a href="https://www.army.mil/article/267486/army_publishes_new_body_fat_assessment_guidance" target="_blank" rel="noopener noreferrer">About the formula</a></p>
+      <div class="dialog-actions edit-actions"><button class="danger-link" type="button" id="delete-waist">Delete</button><button class="button primary" type="submit" id="save-waist">Save waist</button></div>
+    </form>
+    <div id="waist-confirm" hidden><p class="dialog-detail">Delete this waist measurement?</p><div class="dialog-actions"><button class="button secondary" type="button" id="keep-waist">Keep it</button><button class="button danger" type="button" id="confirm-waist-delete">Delete measurement</button></div></div>
   </dialog>
   <dialog id="reminder-dialog" aria-labelledby="reminder-title">
     <div class="dialog-heading"><h2 id="reminder-title">Daily reminder</h2><button class="icon-button" data-close type="button" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="./icons.svg#close"/></svg></button></div>

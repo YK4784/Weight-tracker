@@ -1,4 +1,4 @@
-import { GOAL_MAX_MILESTONES, GOAL_MAX_RATE, GOAL_MIN_RATE, HEIGHT_UNITS, NOTE_MAX_LENGTH, WEIGHT_UNITS, cleanNote, dateOf, dayOf, noteLength, normalizeState, roundHeight, roundRate, roundWeight, validDate, validTimeZone } from "../baseline/dist/model.mjs";
+import { GOAL_MAX_MILESTONES, GOAL_MAX_RATE, GOAL_MIN_RATE, HEIGHT_UNITS, NOTE_MAX_LENGTH, SEXES, WAIST_MAX, WAIST_MIN, WEIGHT_UNITS, cleanNote, dateOf, dayOf, noteLength, normalizeState, roundHeight, roundRate, roundWaist, roundWeight, validDate, validTimeZone } from "../baseline/dist/model.mjs";
 import { parseSubscription } from "./push.mjs";
 
 export const MAX_IMPORT_ENTRIES = 20_000;
@@ -28,6 +28,13 @@ export function parseOp(body, now = new Date()) {
       return validDate(body.date) ? { op: body.op, date: body.date } : null;
     case "set-height":
       return inRange(body.height, 0.1, 400) ? { op: body.op, height: roundHeight(body.height) } : null;
+    // A waist measurement in cm, kept to 0.01 cm, and the sex whose body fat
+    // formula applies, which is saved to the profile with it.
+    case "save-waist":
+      return validDate(body.date) && body.date <= latest && inRange(body.waist, WAIST_MIN, WAIST_MAX) && SEXES.includes(body.sex)
+        ? { op: body.op, date: body.date, waist: roundWaist(body.waist), sex: body.sex } : null;
+    case "delete-waist":
+      return validDate(body.date) ? { op: body.op, date: body.date } : null;
     case "set-goal": {
       const goal = body.goal;
       const valid = inRange(goal?.weight, 0.1, 2000) && inRange(goal.startWeight, 0.1, 2000)

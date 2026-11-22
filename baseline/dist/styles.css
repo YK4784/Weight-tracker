@@ -221,23 +221,27 @@ body[data-weight-unit="st"] .hero:not(.is-empty) { font-size: clamp(3.5rem, 9vw 
 .key-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dot); }
 .key-goal { width: 18px; height: 1px; background: repeating-linear-gradient(90deg, var(--ink-2) 0 4px, transparent 4px 7px); }
 .chart-wrap { position: relative; height: clamp(240px, 28vw, 320px); margin-top: 18px; border-radius: 4px; }
-#trend-chart { position: absolute; inset: 0; display: block; width: 100%; height: 100%; overflow: visible; }
-#trend-chart text { font-family: var(--font); font-size: 12.5px; fill: var(--ink-3); font-variant-numeric: tabular-nums; }
-#trend-chart .grid { stroke: var(--rule); stroke-width: 1; }
+:is(#trend-chart, #fat-chart) { position: absolute; inset: 0; display: block; width: 100%; height: 100%; overflow: visible; }
+:is(#trend-chart, #fat-chart) text { font-family: var(--font); font-size: 12.5px; fill: var(--ink-3); font-variant-numeric: tabular-nums; }
+:is(#trend-chart, #fat-chart) .grid { stroke: var(--rule); stroke-width: 1; }
 #trend-chart .avg { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 #trend-chart .avg-single { fill: var(--accent); }
 #trend-chart .dot { fill: var(--dot); stroke: var(--paper); stroke-width: 3; paint-order: stroke; }
 #trend-chart .end-dot, #trend-chart .cursor-avg { fill: var(--accent); stroke: var(--paper); stroke-width: 4; paint-order: stroke; }
 #trend-chart .cursor-dot { fill: var(--ink-2); stroke: var(--paper); stroke-width: 4; paint-order: stroke; }
-#trend-chart .end-label { fill: var(--ink); font-size: 14px; font-weight: 700; }
+:is(#trend-chart, #fat-chart) .end-label { fill: var(--ink); font-size: 14px; font-weight: 700; }
 #trend-chart .goal { stroke: var(--ink-2); stroke-width: 1; stroke-dasharray: 4 3; }
 #trend-chart .goal-label { fill: var(--ink-2); font-weight: 600; }
-#trend-chart .crosshair { stroke: var(--ink-3); stroke-width: 1; }
+:is(#trend-chart, #fat-chart) .crosshair { stroke: var(--ink-3); stroke-width: 1; }
 .chart-tooltip { position: absolute; z-index: 2; width: max-content; max-width: 100%; padding: 10px 12px; border: 1px solid var(--rule); border-radius: 10px; background: var(--surface); box-shadow: var(--shadow); font-size: .875rem; pointer-events: none; }
 .chart-tooltip strong { display: block; margin-bottom: 4px; font-weight: 700; }
 .tip-row { display: flex; align-items: center; gap: 8px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .tip-row b { color: var(--ink); font-weight: 700; }
 .tip-note { max-width: 15rem; margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--rule); color: var(--ink-2); overflow-wrap: anywhere; }
+/* Body fat draws in ink rather than the accent, so the weight trend stays the figure. */
+#fat-chart .fat-line { fill: none; stroke: var(--ink-2); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+#fat-chart .fat-dot { fill: var(--ink-2); stroke: var(--paper); stroke-width: 3; paint-order: stroke; }
+#fat-chart .end-dot, #fat-chart .cursor-dot { fill: var(--ink); stroke: var(--paper); stroke-width: 4; paint-order: stroke; }
 .chart-empty { position: absolute; inset: 0; display: grid; place-content: center; padding: 20px; color: var(--ink-3); text-align: center; }
 .note { max-width: 68ch; margin-top: 14px; color: var(--ink-3); font-size: .875rem; }
 
@@ -284,6 +288,14 @@ tbody:first-of-type .month-row th { padding-top: 20px; }
 .month-figures + .month-note { margin-top: 14px; }
 .month-note { color: var(--ink-2); text-wrap: pretty; }
 .month-gap { padding-block: 16px; border-bottom: 1px solid var(--rule); color: var(--ink-3); }
+/* Body fat: below the log, so the weight stays the focus of the overview. */
+.body-fat { margin-top: 48px; padding-top: 36px; border-top: 1px solid var(--rule); }
+.fat-lead { max-width: 60ch; margin-top: 10px; color: var(--ink-3); text-wrap: pretty; }
+.fat-figures { margin-top: 14px; }
+.chart-wrap.fat-chart { height: clamp(180px, 20vw, 240px); }
+.body-fat .table-wrap { margin-top: 18px; }
+.fat-cell { font-weight: 700; }
+.waist-more { margin-top: 14px; }
 .storage-status { margin-top: 48px; color: var(--ink-3); font-size: .875rem; text-align: center; }
 
 /* Dialogs and toast */
@@ -300,6 +312,13 @@ dialog h2 { font-size: 1.25rem; font-weight: 700; letter-spacing: -.01em; }
 .bmi-preview strong { font-size: 1.25rem; }
 .field-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 12px; margin-top: 16px; }
 body[data-weight-unit="st"] .start-row { grid-template-columns: minmax(0, 1fr); }
+/* A pick of two, framed like the inputs. */
+.choice-group { min-width: 0; margin: 16px 0 0; padding: 0; border: 0; }
+.choice-group legend { padding: 0; }
+.choices { display: flex; gap: 8px; }
+.choice { display: flex; flex: 1 1 0; align-items: center; gap: 10px; min-height: 46px; padding: 10px 12px; border: 1px solid var(--field-border); border-radius: 8px; background: var(--surface); cursor: pointer; }
+.choice:has(input:checked) { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.choice input { flex: none; width: 18px; height: 18px; margin: 0; accent-color: var(--accent); cursor: pointer; }
 .field-hint { margin-top: 6px; color: var(--ink-3); font-size: .875rem; text-wrap: pretty; }
 .optional { font-weight: 400; color: var(--ink-3); }
 .goal-preview, .dialog-note { margin-top: 18px; padding: 12px 14px; border-radius: 8px; background: var(--paper); color: var(--ink-2); text-wrap: pretty; }
@@ -340,6 +359,7 @@ body[data-weight-unit="st"] .start-row { grid-template-columns: minmax(0, 1fr); 
   .entry-panel { padding: 20px; }
   .date-step { flex-basis: 48px; }
   .trend, .entries, .forecast { padding-top: 28px; }
+  .body-fat { margin-top: 36px; padding-top: 28px; }
   .chart-wrap { margin-top: 12px; }
   th, td { padding-inline: 6px; }
   th { font-size: .8125rem; }

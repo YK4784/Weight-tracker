@@ -37,6 +37,15 @@ export function createStore(url = process.env.DATABASE_URL) {
       case "set-height":
         return [sql`INSERT INTO profiles (user_id, started, height_cm) VALUES (${userId}, true, ${change.height})
                     ON CONFLICT (user_id) DO UPDATE SET started = true, height_cm = excluded.height_cm, updated_at = now()`];
+      case "save-waist":
+        return [
+          sql`INSERT INTO profiles (user_id, started, sex) VALUES (${userId}, true, ${change.sex})
+              ON CONFLICT (user_id) DO UPDATE SET started = true, sex = excluded.sex, updated_at = now()`,
+          sql`INSERT INTO waist_measurements (user_id, date, waist_cm) VALUES (${userId}, ${change.date}::date, ${change.waist})
+              ON CONFLICT (user_id, date) DO UPDATE SET waist_cm = excluded.waist_cm, updated_at = now()`
+        ];
+      case "delete-waist":
+        return [sql`DELETE FROM waist_measurements WHERE user_id = ${userId} AND date = ${change.date}::date`];
       case "set-goal": {
         const { weight, startDate, startWeight, rate, milestones } = change.goal;
         return [sql`
@@ -113,13 +122,15 @@ export function createStore(url = process.env.DATABASE_URL) {
         ...queries,
         sql`SELECT started, height_cm::float8 AS height, goal_kg::float8 AS goal_weight,
                    to_char(goal_start_date, 'YYYY-MM-DD') AS goal_start_date, goal_start_kg::float8 AS goal_start_weight,
-                   goal_rate_kg_week::float8 AS goal_rate, goal_milestones, weight_unit, height_unit, reminder_hour, time_zone
+                   goal_rate_kg_week::float8 AS goal_rate, goal_milestones, weight_unit, height_unit, reminder_hour, time_zone, sex
             FROM profiles WHERE user_id = ${userId}`,
         sql`SELECT to_char(date, 'YYYY-MM-DD') AS date, weight_kg::float8 AS weight, note
             FROM weigh_ins WHERE user_id = ${userId} ORDER BY date`,
+        sql`SELECT to_char(date, 'YYYY-MM-DD') AS date, waist_cm::float8 AS waist
+            FROM waist_measurements WHERE user_id = ${userId} ORDER BY date`,
         sql`SELECT endpoint FROM push_subscriptions WHERE user_id = ${userId} ORDER BY created_at, endpoint`
       ]);
-      const [[profile], entries, devices] = results.slice(-3);
+      const [[profile], entries, waists, devices] = results.slice(-4);
       const goal = profile?.goal_weight == null ? null : {
         weight: profile.goal_weight, startDate: profile.goal_start_date, startWeight: profile.goal_start_weight,
         rate: profile.goal_rate, milestones: profile.goal_milestones
@@ -128,7 +139,7 @@ export function createStore(url = process.env.DATABASE_URL) {
       // Reminders are off without a device to send them to.
       const reminder = profile?.reminder_hour == null || !devices.length ? null
         : { hour: profile.reminder_hour, timeZone: profile.time_zone, devices: devices.map(device => device.endpoint) };
-      const result = { log: { started: Boolean(profile?.started), height: profile?.height ?? null, goal, units, reminder, entries } };
+      const result = { log: { started: Boolean(profile?.started), height: profile?.height ?? null, sex: profile?.sex ?? null, goal, units, reminder, entries, waists } };
       if (change?.op === "update-weight") result.found = results[0].length > 0;
       if (change?.op === "import") result.imported = results[0][0]?.imported > 0;
       return result;

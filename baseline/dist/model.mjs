@@ -134,6 +134,53 @@ export function bmi(weight, heightCm) {
   return weight / (heightCm / 100) ** 2;
 }
 
+// Waists are stored in centimeters to 0.01, so a waist entered in inches comes
+// back as entered. They show to 0.1 cm, or to 0.1 in when heights show in feet
+// and inches: the height unit is the unit for every length.
+export const WAIST_MIN = 10;
+export const WAIST_MAX = 400;
+export const SEXES = ["male", "female"];
+export const roundWaist = value => Math.round(value * 100) / 100;
+
+export function validWaist(value) {
+  return positive(value) && value >= WAIST_MIN && value <= WAIST_MAX;
+}
+
+// A waist as a whole number of the tenths shown: 0.1 cm, or 0.1 in.
+export function waistTenths(cm, heightUnit = "cm") {
+  return Math.round(cm / (heightUnit === "cm" ? 1 : CM_PER_IN) * 10);
+}
+
+// A waist as it reads on screen: [["86.5", "cm"]] or [["34.1", "in"]].
+export function waistParts(cm, heightUnit = "cm") {
+  return [[decimal.format(waistTenths(cm, heightUnit) / 10), heightUnit === "cm" ? "cm" : "in"]];
+}
+
+export function formatWaist(cm, heightUnit = "cm") {
+  return Number.isFinite(cm) ? waistParts(cm, heightUnit)[0].join(" ") : "—";
+}
+
+export function spokenWaist(cm, heightUnit = "cm") {
+  return spoken(waistParts(cm, heightUnit));
+}
+
+// The U.S. Army's one-site tape estimate of body fat, in percent (Army
+// Directive 2023-11; the equations are in ALARACT 046/2023, table B-5). It
+// takes body weight in pounds and the waist at the navel in inches:
+//   men:   −26.97 − 0.12 × weight + 1.99 × waist
+//   women: −9.15 − 0.015 × weight + 1.27 × waist
+// The Army rounds the result to a whole percent; this leaves it unrounded.
+// Null when something is missing, or when the result is outside 0–100%,
+// which only measurements far outside the formula's range (or a waist in the
+// wrong unit) give.
+export function bodyFat(weightKg, waistCm, sex) {
+  if (!positive(weightKg) || !positive(waistCm) || !SEXES.includes(sex)) return null;
+  const pounds = weightKg / KG_PER_LB;
+  const inches = waistCm / CM_PER_IN;
+  const percent = sex === "male" ? -26.97 - 0.12 * pounds + 1.99 * inches : -9.15 - 0.015 * pounds + 1.27 * inches;
+  return percent > 0 && percent < 100 ? percent : null;
+}
+
 export const GOAL_MILESTONES = 10;
 export const GOAL_MAX_MILESTONES = 20;
 export const GOAL_MAX_RATE = 5;
@@ -198,11 +245,25 @@ export function normalizeState(value) {
     }
   }
   const entries = [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+  const waistsByDate = new Map();
+  for (const item of Array.isArray(value?.waists) ? value.waists : []) {
+    if (validDate(item?.date) && validWaist(item.waist)) waistsByDate.set(item.date, { date: item.date, waist: roundWaist(item.waist) });
+  }
+  const waists = [...waistsByDate.values()].sort((a, b) => a.date.localeCompare(b.date));
   const height = positive(value?.height) && value.height >= .1 && value.height <= 400 ? value.height : null;
+  // Which of the body fat formulas applies. Null until the first waist is logged.
+  const sex = SEXES.includes(value?.sex) ? value.sex : null;
   const goal = normalizeGoal(value?.goal);
   const units = normalizeUnits(value?.units);
   const reminder = normalizeReminder(value?.reminder);
-  return { version: 1, started: Boolean(value?.started || entries.length || height || goal), height, goal, units, reminder, entries };
+  return { version: 1, started: Boolean(value?.started || entries.length || height || goal || waists.length), height, sex, goal, units, reminder, entries, waists };
+}
+
+// Adds or replaces the waist measurement on `date`, and sets which body fat
+// formula applies. The server does the same.
+export function saveWaist(state, date, waist, sex) {
+  if (!validDate(date) || !validWaist(waist) || !SEXES.includes(sex)) throw new Error("Enter a valid date, waist and sex.");
+  return normalizeState({ ...state, started: true, sex, waists: [...state.waists, { date, waist }] });
 }
 
 // Adds or replaces the weigh-in on `date`. Leaving out `note` keeps the note
@@ -490,4 +551,30 @@ export function forecastGoal(progress, perWeek, fromDate) {
     const days = Math.round(Math.abs(milestone.weight - progress.current) / Math.abs(perWeek) * 7);
     return { ...milestone, days, date: days > FORECAST_MAX_DAYS ? null : dateOf(from + days) };
   });
+}
+
+// Body fat at each waist measurement through `today`, oldest first. The weight
+// is the 14-day average on the day of the measurement, so one heavy or light
+// day moves the estimate little, and a later weigh-in in those 14 days updates
+// it. `weight` is null without an average that day; `bodyFat` is null then, or
+// without a sex, or outside the formula's range (see bodyFat).
+export function bodyFatHistory(entries, waists, sex, today) {
+  const measured = waists.filter(item => item.date <= today);
+  if (!measured.length) return [];
+  const averages = new Map(calculateTrend(entries, measured.at(-1).date).days.map(point => [point.day, point.average]));
+  return measured.map(({ date, waist }) => {
+    const day = dayOf(date);
+    const weight = averages.get(day) ?? null;
+    return { date, day, waist, weight, bodyFat: weight === null ? null : bodyFat(weight, waist, sex) };
+  });
+}
+
+// The change from the first body fat estimate to the latest, using both as
+// shown, to 0.1 of a percent. Null with fewer than two estimates.
+export function bodyFatChange(history) {
+  const estimates = history.filter(point => point.bodyFat !== null);
+  if (estimates.length < 2) return null;
+  const from = estimates[0];
+  const to = estimates.at(-1);
+  return { from, to, change: (Math.round(to.bodyFat * 10) - Math.round(from.bodyFat * 10)) / 10 };
 }

@@ -1,4 +1,4 @@
-import { KG_PER_LB, dateOf, dayOf, formatWeight, prettyDate, spokenWeight, weightParts } from "./model.mjs";
+import { KG_PER_LB, dateOf, dayOf, formatWaist, formatWeight, oneDecimal, prettyDate, spokenWaist, spokenWeight, weightParts } from "./model.mjs";
 
 const NS = "http://www.w3.org/2000/svg";
 
@@ -17,16 +17,17 @@ const coord = value => Math.round(value * 100) / 100;
 const textWidth = (text, digit, point = digit) => [...text].reduce((sum, char) => sum + (char === "." ? point : /\d/.test(char) ? digit : 4.5), 0);
 
 // The y-axis range: every plotted average and weigh-in, and the goal (null for
-// none) so its line stays on screen, with some room above and below. The grid
-// step is a round number, or the one of `steps` nearest a quarter of the range.
-export function yDomain(points, goal = null, steps = null) {
+// none) so its line stays on screen, with some room above and below, at least
+// `minPad`. The grid step is a round number, or the one of `steps` nearest a
+// quarter of the range.
+export function yDomain(points, goal = null, steps = null, minPad = .25) {
   let low = goal ?? Infinity;
   let high = goal ?? -Infinity;
   for (const point of points) {
     low = Math.min(low, point.average, point.weight ?? Infinity);
     high = Math.max(high, point.average, point.weight ?? -Infinity);
   }
-  const pad = Math.max(.25, (high - low) * .11);
+  const pad = Math.max(minPad, (high - low) * .11);
   const bottom = Math.max(0, low - pad);
   const top = high + pad;
   const target = (top - bottom) / 4;
@@ -63,13 +64,28 @@ export function separateLabel(y, avoid, gap, min, max) {
   return preferred >= min && preferred <= max ? preferred : avoid - side * gap;
 }
 
-export class TrendChart {
-  constructor() {
-    this.wrap = document.getElementById("chart-wrap");
-    this.canvas = document.getElementById("trend-chart");
-    this.tooltip = document.getElementById("chart-tooltip");
-    this.empty = document.getElementById("chart-empty");
-    this.announce = document.getElementById("chart-announce");
+// Date labels along the bottom, from `start` to `end` (days).
+function dateTicks(fragment, start, end, x, width, height) {
+  const compact = width < 480;
+  const tickCount = Math.min(end - start + 1, width < 360 ? 3 : compact ? 4 : width < 680 ? 5 : 7);
+  for (let n = 0; n < tickCount; n++) {
+    const day = tickCount === 1 ? start : start + Math.round(n / (tickCount - 1) * (end - start));
+    const anchor = tickCount > 1 && n === 0 ? "start" : tickCount > 1 && n === tickCount - 1 ? "end" : "middle";
+    const label = prettyDate(dateOf(day), end - start > 365 ? "monthYear" : "short");
+    fragment.append(svg("text", { x: coord(x(day)), y: height - 6, "text-anchor": anchor }, label));
+  }
+}
+
+// What both charts share: an SVG in a wrapper that redraws when it resizes, and
+// a tooltip for one point at a time, picked with a pointer or the arrow keys.
+// Subclasses draw, set `points`, `axes` and `cursor`, and show a point's tooltip.
+class Chart {
+  constructor(ids) {
+    this.wrap = document.getElementById(ids.wrap);
+    this.canvas = document.getElementById(ids.canvas);
+    this.tooltip = document.getElementById(ids.tooltip);
+    this.empty = document.getElementById(ids.empty);
+    this.announce = document.getElementById(ids.announce);
     this.points = [];
     this.active = null;
     this.wrap.addEventListener("pointermove", event => {
@@ -84,6 +100,38 @@ export class TrendChart {
     });
     this.resize = new ResizeObserver(() => this.draw());
     this.resize.observe(this.wrap);
+  }
+
+  inspectKey(event) {
+    if (!this.points.length) return;
+    const lastIndex = this.points.length - 1;
+    // With nothing selected, either arrow starts on the latest point.
+    const step = delta => this.active === null ? lastIndex : Math.max(0, Math.min(lastIndex, this.active + delta));
+    const keys = { ArrowLeft: step(-1), ArrowRight: step(1), Home: 0, End: lastIndex };
+    if (event.key === "Escape") return this.hideTooltip();
+    if (!Object.hasOwn(keys, event.key)) return;
+    event.preventDefault();
+    this.showTooltip(keys[event.key], true);
+  }
+
+  // Beside the point at `xx`, on whichever side has room, centered on `yy`.
+  placeTooltip(xx, yy) {
+    this.tooltip.hidden = false;
+    const tipWidth = this.tooltip.offsetWidth;
+    this.tooltip.style.left = Math.max(0, Math.min(this.wrap.clientWidth - tipWidth, xx + tipWidth + 14 < this.wrap.clientWidth ? xx + 14 : xx - tipWidth - 14)) + "px";
+    this.tooltip.style.top = Math.max(0, Math.min(this.axes.floor - this.tooltip.offsetHeight, yy - this.tooltip.offsetHeight / 2)) + "px";
+  }
+
+  hideTooltip() {
+    this.active = null;
+    this.tooltip.hidden = true;
+    this.cursor?.setAttribute("visibility", "hidden");
+  }
+}
+
+export class TrendChart extends Chart {
+  constructor() {
+    super({ wrap: "chart-wrap", canvas: "trend-chart", tooltip: "chart-tooltip", empty: "chart-empty", announce: "chart-announce" });
   }
 
   // `goal` is the goal weight in kg, or null without one. The chart plots in
@@ -149,13 +197,7 @@ export class TrendChart {
         svg("text", { x: left - 12, y: yy + 4, "text-anchor": "end" }, tick.label)
       );
     }
-    const tickCount = Math.min(end - start + 1, width < 360 ? 3 : compact ? 4 : width < 680 ? 5 : 7);
-    for (let n = 0; n < tickCount; n++) {
-      const day = tickCount === 1 ? start : start + Math.round(n / (tickCount - 1) * (end - start));
-      const anchor = tickCount > 1 && n === 0 ? "start" : tickCount > 1 && n === tickCount - 1 ? "end" : "middle";
-      const label = prettyDate(dateOf(day), end - start > 365 ? "monthYear" : "short");
-      fragment.append(svg("text", { x: coord(x(day)), y: height - 6, "text-anchor": anchor }, label));
-    }
+    dateTicks(fragment, start, end, x, width, height);
 
     // The goal is a dashed hairline under the data, ending with its value.
     if (goal !== null) {
@@ -217,18 +259,6 @@ export class TrendChart {
     this.showTooltip(index, false);
   }
 
-  inspectKey(event) {
-    if (!this.points.length) return;
-    const lastIndex = this.points.length - 1;
-    // With nothing selected, either arrow starts on the latest point.
-    const step = delta => this.active === null ? lastIndex : Math.max(0, Math.min(lastIndex, this.active + delta));
-    const keys = { ArrowLeft: step(-1), ArrowRight: step(1), Home: 0, End: lastIndex };
-    if (event.key === "Escape") return this.hideTooltip();
-    if (!Object.hasOwn(keys, event.key)) return;
-    event.preventDefault();
-    this.showTooltip(keys[event.key], true);
-  }
-
   showTooltip(index, announce) {
     const point = this.points[index];
     const { x, y, ceiling, floor } = this.axes;
@@ -250,19 +280,129 @@ export class TrendChart {
       note.textContent = point.note;
       this.tooltip.append(note);
     }
-    this.tooltip.hidden = false;
-    const tipWidth = this.tooltip.offsetWidth;
-    this.tooltip.style.left = Math.max(0, Math.min(this.wrap.clientWidth - tipWidth, xx + tipWidth + 14 < this.wrap.clientWidth ? xx + 14 : xx - tipWidth - 14)) + "px";
-    this.tooltip.style.top = Math.max(0, Math.min(floor - this.tooltip.offsetHeight, y(point.average) - this.tooltip.offsetHeight / 2)) + "px";
+    this.placeTooltip(xx, y(point.average));
     if (announce) {
       const weighIn = point.weight === null ? "No weigh-in." : "Weigh-in " + spokenWeight(point.weight, this.unit) + ".";
       this.announce.textContent = heading + ". 14-day average " + spokenWeight(point.average, this.unit) + ". " + weighIn + (point.note ? " Note: " + point.note : "");
     }
   }
+}
 
-  hideTooltip() {
-    this.active = null;
-    this.tooltip.hidden = true;
-    this.cursor?.setAttribute("visibility", "hidden");
+// Body fat from occasional waist measurements: a point for each estimate,
+// joined by a line, from the first through today. It is drawn in ink, not the
+// accent, so it stays quieter than the weight trend above it.
+export class BodyFatChart extends Chart {
+  constructor() {
+    super({ wrap: "fat-chart-wrap", canvas: "fat-chart", tooltip: "fat-tooltip", empty: "fat-chart-empty", announce: "fat-announce" });
+  }
+
+  // `estimates` are points from bodyFatHistory with a body fat estimate.
+  update(estimates, today, units) {
+    this.estimates = estimates;
+    this.today = today;
+    this.units = units;
+    this.draw();
+  }
+
+  draw() {
+    const width = this.wrap.clientWidth;
+    const height = this.wrap.clientHeight;
+    if (!this.estimates || !width || !height) return;
+    this.hideTooltip();
+    this.canvas.replaceChildren();
+    this.canvas.setAttribute("viewBox", "0 0 " + width + " " + height);
+    this.points = this.estimates;
+    this.empty.hidden = this.points.length > 0;
+    this.wrap.tabIndex = this.points.length ? 0 : -1;
+    if (!this.points.length) {
+      this.empty.textContent = "Your body fat shows here once a waist measurement has a weigh-in in the 14 days up to it.";
+      this.canvas.setAttribute("aria-label", this.empty.textContent);
+      return;
+    }
+
+    const compact = width < 480;
+    const first = this.points[0];
+    const last = this.points.at(-1);
+    const start = first.day;
+    const end = Math.max(dayOf(this.today), last.day);
+    // At least a point either side, so small changes don't look like big ones.
+    const { bottom, top, step } = yDomain(this.points.map(p => ({ average: p.bodyFat, weight: null })), null, null, 1);
+    const endLabel = oneDecimal(last.bodyFat) + "%";
+    const ticks = [];
+    for (let tick = Math.ceil((bottom - 1e-8) / step) * step; tick <= top + 1e-8; tick += step) ticks.push(String(Number(tick.toFixed(2))));
+    const left = Math.max(compact ? 30 : 38, Math.max(...ticks.map(label => textWidth(label, 8, 3.5))) + 14);
+    // The "%" is wider than the letters textWidth allows for.
+    const right = width - (textWidth(endLabel, 8.5) + 24);
+    const ceiling = 24;
+    const floor = height - 30;
+    const x = day => start === end ? (left + right) / 2 : left + (day - start) / (end - start) * (right - left);
+    const y = percent => floor - (percent - bottom) / (top - bottom) * (floor - ceiling);
+    this.axes = { left, right, ceiling, floor, x, y };
+    const fragment = document.createDocumentFragment();
+
+    fragment.append(svg("text", { x: left - 12, y: 12, "text-anchor": "end" }, "%"));
+    for (const label of ticks) {
+      const yy = coord(y(Number(label))) + .5;
+      fragment.append(
+        svg("line", { class: "grid", x1: left, x2: width, y1: yy, y2: yy }),
+        svg("text", { x: left - 12, y: yy + 4, "text-anchor": "end" }, label)
+      );
+    }
+    dateTicks(fragment, start, end, x, width, height);
+
+    if (this.points.length > 1) {
+      fragment.append(svg("path", { class: "fat-line", d: this.points.map((p, i) => (i ? "L" : "M") + coord(x(p.day)) + " " + coord(y(p.bodyFat))).join(" ") }));
+    }
+    for (const p of this.points.slice(0, -1)) fragment.append(svg("circle", { class: "fat-dot", cx: coord(x(p.day)), cy: coord(y(p.bodyFat)), r: compact ? 3.5 : 4 }));
+    const lastX = x(last.day);
+    const lastY = y(last.bodyFat);
+    fragment.append(
+      svg("circle", { class: "end-dot", cx: coord(lastX), cy: coord(lastY), r: 5 }),
+      svg("text", { class: "end-label", x: coord(lastX + 11), y: coord(lastY + 5) }, endLabel)
+    );
+    this.cursor = svg("g", { visibility: "hidden", "pointer-events": "none" });
+    fragment.append(this.cursor);
+    this.canvas.append(fragment);
+    const count = this.points.length;
+    this.canvas.setAttribute("aria-label", "Body fat estimates from " + count + (count === 1 ? " waist measurement" : " waist measurements") + ", " +
+      prettyDate(first.date, "full") + " through " + prettyDate(dateOf(end), "full") + ". Latest " + oneDecimal(last.bodyFat) + " percent on " + prettyDate(last.date, "full") + ".");
+  }
+
+  // Measurements are far apart, so the pointer picks the nearest one.
+  inspectPointer(event) {
+    if (!this.points.length) return;
+    const bounds = this.wrap.getBoundingClientRect();
+    const { left, right, ceiling, floor, x } = this.axes;
+    const xx = event.clientX - bounds.left;
+    const yy = event.clientY - bounds.top;
+    if (xx < left - 12 || xx > right + 12 || yy < ceiling - 12 || yy > floor + 5) return this.hideTooltip();
+    let index = 0;
+    this.points.forEach((point, i) => {
+      if (Math.abs(x(point.day) - xx) < Math.abs(x(this.points[index].day) - xx)) index = i;
+    });
+    this.showTooltip(index, false);
+  }
+
+  showTooltip(index, announce) {
+    const point = this.points[index];
+    const { x, y, ceiling, floor } = this.axes;
+    this.active = index;
+    const xx = coord(x(point.day));
+    this.cursor.replaceChildren(
+      svg("line", { class: "crosshair", x1: xx + .5, x2: xx + .5, y1: ceiling - 8, y2: floor }),
+      svg("circle", { class: "cursor-dot", cx: xx, cy: coord(y(point.bodyFat)), r: 5 })
+    );
+    this.cursor.setAttribute("visibility", "visible");
+    const heading = prettyDate(point.date, "full");
+    const lengthUnit = this.units.height;
+    this.tooltip.innerHTML = "<strong>" + heading + "</strong>" +
+      '<div class="tip-row"><b>' + oneDecimal(point.bodyFat) + "%</b>body fat</div>" +
+      '<div class="tip-row"><b>' + formatWaist(point.waist, lengthUnit) + "</b>waist</div>" +
+      '<div class="tip-row"><b>' + formatWeight(point.weight, this.units.weight) + "</b>14-day average</div>";
+    this.placeTooltip(xx, y(point.bodyFat));
+    if (announce) {
+      this.announce.textContent = heading + ". Body fat " + oneDecimal(point.bodyFat) + " percent. Waist " + spokenWaist(point.waist, lengthUnit) +
+        ". 14-day average " + spokenWeight(point.weight, this.units.weight) + ".";
+    }
   }
 }

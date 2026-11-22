@@ -165,3 +165,16 @@ test("a reminder is a whole hour in a real time zone, and can bring this device'
   }
   assert.deepEqual(parseOp({ op: "clear-reminder", hour: 8 }, NOW), { op: "clear-reminder" });
 });
+
+test("a waist is a date, a waist in cm kept to 0.01 cm, and the sex whose formula applies", () => {
+  assert.deepEqual(parseOp({ op: "save-waist", date: "2026-11-22", waist: 34.1 * 2.54, sex: "female", extra: 1 }, NOW), { op: "save-waist", date: "2026-11-22", waist: 86.61, sex: "female" });
+  assert.equal(parseOp({ op: "save-waist", date: "2026-11-23", waist: 10, sex: "male" }, NOW).waist, 10, "a UTC+14 user's today, and the smallest waist");
+  assert.equal(parseOp({ op: "save-waist", date: "2026-11-01", waist: 400, sex: "male" }, NOW).waist, 400);
+  const bad = [{ waist: 9.99 }, { waist: 400.01 }, { waist: "86" }, { waist: null }, { waist: NaN }, { sex: "other" }, { sex: undefined },
+    { date: "2026-11-24" }, { date: "2026-02-30" }, { date: undefined }];
+  for (const change of bad) {
+    assert.equal(parseOp({ op: "save-waist", date: "2026-11-01", waist: 86, sex: "male", ...change }, NOW), null, JSON.stringify(change));
+  }
+  assert.deepEqual(parseOp({ op: "delete-waist", date: "2026-11-01", waist: 86 }, NOW), { op: "delete-waist", date: "2026-11-01" });
+  assert.equal(parseOp({ op: "delete-waist", date: "nope" }, NOW), null);
+});

@@ -33,3 +33,11 @@ test("stones use grid steps of whole pounds or stones, labelled in stones and po
   assert.equal(stoneTick(139.5), "9 st 13.5");
   assert.equal(stoneTick(140 - 1e-12), "10 st", "float error at a whole stone");
 });
+
+test("a minimum pad keeps a nearly flat series from filling the chart", () => {
+  const flat = [{ average: 24.3, weight: null }, { average: 24.1, weight: null }];
+  const padded = yDomain(flat, null, null, 1);
+  assert.ok(padded.bottom <= 23.1 && padded.top >= 25.3);
+  assert.equal(padded.step, 0.5);
+  assert.deepEqual(yDomain(points, null, null, 0.25), yDomain(points), "the default pad is unchanged");
+});
