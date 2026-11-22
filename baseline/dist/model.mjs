@@ -115,17 +115,3 @@ export function calculateTrend(entries, throughDate) {
   const last = days.at(-1);
   return { days, readings, current: last?.day === end ? last : null };
 }
-
-const sampleWeights = [
-  78.3, 77.8, 78.0, 78.4, 77.7, 77.6, 78.0, 77.4, 77.8, 77.3, 77.5, 77.9,
-  77.3, 77.2, 77.6, 77.4, 77.0, 77.4, 77.5, 77.0, 76.9, 77.2, 76.7, 76.9,
-  76.6, 76.3, 76.7, 76.1, 76.5, 76.7, 76.2, 76.4, 76.8, 76.3, 76.6, 76.0, 76.5, 76.2,
-  76.2, 76.8, 76.5, 77.1, 76.9, 76.4, 76.7, 76.1, 76.4, 75.9, 76.2, 75.7, 76.0,
-  75.4, 75.6, 75.2, 75.4, 76.0, 75.7, 75.2, 75.6, 75.0, 74.9, 75.4, 74.8, 74.5,
-  74.9, 74.6, 74.4, 74.2
-];
-
-export function sampleEntries(today) {
-  const first = dayOf(today) - sampleWeights.length + 1;
-  return sampleWeights.map((weight, i) => ({ date: dateOf(first + i), weight }));
-}

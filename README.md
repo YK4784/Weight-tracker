@@ -46,7 +46,7 @@ Open [Baseline locally](http://127.0.0.1:4173/). `npm start` serves the page fro
 
 Save a weight in kilograms and a date in **Log a weigh-in**. The arrows beside the date move it back or forward one day and stop at today. Saving again on the same date updates that entry. Use **Add** or **Edit** next to **Height** to enter a height in centimeters. Baseline calculates BMI from the latest recorded weight.
 
-Sign in to open your log. Use the avatar at the top right to manage your account or sign out. A new account starts with labeled sample data. Your first saved weight or height starts your own log. The **Weight log** shows every entry and lets you edit or delete individual weigh-ins.
+Sign in to open your log. Use the avatar at the top right to manage your account or sign out. A new account starts with an empty log. The **Weight log** shows every entry and lets you edit or delete individual weigh-ins.
 
 Entries and height are saved to your account, so the same log opens on any device you sign in on. A change shows right away and is saved in the background. If saving fails, the change is undone and a message says so. Switching back to the tab picks up changes made on another device.
 

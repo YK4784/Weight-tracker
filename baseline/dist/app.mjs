@@ -1,4 +1,4 @@
-import { bmi, calculateTrend, localToday, normalizeState, oneDecimal, positive, prettyDate, sampleEntries, saveWeight, shiftDate, validDate } from "./model.mjs";
+import { bmi, calculateTrend, localToday, normalizeState, oneDecimal, positive, prettyDate, saveWeight, shiftDate, validDate } from "./model.mjs";
 import { TrendChart } from "./chart.mjs";
 import { claimLegacyLog, storageKeyFor } from "./account.mjs";
 import { AuthSetupError, startClerk } from "./auth.mjs";
@@ -15,7 +15,6 @@ let state = null; // The log on screen. Null while signed out or loading.
 let saved = null; // The log as the server last returned it.
 let queue = Promise.resolve(); // Changes reach the server one at a time, in order.
 let unsaved = 0; // Changes sent and not yet answered.
-let demo;
 let trend;
 let range = "30";
 let page = 0;
@@ -84,7 +83,7 @@ function setValue(id, value, unit = "") {
 
 function showMetrics() {
   const latest = trend.readings.at(-1);
-  const height = demo ? 178 : state.height;
+  const height = state.height;
   setValue("avg-value", trend.current?.average);
   document.querySelector(".hero").classList.toggle("is-empty", !trend.current);
   const count = trend.current?.count ?? 0;
@@ -109,7 +108,7 @@ function syncEntryForm(force = false) {
   // aria-disabled keeps the button focusable when repeated presses reach today.
   $("next-day").setAttribute("aria-disabled", String(validDate(date) && date >= today));
   $("save-label").textContent = entry ? "Update entry" : "Save entry";
-  $("entry-hint").textContent = demo ? "Your first entry starts your personal log."
+  $("entry-hint").textContent = !state.entries.length ? "Your first weigh-in starts your log."
     : entry ? "You have a weigh-in on this date." : "Choose an earlier date to add a past weigh-in.";
 }
 
@@ -130,7 +129,7 @@ function showTable(isLog) {
   $("view-log").hidden = isLog || !total;
   $("log-count").hidden = !isLog;
   $("log-count").textContent = total + (total === 1 ? " entry" : " entries");
-  const canEdit = !demo && total > 0;
+  const canEdit = total > 0;
   $("action-heading").hidden = !canEdit;
   $("entry-rows").innerHTML = rows.map(point => {
     const date = prettyDate(point.date, "full");
@@ -164,14 +163,12 @@ function showPage() {
   $("heading-detail").textContent = !isLog || !first ? ""
     : first === last ? prettyDate(first.date, "full")
     : prettyDate(first.date, "full") + " – " + prettyDate(last.date, "full");
-  $("sample-note").hidden = !demo;
   showTable(isLog);
   if (!isLog) chart.update(trend, range, today);
 }
 
 function render() {
-  demo = !state.started;
-  trend = calculateTrend(demo ? sampleEntries(today) : state.entries, today);
+  trend = calculateTrend(state.entries, today);
   $("entry-date").max = today;
   showMetrics();
   syncEntryForm();
@@ -327,16 +324,16 @@ function focusEntry() {
 
 function openProfile() {
   $("profile-height").value = state.height ?? "";
-  $("profile-description").textContent = demo
-    ? "Save your own height to start your log. Your BMI will appear after your first weigh-in."
-    : "Your height and latest weight are used to calculate BMI.";
+  $("profile-description").textContent = trend.readings.length
+    ? "Your height and latest weight are used to calculate BMI."
+    : "Your height and latest weight are used to calculate BMI. Your BMI will appear after your first weigh-in.";
   previewBmi();
   $("profile-dialog").showModal();
   $("profile-height").focus();
 }
 
 function previewBmi() {
-  const latest = demo ? null : trend.readings.at(-1);
+  const latest = trend.readings.at(-1);
   $("profile-bmi").textContent = oneDecimal(bmi(latest?.weight, $("profile-height").valueAsNumber));
 }
 
@@ -408,14 +405,10 @@ $("profile-form").addEventListener("submit", async event => {
   $("profile-dialog").close();
   if (await changeState(current => ({ ...current, started: true, height }), { op: "set-height", height })) notify("Height saved.");
 });
-$("start-log").addEventListener("click", () => {
-  changeState(current => ({ ...current, started: true }), { op: "start" });
-  focusEntry();
-});
 
 $("entry-rows").addEventListener("click", event => {
   const button = event.target.closest("button[data-edit]");
-  if (!button || demo) return;
+  if (!button) return;
   const entry = state.entries.find(item => item.date === button.dataset.edit);
   if (!entry) return;
   editingDate = entry.date;
