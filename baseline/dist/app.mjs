@@ -907,10 +907,7 @@ function showFigures() {
 function syncEntryForm() {
   const date = $("entry-date").value;
   const entry = state.entries.find(item => item.date === date);
-  if (autoFill) {
-    writeWeight("entry-weight", entry?.weight);
-    $("entry-note").value = entry?.note ?? "";
-  }
+  if (autoFill) writeWeight("entry-weight", entry?.weight);
   // aria-disabled keeps the button focusable when repeated presses reach today.
   $("next-day").setAttribute("aria-disabled", String(validDate(date) && date >= today));
   $("save-label").textContent = entry ? "Update entry" : "Save entry";
@@ -2399,7 +2396,7 @@ $("prev-day").addEventListener("click", () => stepDate(-1));
 $("next-day").addEventListener("click", () => {
   if ($("next-day").getAttribute("aria-disabled") !== "true") stepDate(1);
 });
-for (const id of ["entry-weight", "entry-weight-lb", "entry-note"]) $(id).addEventListener("input", () => {
+for (const id of ["entry-weight", "entry-weight-lb"]) $(id).addEventListener("input", () => {
   autoFill = false;
   entryEdits++;
 });
@@ -2515,12 +2512,8 @@ $("entry-form").addEventListener("submit", event => {
     // save loses nothing. Then the form shows the saved weigh-in, unless
     // something new was typed meanwhile.
     const edits = entryEdits;
-    saveWeighIn({
-      date,
-      weight: chosen,
-      // The form shows the date's note, so an empty field removes it.
-      note: cleanNote($("entry-note").value)
-    }, () => {
+    // The form has no note field, so the date's note stays as it is.
+    saveWeighIn({ date, weight: chosen }, () => {
       if (entryEdits !== edits) return;
       autoFill = true;
       syncEntryForm();
@@ -2591,9 +2584,9 @@ $("sheet-add-note").addEventListener("click", () => {
   showSheetNote(true);
   $("sheet-note").focus();
 });
-// "Another day" goes to the log form, set to yesterday. Anything typed in the
-// sheet moves into the form with it. Without a note typed, the form keeps
-// yesterday's note, as it shows when that date is chosen.
+// "Another day" goes to the log form, set to yesterday. A weight typed in the
+// sheet moves into the form with it. The form has no note field, so a note
+// typed in the sheet stays behind.
 $("sheet-other-day").addEventListener("click", () => {
   const date = shiftDate(today, -1, today);
   $("entry-date").value = date;
@@ -2601,7 +2594,6 @@ $("sheet-other-day").addEventListener("click", () => {
   else {
     $("entry-weight").value = $("sheet-weight").value;
     $("entry-weight-lb").value = $("sheet-weight-lb").value;
-    $("entry-note").value = $("sheet-note-field").hidden ? state.entries.find(entry => entry.date === date)?.note ?? "" : $("sheet-note").value;
     autoFill = false;
     entryEdits++;
     sheetAutoFill = true;
