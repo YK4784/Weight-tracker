@@ -451,7 +451,7 @@ Neon keeps a history of every change so the database can be restored to an earli
 
 Baseline's privacy pages and documents:
 
-- **The health data privacy policy,** `baseline/dist/health-data-privacy.html`, served at `/health-data-privacy.html`. It's Baseline's consumer health data privacy policy, on a page of its own. It's linked from the consent step, Your data and the bottom of every page of the app. The service worker keeps it, so it opens offline too.
+- **The health data privacy policy,** `baseline/dist/health-data-privacy.html`, served at `/health-data-privacy.html`. It's Baseline's consumer health data privacy policy, on a page of its own. It's linked from the sign-in screen, under the note about the log, and from the consent step, Your data and the bottom of every page of the app. The service worker keeps it, so it opens offline too.
 - **Your data,** at `#your-data` in the app. It's a one-page summary of the policy, as [Your data](#your-data) describes.
 - **[docs/processors.md](docs/processors.md):** each service that receives users' data, what it gets, where, and its data processing agreement, with the known gaps.
 - **[docs/breach-runbook.md](docs/breach-runbook.md):** what to do if data may have leaked. It covers rotating the keys, working out whose data was exposed, and the deadlines for telling people.

@@ -121,6 +121,9 @@ a { color: inherit; }
 .sign-in { display: flex; justify-content: center; }
 /* A one-off message over the sign-in form, such as after deleting an account. */
 .auth-notice { max-width: 25rem; margin: 0 auto 24px; color: var(--ink); font-weight: 600; text-align: center; text-wrap: pretty; }
+.auth-note { max-width: 25rem; margin: 20px auto 0; color: var(--ink-3); font-size: .875rem; text-align: center; text-wrap: pretty; }
+.auth-note p + p { margin-top: 8px; }
+.auth-note a { color: var(--ink-2); text-underline-offset: 3px; }
 /* The consent step: what Baseline stores, the box to tick and Continue, then
    the ways out for someone who doesn't agree, under a hairline. */
 .consent { max-width: 34rem; margin-inline: auto; }

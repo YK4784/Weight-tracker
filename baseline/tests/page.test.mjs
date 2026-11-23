@@ -54,9 +54,9 @@ test("the health data policy carries the version people agree to", async () => {
   assert.match(policy, /<p class="policy-draft"><strong>Draft\.<\/strong>/, "marked as a draft until a lawyer has reviewed it");
 });
 
-test("the policy is linked from the consent step, Your data and the footer", () => {
+test("the policy is linked from the sign-in screen, the consent step, Your data and the footer", () => {
   const link = /href="\.\/health-data-privacy\.html"/;
-  for (const id of ["consent", "data-view"]) assert.match(section(page, id), link, id);
+  for (const id of ["auth-note", "consent", "data-view"]) assert.match(section(page, id), link, id);
   const footer = page.slice(page.indexOf('<footer class="app-footer">'), page.indexOf("</footer>"));
   assert.match(footer, link);
   assert.match(footer, /href="#your-data"/);
