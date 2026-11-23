@@ -41,10 +41,10 @@ export function weighInsCsv(state, unit = "kg") {
 }
 
 // Everything in the log, as Baseline stores it, in metric units: the units
-// shown, height, the body fat formula, the goal, the reminder's hour and time
-// zone, the weigh-ins with their notes, and the waist measurements. It holds
-// nothing that identifies the account or a device: no user ID, email, or push
-// subscription. `now` is when it was exported.
+// shown, what the overview shows, height, the body fat formula, the goal, the
+// reminder's hour and time zone, the weigh-ins with their notes, and the waist
+// measurements. It holds nothing that identifies the account or a device: no
+// user ID, email, or push subscription. `now` is when it was exported.
 export function exportJson(state, now = new Date()) {
   const log = normalizeState(state);
   const goal = log.goal && {
@@ -59,6 +59,7 @@ export function exportJson(state, now = new Date()) {
     version: EXPORT_VERSION,
     exportedAt: now.toISOString(),
     units: log.units,
+    preferences: log.preferences,
     heightCm: log.height,
     sex: log.sex,
     goal,

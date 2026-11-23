@@ -123,6 +123,38 @@ test("units must be one of the known weight and height units", () => {
   }
 });
 
+test("preferences accept only known keys with the right types", () => {
+  assert.deepEqual(parseOp({ op: "set-preferences", preferences: { showBmi: false } }, NOW), { op: "set-preferences", preferences: { showBmi: false } });
+  assert.deepEqual(parseOp({ op: "set-preferences", preferences: { showBmi: true, showBodyFat: false }, extra: 1 }, NOW),
+    { op: "set-preferences", preferences: { showBmi: true, showBodyFat: false } });
+  // An unknown key turns down the whole change, rather than saving the rest.
+  for (const preferences of [{ showBmi: false, showWeight: false }, { hideNumbers: true }, { constructor: true }, JSON.parse('{"__proto__": {"showBmi": false}}')]) {
+    assert.equal(parseOp({ op: "set-preferences", preferences }, NOW), null, JSON.stringify(preferences));
+  }
+  // So does a value of the wrong type.
+  for (const value of ["false", 0, 1, null, [], {}]) {
+    assert.equal(parseOp({ op: "set-preferences", preferences: { showBmi: value } }, NOW), null, JSON.stringify(value));
+  }
+  // And a change with nothing in it.
+  for (const preferences of [undefined, null, {}, [], [["showBmi", false]], "showBmi", true]) {
+    assert.equal(parseOp({ op: "set-preferences", preferences }, NOW), null, JSON.stringify(preferences));
+  }
+});
+
+test("the API passes cleaned preferences to the store as the signed-in user", async () => {
+  const { calls, send } = setup();
+  assert.equal((await send("POST", { op: "set-preferences", preferences: { showBodyFat: false }, userId: "user_2" })).status, 200);
+  assert.equal((await send("POST", { op: "set-preferences", preferences: { showBodyFat: "no" } })).status, 400);
+  assert.equal((await send("POST", { op: "set-preferences", preferences: { showBmi: false, theme: "dark" } })).status, 400);
+  assert.equal((await send("POST", { op: "set-preferences", preferences: { showBmi: false } }, null)).status, 401);
+  assert.deepEqual(calls, [["user_1", { op: "set-preferences", preferences: { showBodyFat: false } }]]);
+});
+
+test("the preferences column is added to existing databases with an empty object", () => {
+  const statement = schema.find(text => /preferences/.test(text));
+  assert.match(statement, /ALTER TABLE profiles\s+ADD COLUMN IF NOT EXISTS preferences jsonb NOT NULL DEFAULT '\{\}'::jsonb/);
+});
+
 const GOAL = { weight: 60, startDate: "2026-09-13", startWeight: 66, rate: 0.5, milestones: 10 };
 
 test("goals are checked and rounded like weights, with the rate to 0.001 kg a week", () => {

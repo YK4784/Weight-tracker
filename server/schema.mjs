@@ -85,5 +85,10 @@ export const schema = [
   )`,
   // Which body fat formula applies. Null until the first waist is logged.
   `ALTER TABLE profiles
-    ADD COLUMN IF NOT EXISTS sex text CHECK (sex IN ('male', 'female'))`
+    ADD COLUMN IF NOT EXISTS sex text CHECK (sex IN ('male', 'female'))`,
+  // Choices about what the app shows, such as hiding BMI, as one JSON object
+  // (see PREFERENCE_KEYS in model.mjs). A key that isn't set takes its default,
+  // so a new key needs no migration. Changes merge into it (see store.mjs).
+  `ALTER TABLE profiles
+    ADD COLUMN IF NOT EXISTS preferences jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(preferences) = 'object')`
 ];

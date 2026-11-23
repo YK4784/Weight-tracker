@@ -1,4 +1,4 @@
-import { GOAL_MAX_MILESTONES, GOAL_MIN_RATE, GOAL_STORED_MAX_RATE, HEIGHT_UNITS, NOTE_MAX_LENGTH, SEXES, WAIST_MAX, WAIST_MIN, WEIGHT_UNITS, cleanNote, dateOf, dayOf, goalRateAllowed, noteLength, normalizeState, roundHeight, roundRate, roundWaist, roundWeight, validDate, validTimeZone } from "../baseline/dist/model.mjs";
+import { GOAL_MAX_MILESTONES, GOAL_MIN_RATE, GOAL_STORED_MAX_RATE, HEIGHT_UNITS, NOTE_MAX_LENGTH, SEXES, WAIST_MAX, WAIST_MIN, WEIGHT_UNITS, cleanNote, dateOf, dayOf, goalRateAllowed, noteLength, normalizeState, preferencesChange, roundHeight, roundRate, roundWaist, roundWeight, validDate, validTimeZone } from "../baseline/dist/model.mjs";
 import { parseSubscription } from "./push.mjs";
 
 export const MAX_IMPORT_ENTRIES = 20_000;
@@ -56,6 +56,14 @@ export function parseOp(body, now = new Date()) {
       const units = body.units;
       return WEIGHT_UNITS.includes(units?.weight) && HEIGHT_UNITS.includes(units.height)
         ? { op: body.op, units: { weight: units.weight, height: units.height } } : null;
+    }
+    // Some of the preferences (see PREFERENCE_KEYS in model.mjs), such as
+    // whether the overview shows BMI. Every key must be known and have the
+    // right type, or the whole change is turned down. Keys left out keep
+    // their saved value (see store.mjs).
+    case "set-preferences": {
+      const preferences = preferencesChange(body.preferences);
+      return preferences ? { op: body.op, preferences } : null;
     }
     // A daily reminder at a whole hour in the account's time zone. The
     // subscription, when given, adds the device it came from (see push.mjs).

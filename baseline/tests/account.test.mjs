@@ -240,8 +240,8 @@ test("an outbox that can't be written says so, and storage that can't be read co
 test("signing out with changes waiting asks first, counting them", () => {
   assert.equal(signOutWarning(0), null);
   assert.equal(signOutWarning(undefined), null);
-  assert.equal(signOutWarning(1), "1 change on this device hasn’t synced yet. Sign out anyway?");
-  assert.equal(signOutWarning(2), "2 changes on this device haven’t synced yet. Sign out anyway?");
+  assert.equal(signOutWarning(1), "1 change on this device hasn’t synced yet. Signing out deletes it, so it won’t be saved.");
+  assert.equal(signOutWarning(2), "2 changes on this device haven’t synced yet. Signing out deletes them, so they won’t be saved.");
 });
 
 test("after a deletion, the device keeps nothing of the user's log, and nothing that could be imported again", () => {

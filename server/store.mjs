@@ -1,5 +1,6 @@
 import { neon } from "@neondatabase/serverless";
 import { schema } from "./schema.mjs";
+import { normalizePreferences } from "../baseline/dist/model.mjs";
 
 // The most devices an account can get reminders on.
 export const MAX_DEVICES = 10;
@@ -67,6 +68,12 @@ export function createStore(url = process.env.DATABASE_URL) {
       case "set-units":
         return [sql`INSERT INTO profiles (user_id, started, weight_unit, height_unit) VALUES (${userId}, true, ${change.units.weight}, ${change.units.height})
                     ON CONFLICT (user_id) DO UPDATE SET started = true, weight_unit = excluded.weight_unit, height_unit = excluded.height_unit,
+                      updated_at = now()`];
+      // Merges the keys sent into the saved preferences, so a key this change
+      // leaves out, including one only a newer app knows, keeps its value.
+      case "set-preferences":
+        return [sql`INSERT INTO profiles (user_id, started, preferences) VALUES (${userId}, true, ${JSON.stringify(change.preferences)}::jsonb)
+                    ON CONFLICT (user_id) DO UPDATE SET started = true, preferences = profiles.preferences || excluded.preferences,
                       updated_at = now()`];
       // Sets the hour and time zone for every device, and adds this device if it
       // sent its subscription. A device moves to whichever account adds it last.
@@ -139,7 +146,7 @@ export function createStore(url = process.env.DATABASE_URL) {
         ...queries,
         sql`SELECT started, height_cm::float8 AS height, goal_kg::float8 AS goal_weight,
                    to_char(goal_start_date, 'YYYY-MM-DD') AS goal_start_date, goal_start_kg::float8 AS goal_start_weight,
-                   goal_rate_kg_week::float8 AS goal_rate, goal_milestones, weight_unit, height_unit, reminder_hour, time_zone, sex
+                   goal_rate_kg_week::float8 AS goal_rate, goal_milestones, weight_unit, height_unit, preferences, reminder_hour, time_zone, sex
             FROM profiles WHERE user_id = ${userId}`,
         sql`SELECT to_char(date, 'YYYY-MM-DD') AS date, weight_kg::float8 AS weight, note
             FROM weigh_ins WHERE user_id = ${userId} ORDER BY date`,
@@ -153,10 +160,12 @@ export function createStore(url = process.env.DATABASE_URL) {
         rate: profile.goal_rate, milestones: profile.goal_milestones
       };
       const units = { weight: profile?.weight_unit ?? "kg", height: profile?.height_unit ?? "cm" };
+      // Every preference this version knows, with defaults for those not set.
+      const preferences = normalizePreferences(profile?.preferences);
       // Reminders are off without a device to send them to.
       const reminder = profile?.reminder_hour == null || !devices.length ? null
         : { hour: profile.reminder_hour, timeZone: profile.time_zone, devices: devices.map(device => device.endpoint) };
-      const result = { log: { started: Boolean(profile?.started), height: profile?.height ?? null, sex: profile?.sex ?? null, goal, units, reminder, entries, waists } };
+      const result = { log: { started: Boolean(profile?.started), height: profile?.height ?? null, sex: profile?.sex ?? null, goal, units, preferences, reminder, entries, waists } };
       if (change?.op === "update-weight") result.found = results[0].length > 0;
       if (change?.op === "import") result.imported = results[0][0]?.imported > 0;
       return result;

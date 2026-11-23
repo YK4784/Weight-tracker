@@ -119,7 +119,7 @@ a { color: inherit; }
 .page:focus { outline: none; }
 .page-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
 h1 { font-size: 1.125rem; font-weight: 600; color: var(--ink-2); }
-body[data-view="log"] h1 { font-size: 2.25rem; font-weight: 700; line-height: 1.1; letter-spacing: -.025em; color: var(--ink); }
+body:is([data-view="log"], [data-view="settings"]) h1 { font-size: 2.25rem; font-weight: 700; line-height: 1.1; letter-spacing: -.025em; color: var(--ink); }
 .page-detail { margin-top: 8px; color: var(--ink-3); }
 .page-detail:empty { display: none; }
 /* Says the log on screen is the copy kept on this device, and that changes are
@@ -318,14 +318,28 @@ tbody:first-of-type .month-row th { padding-top: 20px; }
 .body-fat .table-wrap { margin-top: 18px; }
 .fat-cell { font-weight: 700; }
 .waist-more { margin-top: 14px; }
-/* Your data: downloads, then deletions, each a row between hairlines. */
-.your-data { margin-top: 48px; padding-top: 36px; border-top: 1px solid var(--rule); }
-.your-data h2 { font-size: 1.375rem; font-weight: 700; letter-spacing: -.015em; }
-.data-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px 40px; padding-block: 18px; border-bottom: 1px solid var(--rule); }
-.your-data h2 + .data-row { margin-top: 14px; border-top: 1px solid var(--ink); }
-.data-row h3 { margin: 0; font-size: 1rem; font-weight: 700; }
-.data-row p { max-width: 60ch; margin-top: 2px; color: var(--ink-2); text-wrap: pretty; }
-.data-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+/* Settings: a section per topic, each a list of rows between hairlines, the
+   first under an ink rule like a table's head. */
+.settings { max-width: 48rem; }
+.settings-section + .settings-section { margin-top: 44px; }
+.settings-section .section-head { margin-bottom: 12px; }
+.settings-section .section-head + * { border-top: 1px solid var(--ink); }
+.setting-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px 40px; padding-block: 16px; border-bottom: 1px solid var(--rule); }
+.setting-row h3 { margin: 0; font-size: 1rem; font-weight: 700; }
+.setting-text p { max-width: 60ch; margin-top: 2px; color: var(--ink-2); text-wrap: pretty; }
+.setting-text .setting-value { margin: 0 0 2px; color: var(--ink); font-size: 1.125rem; font-weight: 700; }
+.setting-value.is-empty, .setting-value .is-empty { color: var(--ink-3); font-weight: 500; }
+.setting-note { margin-left: 4px; color: var(--ink-3); font-size: 1rem; font-weight: 400; }
+.setting-text .account-email { color: var(--ink); overflow-wrap: anywhere; }
+.setting-text .account-email.is-empty { color: var(--ink-3); }
+.setting-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+/* Rows with several long buttons put them under the words. */
+.setting-row.wide-actions { grid-template-columns: minmax(0, 1fr); }
+.wide-actions .setting-actions { justify-content: flex-start; }
+.setting-check { display: flex; align-items: flex-start; gap: 12px; padding-block: 14px; border-bottom: 1px solid var(--rule); cursor: pointer; }
+.setting-check input { flex: none; width: 18px; height: 18px; margin: 3px 0 0; accent-color: var(--accent); cursor: pointer; }
+.setting-name { display: block; font-weight: 700; }
+.setting-hint { display: block; max-width: 60ch; margin-top: 2px; color: var(--ink-2); text-wrap: pretty; }
 .small-button.danger-text { color: var(--danger); }
 .storage-status { margin-top: 48px; color: var(--ink-3); font-size: .875rem; text-align: center; }
 
@@ -384,16 +398,15 @@ body[data-weight-unit="st"] .start-row { grid-template-columns: minmax(0, 1fr); 
 
 @media (max-width: 860px) {
   .top { grid-template-columns: minmax(0, 1fr); gap: 32px; }
-  .data-row { grid-template-columns: minmax(0, 1fr); }
-  .data-actions { justify-content: flex-start; }
   .forecast-body { grid-template-columns: minmax(0, 1fr); }
   .month { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 600px) {
   .wrap { width: calc(100% - 32px); }
-  .masthead-inner { min-height: 56px; }
+  .masthead-inner { min-height: 56px; gap: 12px; }
   .masthead-actions { gap: 8px; }
-  .nav a { padding-inline: 10px; }
+  .nav { gap: 0; }
+  .nav a { padding-inline: 8px; }
   .auth { padding-top: 32px; }
   .auth[data-view="log-loading"] { padding-top: 24px; }
   .bone-title { margin-bottom: 23px; }
@@ -401,7 +414,7 @@ body[data-weight-unit="st"] .start-row { grid-template-columns: minmax(0, 1fr); 
   .skeleton .fact .bone { margin-block: 5px; }
   .page { padding-top: 24px; }
   .page-heading { margin-bottom: 16px; }
-  body[data-view="log"] h1 { font-size: 1.875rem; }
+  body:is([data-view="log"], [data-view="settings"]) h1 { font-size: 1.875rem; }
   .top { padding-bottom: 32px; }
   .facts { display: block; margin-top: 24px; padding-top: 0; border-top: 0; }
   .trend-figures { display: block; margin-top: 12px; padding-bottom: 0; }
@@ -417,7 +430,12 @@ body[data-weight-unit="st"] .start-row { grid-template-columns: minmax(0, 1fr); 
   .entry-panel { padding: 20px; }
   .date-step { flex-basis: 48px; }
   .trend, .entries, .forecast { padding-top: 28px; }
-  .body-fat, .your-data { margin-top: 36px; padding-top: 28px; }
+  .body-fat { margin-top: 36px; padding-top: 28px; }
+  .settings-section + .settings-section { margin-top: 36px; }
+  /* Each row's control goes under its words, lined up with them. */
+  .setting-row { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .setting-actions { justify-content: flex-start; }
+  .setting-actions .unit-switch { margin: 0 0 0 -8px; }
   .chart-wrap { margin-top: 12px; }
   th, td { padding-inline: 6px; }
   th { font-size: .8125rem; }
@@ -434,9 +452,17 @@ body[data-weight-unit="st"] .start-row { grid-template-columns: minmax(0, 1fr); 
 @media (max-width: 440px) {
   .field-row { grid-template-columns: minmax(0, 1fr); }
 }
+/* The wordmark, three links and the avatar share one line down to 320px. */
+@media (max-width: 380px) {
+  .masthead-inner { gap: 8px; }
+  .masthead-actions { gap: 4px; }
+  .wordmark { font-size: 1.125rem; text-underline-offset: 5px; }
+  .nav a { padding-inline: 6px; font-size: .9375rem; }
+}
+@media (max-width: 340px) {
+  .nav a { padding-inline: 4px; }
+}
 @media (max-width: 360px) {
-  .nav { gap: 0; }
-  .nav a { padding-inline: 8px; }
   th, td { padding-inline: 4px; }
   /* Headings wrap only when a table would otherwise be too wide, as with stones. */
   th { vertical-align: bottom; white-space: normal; }

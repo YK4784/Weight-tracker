@@ -285,6 +285,39 @@ export function normalizeReminder(value) {
   return devices.length ? { hour: value.hour, timeZone: value.timeZone, devices } : null;
 }
 
+// Choices about what Baseline shows, kept with the account. Each key has the
+// type its value must have and the value it takes when it isn't set. The
+// server checks a change against these (see parseOp) and merges it into what's
+// saved, so a key an older version of the app doesn't know is never lost.
+// Later keys go here too: G3's showGoal and showChanges, G4's hideNumbers and
+// H9's trendMethod.
+export const PREFERENCE_KEYS = {
+  showBmi: { type: "boolean", fallback: true }, // The BMI fact on the overview.
+  showBodyFat: { type: "boolean", fallback: true } // The body fat fact and the Body fat section.
+};
+
+export function validPreference(key, value) {
+  return Object.hasOwn(PREFERENCE_KEYS, key) && typeof value === PREFERENCE_KEYS[key].type;
+}
+
+// Every known preference, from `value` where it holds a valid one and the
+// default otherwise. Unknown keys are left out.
+export function normalizePreferences(value) {
+  const preferences = {};
+  for (const [key, { fallback }] of Object.entries(PREFERENCE_KEYS)) {
+    preferences[key] = value && typeof value === "object" && Object.hasOwn(value, key) && validPreference(key, value[key]) ? value[key] : fallback;
+  }
+  return preferences;
+}
+
+// A change to some of the preferences, as the app sends it in set-preferences:
+// at least one key, each known and of the right type. Null for anything else.
+export function preferencesChange(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const entries = Object.entries(value);
+  return entries.length && entries.every(([key, item]) => validPreference(key, item)) ? Object.fromEntries(entries) : null;
+}
+
 export function normalizeState(value) {
   const byDate = new Map();
   for (const item of Array.isArray(value?.entries) ? value.entries : []) {
@@ -304,7 +337,8 @@ export function normalizeState(value) {
   const goal = normalizeGoal(value?.goal);
   const units = normalizeUnits(value?.units);
   const reminder = normalizeReminder(value?.reminder);
-  return { version: 1, started: Boolean(value?.started || entries.length || height || goal || waists.length), height, sex, goal, units, reminder, entries, waists };
+  const preferences = normalizePreferences(value?.preferences);
+  return { version: 1, started: Boolean(value?.started || entries.length || height || goal || waists.length), height, sex, goal, units, preferences, reminder, entries, waists };
 }
 
 // Adds or replaces the waist measurement on `date`, and sets which body fat
@@ -315,10 +349,10 @@ export function saveWaist(state, date, waist, sex) {
 }
 
 // What a change sent to the server (see server/ops.mjs) applies to: the
-// weigh-in or waist measurement on its date, or the goal, height, units or
-// reminder. A later change to the same thing replaces an earlier one, so once
-// it's saved, an earlier change to it that failed needn't be sent again.
-// Null for changes that apply to the whole log.
+// weigh-in or waist measurement on its date, or the goal, height, units,
+// reminder or the preferences it sets. A later change to the same thing
+// replaces an earlier one, so once it's saved, an earlier change to it that
+// failed needn't be sent again. Null for changes that apply to the whole log.
 const CHANGE_TARGETS = {
   "save-weight": "weigh-in", "update-weight": "weigh-in", "delete-weight": "weigh-in",
   "save-waist": "waist", "delete-waist": "waist",
@@ -328,6 +362,11 @@ const CHANGE_TARGETS = {
 };
 
 export function changeTarget(change) {
+  // Preferences merge, so only a change to the very same keys replaces another.
+  if (change?.op === "set-preferences") {
+    const preferences = preferencesChange(change.preferences);
+    return preferences && "preferences " + Object.keys(preferences).sort().join(" ");
+  }
   const target = CHANGE_TARGETS[change?.op];
   if (!target) return null;
   return target === "weigh-in" || target === "waist" ? (validDate(change.date) ? target + " " + change.date : null) : target;
@@ -344,7 +383,7 @@ export function saveWeight(state, date, weight, note) {
 // The changes that can wait on the device while it's offline and be sent
 // later, in order (see the outbox in app.mjs). Reminders need a live push
 // subscription, so they aren't among them.
-export const QUEUEABLE_OPS = ["save-weight", "update-weight", "delete-weight", "set-height", "save-waist", "delete-waist", "set-goal", "clear-goal", "set-units"];
+export const QUEUEABLE_OPS = ["save-weight", "update-weight", "delete-weight", "set-height", "save-waist", "delete-waist", "set-goal", "clear-goal", "set-units", "set-preferences"];
 
 // Applies a change the app sends (see server/ops.mjs) to a normalized log, as
 // server/store.mjs does on the server, so the screen can show changes that
@@ -373,6 +412,12 @@ export function applyOp(state, change) {
     case "set-units":
       if (!WEIGHT_UNITS.includes(change.units?.weight) || !HEIGHT_UNITS.includes(change.units.height)) throw new Error("Choose valid units.");
       return normalizeState({ ...state, started: true, units: change.units });
+    // Only the keys sent change, as the server merges them into what it has.
+    case "set-preferences": {
+      const preferences = preferencesChange(change.preferences);
+      if (!preferences) throw new Error("Choose valid preferences.");
+      return normalizeState({ ...state, started: true, preferences: { ...state.preferences, ...preferences } });
+    }
     // The device that sent its subscription joins the others. Without any
     // device, reminders are off, as the server has it.
     case "set-reminder": {

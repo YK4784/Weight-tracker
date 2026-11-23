@@ -164,9 +164,10 @@ export function clearDeviceData(storage, userId) {
   }
 }
 
-// The question to ask before signing out while changes haven't synced, since
+// What Settings says before signing out while changes haven't synced, since
 // signing out removes them. Null when nothing is waiting.
 export function signOutWarning(count) {
   if (!Number.isInteger(count) || count < 1) return null;
-  return (count === 1 ? "1 change on this device hasn’t" : count + " changes on this device haven’t") + " synced yet. Sign out anyway?";
+  return count === 1 ? "1 change on this device hasn’t synced yet. Signing out deletes it, so it won’t be saved."
+    : count + " changes on this device haven’t synced yet. Signing out deletes them, so they won’t be saved.";
 }

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { CM_PER_IN, FORECAST_MAX_DAYS, KG_PER_LB, NOTE_MAX_LENGTH, averageChanges, bodyFat, bodyFatChange, bodyFatHistory, changeTarget, formatWaist, roundWaist, saveWaist, spokenWaist, validWaist, waistParts, formatAmount, formatWeight, fromTenths, heightParts, normalizeUnits, toTenths, weightParts, bmi, calculateRate, calculateTrend, cleanNote, dateOf, dayOf, fastGoalRate, fastLossCaution, forecastGoal, goalProgress, goalRateAllowed, goalRateLimit, groupByMonth, maxGoalRate, monthlyReports, normalizeGoal, normalizeReminder, validTimeZone, normalizeState, noteLength, overallRate, recentRange, saveWeight, shiftDate, validDate } from "../dist/model.mjs";
-import { QUEUEABLE_OPS, applyOp, applyOps } from "../dist/model.mjs";
+import { PREFERENCE_KEYS, QUEUEABLE_OPS, applyOp, applyOps, normalizePreferences, preferencesChange, validPreference } from "../dist/model.mjs";
 
 const first = dayOf("2026-03-01");
 const entry = (index, weight) => ({ date: dateOf(first + index), weight });
@@ -716,6 +716,11 @@ test("a change's target is what it replaces", () => {
   assert.equal(changeTarget({ op: "set-reminder", hour: 8 }), changeTarget({ op: "clear-reminder" }));
   assert.equal(changeTarget({ op: "set-height", height: 178 }), "height");
   assert.equal(changeTarget({ op: "set-units", units: {} }), "units");
+  // Preferences merge, so a change replaces another only when it sets the same keys.
+  assert.equal(changeTarget({ op: "set-preferences", preferences: { showBmi: false } }), changeTarget({ op: "set-preferences", preferences: { showBmi: true } }));
+  assert.notEqual(changeTarget({ op: "set-preferences", preferences: { showBmi: false } }), changeTarget({ op: "set-preferences", preferences: { showBodyFat: false } }));
+  assert.equal(changeTarget({ op: "set-preferences", preferences: { showBodyFat: true, showBmi: true } }), "preferences showBmi showBodyFat");
+  assert.equal(changeTarget({ op: "set-preferences", preferences: { showBmi: "no" } }), null);
   for (const change of [null, {}, { op: "import" }, { op: "start" }, { op: "save-weight" }, { op: "delete-waist", date: "2026-02-30" }]) {
     assert.equal(changeTarget(change), null, JSON.stringify(change));
   }
@@ -751,19 +756,26 @@ test("each change that can wait applies as the server applies it", () => {
   assert.deepEqual(applyOp(log, { op: "set-goal", goal }).goal, goal);
   assert.equal(applyOp(log, { op: "clear-goal" }).goal, null);
   assert.deepEqual(applyOp(log, { op: "set-units", units: { weight: "st", height: "ft" } }).units, { weight: "st", height: "ft" });
+  // Preferences merge: the keys sent change and the rest stay.
+  const hidden = applyOp(log, { op: "set-preferences", preferences: { showBodyFat: false } });
+  assert.deepEqual(hidden.preferences, { showBmi: true, showBodyFat: false });
+  assert.deepEqual(applyOp(hidden, { op: "set-preferences", preferences: { showBmi: false } }).preferences, { showBmi: false, showBodyFat: false });
+  assert.deepEqual(applyOp(hidden, { op: "set-preferences", preferences: { showBodyFat: true } }).preferences, { showBmi: true, showBodyFat: true });
+  // Hiding them deletes nothing.
+  assert.deepEqual({ ...hidden, preferences: log.preferences }, log);
   // Each change leaves the log it was given untouched.
   assert.deepEqual(log, serverLog());
 });
 
 test("every change that can wait is one the app sends, and reminders aren't among them", () => {
-  assert.deepEqual([...QUEUEABLE_OPS].sort(), ["clear-goal", "delete-waist", "delete-weight", "save-waist", "save-weight", "set-goal", "set-height", "set-units", "update-weight"]);
+  assert.deepEqual([...QUEUEABLE_OPS].sort(), ["clear-goal", "delete-waist", "delete-weight", "save-waist", "save-weight", "set-goal", "set-height", "set-preferences", "set-units", "update-weight"]);
   assert.ok(!QUEUEABLE_OPS.includes("set-reminder") && !QUEUEABLE_OPS.includes("clear-reminder") && !QUEUEABLE_OPS.includes("import"));
 });
 
 test("an empty log starts with its first change, as on the server", () => {
   const empty = normalizeState({});
   assert.equal(empty.started, false);
-  for (const change of [{ op: "set-height", height: 170 }, { op: "set-units", units: { weight: "lb", height: "cm" } }, { op: "save-waist", date: "2026-11-21", waist: 80, sex: "male" },
+  for (const change of [{ op: "set-height", height: 170 }, { op: "set-units", units: { weight: "lb", height: "cm" } }, { op: "set-preferences", preferences: { showBmi: false } }, { op: "save-waist", date: "2026-11-21", waist: 80, sex: "male" },
     { op: "set-goal", goal: { weight: 60, startDate: "2026-11-21", startWeight: 65, rate: null, milestones: 10 } }, { op: "save-weight", date: "2026-11-21", weight: 65 }, { op: "start" }]) {
     assert.equal(applyOp(empty, change).started, true, change.op);
   }
@@ -785,7 +797,8 @@ test("a change that isn't valid, or that the app never sends, throws", () => {
   const log = serverLog();
   for (const change of [null, {}, { op: "import", log: {} }, { op: "drop-table" }, { op: "save-weight", date: "2026-11-31", weight: 80 },
     { op: "save-weight", date: "2026-11-22", weight: 0 }, { op: "set-height", height: 0 }, { op: "set-height", height: 401 }, { op: "set-height", height: "180" },
-    { op: "save-waist", date: "2026-11-22", waist: 80, sex: "other" }, { op: "set-goal", goal: { weight: 80 } }, { op: "set-units", units: { weight: "g", height: "cm" } }]) {
+    { op: "save-waist", date: "2026-11-22", waist: 80, sex: "other" }, { op: "set-goal", goal: { weight: 80 } }, { op: "set-units", units: { weight: "g", height: "cm" } },
+    { op: "set-preferences" }, { op: "set-preferences", preferences: {} }, { op: "set-preferences", preferences: { showBmi: 0 } }, { op: "set-preferences", preferences: { showWeight: false } }]) {
     assert.throws(() => applyOp(log, change), JSON.stringify(change));
   }
 });
@@ -811,4 +824,38 @@ test("a change that can't apply is skipped, and the rest still show", () => {
   assert.equal(result.entries.at(-1).date, "2026-11-22");
   assert.equal(result.height, 181);
   assert.deepEqual(applyOps(log, []), log);
+});
+
+test("preferences default to showing BMI and body fat, and keep each valid value", () => {
+  assert.deepEqual(Object.keys(PREFERENCE_KEYS), ["showBmi", "showBodyFat"]);
+  assert.deepEqual(normalizePreferences(undefined), { showBmi: true, showBodyFat: true });
+  assert.deepEqual(normalizePreferences({}), { showBmi: true, showBodyFat: true });
+  // A partial set fills the rest with defaults, and a bad value falls back on its own.
+  assert.deepEqual(normalizePreferences({ showBmi: false }), { showBmi: false, showBodyFat: true });
+  assert.deepEqual(normalizePreferences({ showBodyFat: false }), { showBmi: true, showBodyFat: false });
+  assert.deepEqual(normalizePreferences({ showBmi: "false", showBodyFat: false }), { showBmi: true, showBodyFat: false });
+  assert.deepEqual(normalizePreferences({ showBmi: 0, showBodyFat: null }), { showBmi: true, showBodyFat: true });
+  // Keys this version doesn't know are left out, and so is anything inherited.
+  assert.deepEqual(normalizePreferences({ showBmi: false, hideNumbers: true }), { showBmi: false, showBodyFat: true });
+  assert.deepEqual(normalizePreferences(Object.create({ showBmi: false })), { showBmi: true, showBodyFat: true });
+  for (const value of [null, "showBmi", 5, true, [false, false]]) assert.deepEqual(normalizePreferences(value), { showBmi: true, showBodyFat: true }, JSON.stringify(value));
+});
+
+test("preferences survive normalizing, and alone don't start a log", () => {
+  const state = normalizeState({ preferences: { showBmi: false, showBodyFat: true } });
+  assert.deepEqual(state.preferences, { showBmi: false, showBodyFat: true });
+  assert.deepEqual(normalizeState(state), state);
+  assert.equal(state.started, false);
+  assert.deepEqual(normalizeState(null).preferences, { showBmi: true, showBodyFat: true });
+});
+
+test("a change to preferences needs at least one key, each known and of the right type", () => {
+  assert.equal(validPreference("showBmi", false), true);
+  assert.equal(validPreference("showBmi", "false"), false);
+  assert.equal(validPreference("toString", true), false);
+  assert.deepEqual(preferencesChange({ showBodyFat: false }), { showBodyFat: false });
+  assert.deepEqual(preferencesChange({ showBmi: true, showBodyFat: false }), { showBmi: true, showBodyFat: false });
+  for (const value of [undefined, null, {}, [], "showBmi", { showBmi: 1 }, { showBmi: null }, { showBmi: false, extra: true }, { hideNumbers: true }, JSON.parse('{"__proto__": {"showBmi": false}}')]) {
+    assert.equal(preferencesChange(value), null, JSON.stringify(value));
+  }
 });

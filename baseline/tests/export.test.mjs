@@ -7,7 +7,7 @@ const ENDPOINT = "https://fcm.googleapis.com/fcm/send/device-secret-123";
 
 // A log as the server returns it, with a reminder that lists this device's push endpoint.
 const log = () => normalizeState({
-  started: true, height: 178.5, sex: "female", units: { weight: "lb", height: "ft" },
+  started: true, height: 178.5, sex: "female", units: { weight: "lb", height: "ft" }, preferences: { showBmi: false },
   goal: { weight: 75, startDate: "2026-11-01", startWeight: 84.91, rate: .5, milestones: 10 },
   reminder: { hour: 8, timeZone: "Europe/London", devices: [ENDPOINT] },
   entries: [
@@ -103,6 +103,7 @@ test("the JSON export holds the whole log, in metric units, under a named format
     version: EXPORT_VERSION,
     exportedAt: "2026-11-23T09:41:00.000Z",
     units: { weight: "lb", height: "ft" },
+    preferences: { showBmi: false, showBodyFat: true },
     heightCm: 178.5,
     sex: "female",
     goal: { weightKg: 75, startDate: "2026-11-01", startWeightKg: 84.91, rateKgPerWeek: .5, milestones: 10 },
@@ -130,7 +131,7 @@ test("an empty log exports with empty lists and nulls", () => {
   const data = JSON.parse(exportJson(normalizeState({}), new Date("2026-11-23T00:00:00Z")));
   assert.deepEqual(data, {
     format: "baseline-export", version: 1, exportedAt: "2026-11-23T00:00:00.000Z",
-    units: { weight: "kg", height: "cm" }, heightCm: null, sex: null, goal: null, reminder: null, entries: [], waists: []
+    units: { weight: "kg", height: "cm" }, preferences: { showBmi: true, showBodyFat: true }, heightCm: null, sex: null, goal: null, reminder: null, entries: [], waists: []
   });
 });
 

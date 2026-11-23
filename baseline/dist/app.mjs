@@ -1,6 +1,6 @@
 import { CM_PER_IN, FAST_LOSS_DAYS, FORECAST_MAX_DAYS, GOAL_MILESTONES, GOAL_RATE_CAP, KG_PER_LB, OVERALL_MIN_DAYS, QUEUEABLE_OPS, RATE_DAYS, RATE_MIN_ENTRIES, RATE_MIN_SPAN, SEXES, WINDOW_DAYS, applyOps, averageChanges, bmi, bodyFat, bodyFatChange, bodyFatHistory, calculateRate, changeTarget, calculateTrend, cleanNote, dateOf, dayOf, fastGoalRate, fastLossCaution, forecastGoal, formatAmount, formatWaist, formatWeight, fromTenths, goalProgress, goalRateAllowed, goalRateLimit, groupByMonth, heightParts, localToday, maxGoalRate, monthlyReports, normalizeGoal, normalizeState, oneDecimal, overallRate, positive, prettyDate, recentRange, roundHeight, roundWaist, roundWeight, shiftDate, spokenHeight, spokenWeight, toTenths, validDate, validWaist, waistParts, waistTenths, weightParts } from "./model.mjs";
 import { BodyFatChart, TrendChart } from "./chart.mjs";
-import { claimLegacyLog, clearDeviceData, clearLogCache, fastLossHiddenKeyFor, lastUser, readLogCache, readOutbox, storageKeyFor, writeLogCache, writeOutbox } from "./account.mjs";
+import { claimLegacyLog, clearDeviceData, clearLogCache, fastLossHiddenKeyFor, lastUser, readLogCache, readOutbox, signOutWarning, storageKeyFor, writeLogCache, writeOutbox } from "./account.mjs";
 import { csvFileName, exportJson, jsonFileName, weighInsCsv } from "./export.mjs";
 import { AuthSetupError, startClerk } from "./auth.mjs";
 import { PUSH_PUBLIC_KEY } from "./config.mjs";
@@ -314,6 +314,7 @@ function changeName(change) {
     case "clear-goal": return "the removal of your goal";
     case "set-height": return "your height";
     case "set-units": return "your choice of units";
+    case "set-preferences": return "your choice of what the overview shows";
     default: return "a change";
   }
 }
@@ -531,13 +532,13 @@ function showMetrics() {
   showFigures();
   setWeight("weight-value", latest?.weight);
   $("weight-detail").textContent = latest ? shortDate(latest.date) : "";
-  setText("height-value", height ? heightParts(height, state.units.height).map(part => part.join(" ")).join(" ") : null);
-  $("height-label").textContent = height ? "Edit" : "Add";
-  $("height-label").setAttribute("aria-label", height ? "Edit height, currently " + spokenHeight(height, state.units.height) : "Add your height for BMI");
+  // Height lives in Settings. Without one, BMI offers to add it here.
+  $("bmi-fact").hidden = !state.preferences.showBmi;
   setValue("bmi-value", bmi(latest?.weight, height));
+  $("bmi-add").hidden = Boolean(height);
+  $("fat-fact").hidden = !state.preferences.showBodyFat;
   showFatFact();
   showGoal();
-  showReminder();
 }
 
 // Body fat as shown, to 0.1 of a percent: "24.3%".
@@ -995,9 +996,10 @@ function showMonths() {
   $("months-note").hidden = !reports.length;
 }
 
-const VIEWS = { "#weight-log": "entries", "#monthly-summary": "months" };
-// "overview", or one of the log's views: "entries" or "months".
+const VIEWS = { "#weight-log": "entries", "#monthly-summary": "months", "#settings": "settings" };
+// "overview", one of the log's views ("entries" or "months"), or "settings".
 function currentView() { return VIEWS[location.hash] ?? "overview"; }
+const VIEW_TITLES = { overview: "Baseline", entries: "Weight log · Baseline", months: "Monthly summary · Baseline", settings: "Settings · Baseline" };
 
 function markCurrent(links, current) {
   for (const id of links) {
@@ -1008,16 +1010,21 @@ function markCurrent(links, current) {
 
 function showPage() {
   const view = currentView();
-  const isLog = view !== "overview";
-  document.body.dataset.view = isLog ? "log" : "overview";
-  document.title = view === "months" ? "Monthly summary · Baseline" : isLog ? "Weight log · Baseline" : "Baseline";
+  // The page the nav marks: "overview", "log" or "settings".
+  const section = view === "entries" || view === "months" ? "log" : view;
+  const isLog = section === "log";
+  document.body.dataset.view = section;
+  document.title = VIEW_TITLES[view];
   // The overview is a page for today, so today's date is its heading.
-  $("page-title").textContent = isLog ? "Weight log" : prettyDate(today, "day");
-  $("overview-view").hidden = isLog;
+  $("page-title").textContent = isLog ? "Weight log" : section === "settings" ? "Settings" : prettyDate(today, "day");
+  $("overview-view").hidden = section !== "overview";
   $("log-tabs").hidden = !isLog;
-  $("entries").hidden = view === "months";
+  $("entries").hidden = section === "settings" || view === "months";
   $("months").hidden = view !== "months";
-  markCurrent(["overview-link", "log-link"], isLog ? "log-link" : "overview-link");
+  $("settings-view").hidden = section !== "settings";
+  // Settings shows the account in full, so the line about it would repeat it.
+  $("storage-status").hidden = section === "settings";
+  markCurrent(["overview-link", "log-link", "settings-link"], section + "-link");
   markCurrent(["entries-link", "months-link"], view === "months" ? "months-link" : "entries-link");
   const first = trend.readings[0];
   const last = trend.readings.at(-1);
@@ -1026,14 +1033,12 @@ function showPage() {
     : (first === last ? prettyDate(first.date, "full") : prettyDate(first.date, "full") + " – " + prettyDate(last.date, "full")) +
       " · " + total + (total === 1 ? " entry" : " entries");
   if (view === "months") showMonths();
-  else showTable(isLog);
-  // Body fat sits under the recent entries, on the overview only, and "Your data" at the bottom of the log.
-  $("body-fat").hidden = isLog;
-  $("your-data").hidden = !isLog;
-  if (!isLog) {
-    drawChart();
-    showBodyFat();
-  }
+  else if (section !== "settings") showTable(isLog);
+  // Body fat sits under the recent entries, on the overview only, unless it's hidden in Settings.
+  const bodyFatShown = section === "overview" && state.preferences.showBodyFat;
+  $("body-fat").hidden = !bodyFatShown;
+  if (section === "overview") drawChart();
+  if (bodyFatShown) showBodyFat();
 }
 
 function drawChart() {
@@ -1049,14 +1054,20 @@ function render() {
   $("entry-date").max = today;
   applyUnits();
   showMetrics();
+  showSettings();
   syncEntryForm();
   showPage();
-  showStorageStatus();
+  showAccount();
   showLogStatus();
 }
 
-function showStorageStatus() {
+// The account: the line at the bottom of the page and, in Settings, the email
+// and what "Your data" offers.
+function showAccount() {
   $("storage-status").textContent = (account.email ? "Signed in as " + account.email + ". " : "") + "Your log is saved to your account.";
+  // Before Clerk has loaded, the log on screen is the copy on this device, which doesn't keep the email.
+  $("account-email").textContent = account.email || "Shows once Baseline reaches your account.";
+  $("account-email").classList.toggle("is-empty", !account.email);
   showYourData();
 }
 
@@ -1187,7 +1198,7 @@ async function confirmLog(user) {
   account.confirmed = true;
   account.email = emailOf(user);
   cacheUpdating = true;
-  showStorageStatus();
+  showAccount();
   showLogStatus();
   let result;
   try {
@@ -1244,7 +1255,7 @@ function showSignedIn(user) {
   else {
     // The email, or whether the user may delete their account, can change.
     account.email = emailOf(user);
-    showStorageStatus();
+    showAccount();
     // A change the server turned away for want of a sign-in can go now.
     if (syncProblem === "sign-in") syncOutbox();
   }
@@ -1382,8 +1393,8 @@ function setInput(id, attributes) {
 // still means the same weight or height.
 function applyUnits() {
   const { weight: weightUnit, height: heightUnit } = state.units;
-  for (const button of document.querySelectorAll("#weight-units [data-unit]")) button.setAttribute("aria-pressed", String(button.dataset.unit === weightUnit));
-  for (const button of document.querySelectorAll("#height-units [data-unit], #waist-units [data-unit]")) button.setAttribute("aria-pressed", String(button.dataset.unit === heightUnit));
+  for (const button of document.querySelectorAll(":is(#weight-units, #settings-weight-units) [data-unit]")) button.setAttribute("aria-pressed", String(button.dataset.unit === weightUnit));
+  for (const button of document.querySelectorAll(":is(#height-units, #waist-units, #settings-length-units) [data-unit]")) button.setAttribute("aria-pressed", String(button.dataset.unit === heightUnit));
   document.body.dataset.weightUnit = weightUnit;
   const previous = fieldUnits;
   if (previous?.weight !== weightUnit) {
@@ -1595,6 +1606,31 @@ function showReminder() {
   if ($("reminder-dialog").open) showReminderStatus();
 }
 
+// The settings page: units (see applyUnits), height, the reminder, what the
+// overview shows, your data and your account (see showAccount).
+function showSettings() {
+  const height = state.height;
+  $("height-value").textContent = height ? heightParts(height, state.units.height).map(part => part.join(" ")).join(" ") : "Not set";
+  $("height-value").classList.toggle("is-empty", !height);
+  $("height-label").textContent = height ? "Edit" : "Add";
+  $("height-label").setAttribute("aria-label", height ? "Edit height, currently " + spokenHeight(height, state.units.height) : "Add your height for BMI");
+  showReminder();
+  for (const input of document.querySelectorAll("[data-preference]")) input.checked = state.preferences[input.dataset.preference];
+}
+
+// What each preference's checkbox says once its change is saved.
+const preferenceMessages = {
+  showBmi: { true: "BMI shows on the overview again.", false: "BMI hidden from the overview. Your height is kept." },
+  showBodyFat: { true: "Body fat shows on the overview again.", false: "Body fat hidden from the overview. Your waist measurements are kept." }
+};
+
+// Hiding something on the overview changes only what shows, so it can wait on
+// the device like units can.
+function changePreference(key, value) {
+  if (state.preferences[key] === value) return;
+  changeState({ op: "set-preferences", preferences: { [key]: value } }, () => notify(preferenceMessages[key][value]));
+}
+
 // Whether this device can get reminders: "ready", "blocked" (notifications are
 // turned off for the site), "home-screen" (an iPhone or iPad, where push needs
 // Baseline on the Home Screen) or "unsupported".
@@ -1678,8 +1714,7 @@ async function startWorker() {
   if (state) showReminder();
 }
 
-// "Your data": downloading the log, and deleting it or the whole account. The
-// section sits at the bottom of the log; F2's settings page moves it there.
+// "Your data", in Settings: downloading the log, and deleting it or the whole account.
 const DELETE_WORD = "delete"; // What the user types to confirm, and what server/ops.mjs checks.
 let erasing = null; // What the delete dialog deletes: "data" or "account".
 let accountDataGone = false; // The account's rows are deleted, and only the Clerk user is left.
@@ -1873,6 +1908,78 @@ async function deleteAccount() {
   if (account) showSignedOut();
 }
 
+// "Manage account" opens Clerk's account page, where the email, password and
+// sign-in methods change.
+async function manageAccount() {
+  if (navigator.onLine === false) {
+    notify("Managing your account needs a connection. Try again when you’re back online.");
+    return;
+  }
+  const userId = account.id;
+  let instance;
+  try {
+    instance = await connectClerk();
+  } catch (error) {
+    console.error(error);
+    if (account?.id === userId) notify("Couldn’t reach your account. Check your connection and try again.", { error: true });
+    return;
+  }
+  if (instance.user?.id === userId) instance.openUserProfile();
+}
+
+// Signing out removes the log from this device, with any changes that haven't
+// synced, so it asks first when there are some. It needs a connection: Clerk
+// ends the session on its server, and offline it would end only here.
+function signOut() {
+  if (navigator.onLine === false) {
+    notify("Signing out needs a connection. Try again when you’re back online.");
+    return;
+  }
+  loadOutbox();
+  const warning = signOutWarning(outbox.length);
+  if (!warning) {
+    finishSignOut();
+    return;
+  }
+  $("sign-out-warning").textContent = warning;
+  $("sign-out-dialog").showModal();
+  $("sign-out-dialog").querySelector(".button.secondary").focus();
+}
+
+async function finishSignOut() {
+  const userId = account?.id;
+  if (!userId) return;
+  let instance;
+  try {
+    instance = await connectClerk();
+  } catch (error) {
+    console.error(error);
+    if (account?.id === userId) notify("Couldn’t sign out. Check your connection and try again.", { error: true });
+    return;
+  }
+  if (instance.user?.id !== userId) return;
+  try {
+    // Without a callback Clerk reloads the page before it says the user has
+    // gone, so the copy on this device would outlast the session until the
+    // next load. With one, it stays on the page: the device's copy is removed
+    // first, then Clerk's listener shows sign-in (see showSignedOut).
+    await instance.signOut(() => {
+      try { clearLogCache(localStorage); } catch { /* Storage is blocked, so nothing was kept. */ }
+    });
+  } catch (error) {
+    console.error(error);
+    if (account?.id !== userId) return;
+    // Still signed in, so the copy on this device comes back.
+    try { writeLogCache(localStorage, userId, saved); } catch { /* The next reply caches it. */ }
+    if (outbox.length && !outboxInPage) {
+      try { writeOutbox(localStorage, userId, outbox); } catch { outboxInPage = true; }
+    }
+    notify("Couldn’t sign out. Check your connection and try again.", { error: true });
+    return;
+  }
+  if (account?.id === userId && !instance.user) showSignedOut();
+}
+
 function previewBmi() {
   const latest = trend.readings.at(-1);
   $("profile-bmi").textContent = oneDecimal(bmi(latest?.weight, readHeight()));
@@ -2047,11 +2154,11 @@ $("clear-reminder").addEventListener("click", () => {
   });
 });
 for (const id of ["profile-height", "profile-height-in"]) $(id).addEventListener("input", previewBmi);
-$("weight-units").addEventListener("click", event => {
+for (const id of ["weight-units", "settings-weight-units"]) $(id).addEventListener("click", event => {
   const choice = event.target.closest("[data-unit]")?.dataset.unit;
   if (choice) changeUnits({ ...state.units, weight: choice }, "Weights now show in " + unitNames[choice] + ".");
 });
-for (const id of ["height-units", "waist-units"]) $(id).addEventListener("click", event => {
+for (const id of ["height-units", "waist-units", "settings-length-units"]) $(id).addEventListener("click", event => {
   const choice = event.target.closest("[data-unit]")?.dataset.unit;
   if (choice) changeUnits({ ...state.units, height: choice }, lengthMessage(choice));
 });
@@ -2155,6 +2262,16 @@ $("confirm-delete").addEventListener("click", () => {
   changeState({ op: "delete-weight", date }, () => notify("Weigh-in deleted."));
 });
 $("edit-dialog").addEventListener("close", () => { editingDate = null; });
+$("settings-view").addEventListener("change", event => {
+  const key = event.target.dataset.preference;
+  if (key) changePreference(key, event.target.checked);
+});
+$("manage-account").addEventListener("click", manageAccount);
+$("sign-out").addEventListener("click", signOut);
+$("confirm-sign-out").addEventListener("click", () => {
+  $("sign-out-dialog").close();
+  finishSignOut();
+});
 $("download-csv").addEventListener("click", downloadCsv);
 $("download-json").addEventListener("click", downloadJson);
 $("erase-download").addEventListener("click", downloadJson);
