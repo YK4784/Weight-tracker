@@ -1,5 +1,5 @@
 // Account helpers that don't touch the DOM, so Node can test them.
-import { normalizeState } from "./model.mjs";
+import { QUEUEABLE_OPS, normalizeState } from "./model.mjs";
 
 export const LEGACY_STORAGE_KEY = "baseline.weight-log.v1";
 
@@ -93,9 +93,59 @@ export function writeLogCache(storage, userId, log, savedAt = Date.now()) {
   }
 }
 
-// Removes every cached log and the last user, so no weights stay on the
-// device. Called whenever a log closes, such as on sign-out.
-export function clearLogCache(storage) {
+// Removes every cached log, the last user and every outbox, so no weights stay
+// on the device. Called whenever a log closes, such as on sign-out, so changes
+// that haven't synced go too, unless `keepOutbox` says they're the only copy
+// left and nobody signed out.
+export function clearLogCache(storage, { keepOutbox = false } = {}) {
   for (const key of cacheKeys(storage)) storage.removeItem(key);
   storage.removeItem(LAST_USER_KEY);
+  if (!keepOutbox) clearOutbox(storage);
+}
+
+// The outbox: changes made on this device that the server doesn't have yet,
+// oldest first, as [{ id, change }]. Each is a change the app sends (see
+// server/ops.mjs) that can wait (see QUEUEABLE_OPS). It's kept per user, so a
+// change made offline survives a reload and is sent as the account that made it.
+export const OUTBOX_PREFIX = "baseline.outbox.v1:";
+
+export function outboxKeyFor(userId) {
+  return OUTBOX_PREFIX + userId;
+}
+
+const validItem = item => typeof item?.id === "string" && item.id.length > 0 && QUEUEABLE_OPS.includes(item.change?.op);
+
+// A user's outbox. Anything that doesn't parse, or was saved for someone else,
+// counts as empty, and an item that isn't a change that can wait is skipped.
+export function readOutbox(storage, userId) {
+  if (!validUserId(userId)) return [];
+  let record;
+  try { record = JSON.parse(storage.getItem(outboxKeyFor(userId))); } catch { return []; }
+  if (record?.userId !== userId || !Array.isArray(record.changes)) return [];
+  const ids = new Set();
+  return record.changes.filter(item => validItem(item) && !ids.has(item.id) && ids.add(item.id)).map(({ id, change }) => ({ id, change }));
+}
+
+// Saves a user's outbox. An empty one removes the key. Throws if storage can't
+// be written, so the caller knows the changes live only in the page.
+export function writeOutbox(storage, userId, items) {
+  if (!validUserId(userId)) throw new Error("An outbox needs a user id.");
+  if (!items.length) storage.removeItem(outboxKeyFor(userId));
+  else storage.setItem(outboxKeyFor(userId), JSON.stringify({ userId, changes: items.map(({ id, change }) => ({ id, change })) }));
+}
+
+export function clearOutbox(storage) {
+  const keys = [];
+  for (let index = 0; index < storage.length; index++) {
+    const key = storage.key(index);
+    if (key?.startsWith(OUTBOX_PREFIX)) keys.push(key);
+  }
+  for (const key of keys) storage.removeItem(key);
+}
+
+// The question to ask before signing out while changes haven't synced, since
+// signing out removes them. Null when nothing is waiting.
+export function signOutWarning(count) {
+  if (!Number.isInteger(count) || count < 1) return null;
+  return (count === 1 ? "1 change on this device hasn’t" : count + " changes on this device haven’t") + " synced yet. Sign out anyway?";
 }

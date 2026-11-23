@@ -1,6 +1,6 @@
-import { CM_PER_IN, FAST_LOSS_DAYS, FORECAST_MAX_DAYS, GOAL_MILESTONES, GOAL_RATE_CAP, KG_PER_LB, OVERALL_MIN_DAYS, RATE_DAYS, RATE_MIN_ENTRIES, RATE_MIN_SPAN, SEXES, WINDOW_DAYS, averageChanges, bmi, bodyFat, bodyFatChange, bodyFatHistory, calculateRate, changeTarget, calculateTrend, cleanNote, dateOf, dayOf, fastGoalRate, fastLossCaution, forecastGoal, formatAmount, formatWaist, formatWeight, fromTenths, goalProgress, goalRateAllowed, goalRateLimit, groupByMonth, heightParts, localToday, maxGoalRate, monthlyReports, normalizeGoal, normalizeState, oneDecimal, overallRate, positive, prettyDate, recentRange, roundHeight, roundWaist, roundWeight, saveWaist, saveWeight, shiftDate, spokenHeight, spokenWeight, toTenths, validDate, validWaist, waistParts, waistTenths, weightParts } from "./model.mjs";
+import { CM_PER_IN, FAST_LOSS_DAYS, FORECAST_MAX_DAYS, GOAL_MILESTONES, GOAL_RATE_CAP, KG_PER_LB, OVERALL_MIN_DAYS, QUEUEABLE_OPS, RATE_DAYS, RATE_MIN_ENTRIES, RATE_MIN_SPAN, SEXES, WINDOW_DAYS, applyOps, averageChanges, bmi, bodyFat, bodyFatChange, bodyFatHistory, calculateRate, changeTarget, calculateTrend, cleanNote, dateOf, dayOf, fastGoalRate, fastLossCaution, forecastGoal, formatAmount, formatWaist, formatWeight, fromTenths, goalProgress, goalRateAllowed, goalRateLimit, groupByMonth, heightParts, localToday, maxGoalRate, monthlyReports, normalizeGoal, normalizeState, oneDecimal, overallRate, positive, prettyDate, recentRange, roundHeight, roundWaist, roundWeight, shiftDate, spokenHeight, spokenWeight, toTenths, validDate, validWaist, waistParts, waistTenths, weightParts } from "./model.mjs";
 import { BodyFatChart, TrendChart } from "./chart.mjs";
-import { claimLegacyLog, clearLogCache, lastUser, readLogCache, storageKeyFor, writeLogCache } from "./account.mjs";
+import { claimLegacyLog, clearLogCache, lastUser, readLogCache, readOutbox, storageKeyFor, writeLogCache, writeOutbox } from "./account.mjs";
 import { AuthSetupError, startClerk } from "./auth.mjs";
 import { PUSH_PUBLIC_KEY } from "./config.mjs";
 
@@ -18,12 +18,27 @@ let mounted = null; // Which Clerk component is on the page: "sign-in" or "user"
 // that this user is signed in.
 let account = null;
 let session = null; // The open log. Replies meant for an earlier one are ignored.
-let state = null; // The log on screen. Null while signed out or loading.
+let state = null; // The log on screen: `saved` with the changes on their way replayed on top. Null while signed out or loading.
 let saved = null; // The log as the server last returned it, or as it was cached on this device.
 let cachedAt = null; // When the cached copy on screen was saved. Null once the server has answered.
 let cacheUpdating = false; // Whether the server's copy is on its way to replace the cached one.
-let queue = Promise.resolve(); // Changes reach the server one at a time, in order.
-let unsaved = 0; // Changes sent and not yet answered.
+let queue = Promise.resolve(); // Requests reach the server one at a time, in order.
+
+// The outbox holds every change that can wait (see QUEUEABLE_OPS) from the
+// moment it's made until the server has it, so a change survives a failed
+// request, going offline and a reload. It lives in localStorage under the
+// account (see readOutbox), and syncOutbox sends it in order, one change at a
+// time. Changes that need a connection, such as reminders, skip it (see sendNow).
+let outbox = []; // [{ id, change }], oldest first.
+let outboxInPage = false; // Whether storage failed, so the outbox lives only in this page.
+// Changes made in this page that are in the outbox, by id: { done, kept, announced, resolve }.
+// `announced` is whether the user has been told the change is saved on this device.
+const madeHere = new Map();
+let sending = []; // Changes that skip the outbox, sent and not yet answered: [{ change }].
+let syncing = null; // The running syncOutbox, or null.
+let syncProblem = null; // Why the outbox stopped: "offline", "server" or "sign-in". Null when it didn't.
+let syncTimer; // Tries the outbox again while the device seems to have a connection.
+const SYNC_RETRY = 60_000;
 let trend;
 let weeklyRate; // calculateRate for today, or null.
 let progress; // goalProgress for today's average, or null without a goal.
@@ -134,61 +149,285 @@ function connectClerk() {
   return clerkReady;
 }
 
+// A request that couldn't reach the server: the device is offline, the network
+// failed or took too long, or sign-in couldn't load or give a token. It may
+// work later.
+class Unreachable extends Error {
+  constructor(cause) {
+    super("Couldn’t reach Baseline.", { cause });
+    this.name = "Unreachable";
+  }
+}
+
+// The server answered with an error status.
+class Refused extends Error {
+  constructor(status) {
+    super("The log request failed with status " + status + ".");
+    this.name = "Refused";
+    this.status = status;
+  }
+}
+
+const REQUEST_TIMEOUT = 15_000;
+
 // Reads the log, or applies one change to it on the server (see server/ops.mjs),
 // for the account `userId`. It waits for Clerk and a session token first, so a
 // change made to the cached log before Clerk has loaded is sent once it has.
-// Resolves to { log, ... } as the server returns it.
+// Resolves to { log, ... } as the server returns it. Rejects with Unreachable
+// when the server can't be reached, and Refused when it answers with an error.
 async function sendLog(change, userId) {
-  const instance = await connectClerk();
+  if (navigator.onLine === false) throw new Unreachable(new Error("The browser is offline."));
+  let instance;
+  try { instance = await connectClerk(); } catch (error) { throw error instanceof AuthSetupError ? error : new Unreachable(error); }
   // A change made to one account's log is never sent as another account.
   if (!userId || instance.user?.id !== userId) throw new Error("The log's account isn't the one signed in.");
-  const token = await instance.session?.getToken();
-  if (!token) throw new Error("Not signed in.");
-  const response = await fetch("/api/log", {
-    method: change ? "POST" : "GET",
-    headers: { Authorization: "Bearer " + token, ...(change && { "Content-Type": "application/json" }) },
-    body: change ? JSON.stringify(change) : undefined,
-    cache: "no-store"
-  });
-  if (!response.ok) throw new Error("The log request failed with status " + response.status + ".");
-  return response.json();
+  let token;
+  try { token = await instance.session?.getToken(); } catch (error) { throw new Unreachable(error); }
+  // Clerk still has the user, so a missing token means it couldn't refresh one.
+  if (!token) throw new Unreachable(new Error("No session token."));
+  let response;
+  try {
+    response = await fetch("/api/log", {
+      method: change ? "POST" : "GET",
+      headers: { Authorization: "Bearer " + token, ...(change && { "Content-Type": "application/json" }) },
+      body: change ? JSON.stringify(change) : undefined,
+      cache: "no-store",
+      signal: AbortSignal.timeout?.(REQUEST_TIMEOUT)
+    });
+    // A redirect comes from a network that wants a sign-in of its own, as some Wi-Fi does.
+    if (response.ok && !response.redirected) return await response.json();
+  } catch (error) {
+    throw new Unreachable(error);
+  }
+  if (response.redirected) throw new Unreachable(new Error("The request was redirected."));
+  throw new Refused(response.status);
 }
 
-// Shows a change at once, then saves it. Once nothing else is on its way, the
-// server's copy replaces the screen. A failed save falls back to the saved
-// copy, and the toast offers "Try again", which sends the same change again.
-// `done(reply)` runs once the change is saved, whether at first or on a retry.
-// Resolves to the server's reply, or null if the change wasn't saved.
-async function changeState(change, request, done = null) {
+// Runs `task` once the requests before it have finished.
+function enqueue(task) {
+  const result = queue.then(task);
+  queue = result.catch(() => {});
+  return result;
+}
+
+const newId = () => crypto.randomUUID?.() ?? Date.now().toString(36) + Math.random().toString(36).slice(2);
+
+// Reads this account's outbox again, in case another tab changed it.
+function loadOutbox() {
+  if (outboxInPage) return;
+  try { outbox = readOutbox(localStorage, account.id); } catch { outboxInPage = true; }
+}
+
+// Changes the outbox in storage, or only in the page if storage fails.
+function editOutbox(edit) {
+  if (!outboxInPage) {
+    try {
+      const next = edit(readOutbox(localStorage, account.id));
+      writeOutbox(localStorage, account.id, next);
+      outbox = next;
+      return;
+    } catch {
+      outboxInPage = true;
+    }
+  }
+  outbox = edit(outbox);
+}
+
+// The log on screen: the server's copy with every change still on its way
+// replayed on top, in order.
+function showState() {
+  state = applyOps(saved, [...outbox, ...sending].map(item => item.change));
+  render();
+}
+
+// Shows a change at once, then saves it. A change that can wait goes into the
+// outbox first, and syncOutbox sends it. If it can't be sent for lack of a
+// connection, it stays on this device and is sent later. If the server turns
+// it down or fails, it's undone, and the toast offers "Try again", which makes
+// the same change again. `kept()` runs once the change is saved, on the server
+// or on this device; `done(reply)` runs once the server has it, at first or on
+// a retry. Resolves to the server's reply, or null if the server doesn't have
+// the change yet.
+function changeState(change, done = null, kept = null) {
+  if (!QUEUEABLE_OPS.includes(change.op)) return sendNow(change, done);
+  const item = { id: newId(), change };
+  editOutbox(items => [...items, item]);
+  const reply = new Promise(resolve => madeHere.set(item.id, { done, kept, announced: false, resolve }));
+  showState();
+  syncOutbox();
+  return reply;
+}
+
+// Sends a change that needs a connection straight away. If it fails, it's
+// undone, and the toast offers "Try again".
+async function sendNow(change, done) {
   const current = session;
   const userId = account.id;
-  state = normalizeState(change(state));
-  render();
-  unsaved++;
-  const reply = queue.then(() => sendLog(request, userId));
-  queue = reply.catch(() => {});
+  const item = { change };
+  sending.push(item);
+  showState();
   let result = null;
-  try { result = await reply; } catch (error) { console.error(error); }
+  try { result = await enqueue(() => sendLog(change, userId)); } catch (error) { console.error(error); }
   if (session !== current) return null;
-  unsaved--;
+  sending = sending.filter(other => other !== item);
   if (result) receive(result.log);
-  if (!result || !unsaved) {
-    state = saved;
-    render();
-  }
-  const target = changeTarget(request);
+  showState();
   if (!result) {
-    notify("Couldn’t save that change. Check your connection and try again.", {
-      error: true,
-      action: { label: "Try again", run: () => changeState(change, request, done) }
-    }).target = target;
+    saveFailed(change, done);
     return null;
   }
+  savedChange(change, null, done, result);
+  return result;
+}
+
+// A change made in this page has reached the server.
+function savedChange(change, kept, done, result) {
   // Saving the same thing again, by "Try again" or from the form, settles the
   // error about it, which would otherwise offer to send an older change.
+  const target = changeTarget(change);
   if (target && toast?.target === target) closeToast();
+  kept?.();
   done?.(result);
-  return result;
+}
+
+function saveFailed(change, done = null, kept = null) {
+  notify("Couldn’t save that change. Check your connection and try again.", {
+    error: true,
+    action: { label: "Try again", run: () => changeState(change, done, kept) }
+  }).target = changeTarget(change);
+}
+
+// What a change was, for a message: "the weigh-in for Nov 23".
+function changeName(change) {
+  const day = validDate(change.date) ? " for " + prettyDate(change.date) : "";
+  switch (change.op) {
+    case "save-weight":
+    case "update-weight": return "the weigh-in" + day;
+    case "delete-weight": return "the deletion of the weigh-in" + day;
+    case "save-waist": return "the waist measurement" + day;
+    case "delete-waist": return "the deletion of the waist measurement" + day;
+    case "set-goal": return "your goal";
+    case "clear-goal": return "the removal of your goal";
+    case "set-height": return "your height";
+    case "set-units": return "your choice of units";
+    default: return "a change";
+  }
+}
+
+// Whether the server turned a change down for good, rather than failing for now.
+const turnedDown = error => error instanceof Refused && error.status >= 400 && error.status < 500 && ![401, 408, 429].includes(error.status);
+
+// Sends the outbox to the server, oldest change first, one at a time, through
+// the queue. It stops at a change it can't send yet, so nothing goes out of
+// order, and tries again on the next sign-in, `online` event, return to the
+// tab or SYNC_RETRY. A change the server turns down is dropped. Resolves once
+// it has stopped; while it runs, calling it again returns the same promise.
+function syncOutbox() {
+  if (!syncing && account) {
+    const current = session;
+    // It starts once `syncing` is set, so the status line says it's syncing.
+    const run = syncing = Promise.resolve().then(() => sendOutbox(current)).finally(() => {
+      if (syncing === run) syncing = null;
+      if (session === current) showLogStatus();
+    });
+  }
+  return syncing;
+}
+
+async function sendOutbox(current) {
+  const userId = account.id;
+  clearTimeout(syncTimer);
+  syncProblem = null;
+  let synced = false; // Whether a change that had waited on this device reached the server.
+  showLogStatus();
+  for (;;) {
+    loadOutbox();
+    const item = outbox[0];
+    if (!item) break;
+    const local = madeHere.get(item.id);
+    const fresh = local && !local.announced; // Made in this page and not yet said to be on this device.
+    let result = null;
+    let failure = null;
+    try { result = await enqueue(() => sendLog(item.change, userId)); } catch (error) { failure = error; }
+    if (session !== current) return;
+    if (result || turnedDown(failure) || fresh && !(failure instanceof Unreachable)) {
+      editOutbox(items => items.filter(other => other.id !== item.id));
+      madeHere.delete(item.id);
+    }
+    if (result) {
+      receive(result.log);
+      showState();
+      if (fresh) savedChange(item.change, local.kept, local.done, result);
+      else synced = true;
+      local?.resolve(result);
+      continue;
+    }
+    console.error(failure);
+    if (turnedDown(failure) && !fresh) {
+      showState();
+      notify("Couldn’t sync " + changeName(item.change) + ". Baseline didn’t accept it, so it wasn’t saved.", { error: true }).target = changeTarget(item.change);
+      continue;
+    }
+    if (fresh && !(failure instanceof Unreachable)) {
+      // As before the outbox, a change that fails while the user waits for it is undone.
+      showState();
+      saveFailed(item.change, local.done, local.kept);
+      local.resolve(null);
+      continue;
+    }
+    syncProblem = failure instanceof Unreachable ? "offline" : failure instanceof Refused && failure.status === 401 ? "sign-in" : "server";
+    break;
+  }
+  if (syncProblem) {
+    announceKept();
+    if (navigator.onLine !== false) syncTimer = setTimeout(reconnect, SYNC_RETRY);
+    return;
+  }
+  if (!synced) return;
+  // The last reply was the whole log, and reading it again picks up anything
+  // another tab sent from this outbox.
+  notify("Synced.");
+  setTimeout(refreshLog);
+}
+
+// Tells the user that changes made in this page that the server doesn't have
+// yet are saved on this device, once each.
+function announceKept() {
+  let told = false;
+  for (const item of outbox) {
+    const local = madeHere.get(item.id);
+    if (!local || local.announced) continue;
+    local.announced = true;
+    const target = changeTarget(item.change);
+    if (target && toast?.target === target) closeToast();
+    local.kept?.();
+    local.resolve(null);
+    told = true;
+  }
+  if (told) notify(syncProblem === "offline" ? "Saved on this device. It’ll sync when you’re back online." : "Saved on this device. It’ll sync once Baseline can reach your account.");
+  showLogStatus();
+}
+
+// Back online, or back in the tab: loads sign-in if it failed, sends what's
+// waiting on this device, and picks up changes made elsewhere.
+function reconnect() {
+  clearTimeout(syncTimer);
+  if (!state || navigator.onLine === false) return;
+  if (!account.confirmed) {
+    if (clerkReady) return; // Still loading.
+    cacheUpdating = cachedAt !== null;
+    showLogStatus();
+    // Once Clerk has loaded, its listener confirms the user (see confirmLog).
+    connectClerk().catch(error => {
+      console.error(error);
+      if (!state || account.confirmed) return;
+      cacheUpdating = false;
+      showLogStatus();
+    });
+    return;
+  }
+  if (outbox.length) syncOutbox();
+  else refreshLog();
 }
 
 // Takes the log as the server returned it. It becomes the saved copy and the
@@ -208,11 +447,25 @@ function cacheTime(ms) {
   return (day === today ? "" : shortDate(day) + ", ") + hourFormat.format(date);
 }
 
-// A quiet line under the heading while the log on screen is the copy kept on this device.
+// Quiet lines under the heading: one while the log on screen is the copy kept
+// on this device, and one while changes are waiting on this device.
 function showLogStatus() {
-  const line = $("log-status");
-  line.hidden = cachedAt === null;
-  line.textContent = cachedAt === null ? "" : cacheUpdating ? "Updating…" : "Couldn’t update. Showing your log as of " + cacheTime(cachedAt) + ".";
+  const lines = [];
+  if (cachedAt !== null) {
+    lines.push(cacheUpdating ? "Updating…" : navigator.onLine === false ? "Offline · showing your log as of " + cacheTime(cachedAt)
+      : "Couldn’t update. Showing your log as of " + cacheTime(cachedAt) + ".");
+  }
+  // Changes from an earlier visit, or another tab, count as told.
+  if (outbox.some(item => madeHere.get(item.id)?.announced !== false)) {
+    lines.push("Saved on this device · " + (syncing || cacheUpdating ? "syncing…" : syncProblem === "server" || syncProblem === "sign-in" ? "not synced yet" : "syncing when you’re back online"));
+  }
+  const element = $("log-status");
+  element.hidden = !lines.length;
+  element.replaceChildren(...lines.map(text => {
+    const line = document.createElement("span");
+    line.textContent = text;
+    return line;
+  }));
 }
 
 function icon(name) {
@@ -840,16 +1093,31 @@ async function importBrowserLog(result, userId) {
   return imported;
 }
 
-// Starts a new open log for an account, leaving the one before behind.
+// Starts a new open log for an account, leaving the one before behind. The
+// account's outbox comes with it.
 function beginSession(id, email, confirmed) {
+  forgetChanges();
   session = {};
   account = { id, email, confirmed };
   state = saved = null;
   cachedAt = null;
   cacheUpdating = false;
   queue = Promise.resolve();
-  unsaved = 0;
+  loadOutbox();
   return session;
+}
+
+// Drops what this page knows about changes on their way. Changes made here
+// that were still waiting resolve to null.
+function forgetChanges() {
+  for (const local of madeHere.values()) local.resolve(null);
+  madeHere.clear();
+  outbox = [];
+  outboxInPage = false;
+  sending = [];
+  syncing = null;
+  syncProblem = null;
+  clearTimeout(syncTimer);
 }
 
 // Puts the open log on the page, starting from the overview for today.
@@ -865,14 +1133,15 @@ function showLog() {
   $("main").hidden = false;
   $("main-nav").hidden = false;
   $("account-bar").hidden = false;
-  render();
+  showState();
 }
 
-// Shows the log cached on this device at once, before Clerk has loaded. It's
-// marked "Updating…" until Clerk confirms the user and the server's copy arrives.
+// Shows the log cached on this device at once, before Clerk has loaded, with
+// the changes still waiting on this device. It's marked "Updating…" until
+// Clerk confirms the user and the server's copy arrives.
 function showCachedLog(cached) {
   beginSession(cached.userId, "", false);
-  saved = state = cached.log;
+  saved = cached.log;
   cachedAt = cached.savedAt;
   cacheUpdating = true;
   showLog();
@@ -884,7 +1153,7 @@ async function openLog(user) {
   showAuth("log-loading");
   let result;
   try {
-    result = await importBrowserLog(await sendLog(null, user.id), user.id);
+    result = await enqueue(() => sendLog(null, user.id).then(read => importBrowserLog(read, user.id)));
   } catch (error) {
     if (session !== current) return;
     console.error(error);
@@ -892,22 +1161,24 @@ async function openLog(user) {
     return;
   }
   if (session !== current) return;
-  state = receive(result.log);
+  receive(result.log);
   showLog();
+  if (outbox.length) syncOutbox();
 }
 
 // Clerk has confirmed the user whose cached log is on screen. Changes made
-// while it loaded go out first, then the server's copy replaces the cached one.
+// while it loaded go out first, then the server's copy replaces the cached
+// one, and then anything still waiting on this device is sent.
 async function confirmLog(user) {
   const current = session;
   account.confirmed = true;
   account.email = emailOf(user);
+  cacheUpdating = true;
   showStorageStatus();
-  const read = queue.then(() => sendLog(null, user.id)).then(result => importBrowserLog(result, user.id));
-  queue = read.catch(() => {});
+  showLogStatus();
   let result;
   try {
-    result = await read;
+    result = await enqueue(() => sendLog(null, user.id).then(read => importBrowserLog(read, user.id)));
   } catch (error) {
     if (session !== current) return;
     console.error(error);
@@ -918,28 +1189,32 @@ async function confirmLog(user) {
   if (session !== current) return;
   cacheUpdating = false;
   receive(result.log);
-  if (unsaved) return;
-  state = saved;
-  render();
+  showState();
+  if (outbox.length) syncOutbox();
 }
+
+// Whether changes are on their way, so a read could come back without them.
+const changesPending = () => outbox.length > 0 || sending.length > 0 || syncing !== null;
 
 // Picks up changes made in other tabs or on other devices.
 async function refreshLog() {
-  if (!state || unsaved || !account.confirmed || cacheUpdating) return;
+  if (!state || changesPending() || !account.confirmed || cacheUpdating) return;
   const current = session;
   let result;
   try { result = await sendLog(null, account.id); } catch { return; }
-  if (session !== current || unsaved) return;
+  if (session !== current || changesPending()) return;
   const before = JSON.stringify(saved);
   receive(result.log);
   if (JSON.stringify(saved) === before) return;
-  state = saved;
-  render();
+  showState();
 }
 
 // Closes the open log, on sign-out or when another account signs in. The copy
-// kept on this device goes too, so a shared device keeps no one's weights.
-function closeLog() {
+// kept on this device goes too, with any changes that haven't synced, so a
+// shared device keeps no one's weights. `keepOutbox` keeps those changes when
+// nobody signed out and they exist nowhere else.
+function closeLog({ keepOutbox = false } = {}) {
+  forgetChanges();
   account = null;
   session = null;
   state = saved = null;
@@ -947,15 +1222,19 @@ function closeLog() {
   cacheUpdating = false;
   for (const dialog of document.querySelectorAll("dialog[open]")) dialog.close();
   closeToast();
-  try { clearLogCache(localStorage); } catch { /* Storage is blocked, so nothing was cached. */ }
+  try { clearLogCache(localStorage, { keepOutbox }); } catch { /* Storage is blocked, so nothing was cached. */ }
 }
 
 function showSignedIn(user) {
   if (account?.id !== user.id) openLog(user);
   else if (!account.confirmed) confirmLog(user);
-  else if (account.email !== emailOf(user)) {
-    account.email = emailOf(user);
-    showStorageStatus();
+  else {
+    if (account.email !== emailOf(user)) {
+      account.email = emailOf(user);
+      showStorageStatus();
+    }
+    // A change the server turned away for want of a sign-in can go now.
+    if (syncProblem === "sign-in") syncOutbox();
   }
   if (mounted === "user") return;
   if (mounted === "sign-in") clerk.unmountSignIn($("sign-in-card"));
@@ -992,10 +1271,13 @@ async function startAuth() {
   } catch (error) {
     console.error(error);
     if (error instanceof AuthSetupError) {
-      closeLog();
+      // Sign-in isn't set up, so nobody signed out: changes waiting on this
+      // device stay until it is, and then sync.
+      closeLog({ keepOutbox: true });
       showAuth("auth-setup");
     } else if (state) {
-      // The cached log stays, marked as not updated. A save tries Clerk again.
+      // Offline, Clerk can't load, so the cached log stays, marked as not
+      // updated. Coming back online, returning to the tab or saving tries again.
       cacheUpdating = false;
       showLogStatus();
     } else showAuth("auth-error");
@@ -1133,7 +1415,7 @@ const lengthMessage = choice => choice === "ft" ? "Height now shows in feet and 
 
 function changeUnits(units, message) {
   if (units.weight === state.units.weight && units.height === state.units.height) return;
-  changeState(current => ({ ...current, started: true, units }), { op: "set-units", units }, () => notify(message));
+  changeState({ op: "set-units", units }, () => notify(message));
 }
 
 function openProfile() {
@@ -1435,13 +1717,13 @@ $("entry-form").addEventListener("submit", event => {
   // save loses nothing. Then the form shows the saved weigh-in, unless
   // something new was typed meanwhile.
   const edits = entryEdits;
-  changeState(current => saveWeight(current, date, weight, note), { op: "save-weight", date, weight, note }, () => {
-    if (entryEdits === edits) {
+  changeState({ op: "save-weight", date, weight, note },
+    () => notify((updating ? "Weigh-in updated" : "Weigh-in saved") + " for " + prettyDate(date) + "." + celebrate(before, progress)),
+    () => {
+      if (entryEdits !== edits) return;
       autoFill = true;
       syncEntryForm();
-    }
-    notify((updating ? "Weigh-in updated" : "Weigh-in saved") + " for " + prettyDate(date) + "." + celebrate(before, progress));
-  });
+    });
 });
 
 // A word when a weigh-in carries the average past a milestone. Needs an average
@@ -1499,15 +1781,22 @@ $("goal-form").addEventListener("submit", event => {
   if (!goal || goal.startDate > today) return;
   // Dialogs close at once. If the save fails, "Try again" sends exactly what was typed.
   $("goal-dialog").close();
-  changeState(current => ({ ...current, started: true, goal }), { op: "set-goal", goal }, () => notify("Goal saved."));
+  changeState({ op: "set-goal", goal }, () => notify("Goal saved."));
 });
 $("clear-goal").addEventListener("click", () => {
   $("goal-dialog").close();
-  changeState(current => ({ ...current, goal: null }), { op: "clear-goal" }, () => notify("Goal removed."));
+  changeState({ op: "clear-goal" }, () => notify("Goal removed."));
 });
 for (const button of document.querySelectorAll("[data-reminder]")) button.addEventListener("click", openReminder);
+// Reminders change which devices the server sends to, so they need a
+// connection and never wait on this device.
+const reminderOffline = "Reminders need a connection. Try again when you’re back online.";
 $("reminder-form").addEventListener("submit", async event => {
   event.preventDefault();
+  if (navigator.onLine === false) {
+    showReminderStatus(reminderOffline);
+    return;
+  }
   const hour = Number($("reminder-hour").value);
   const timeZone = deviceZone();
   let subscription;
@@ -1527,14 +1816,16 @@ $("reminder-form").addEventListener("submit", async event => {
     }
   } else if (!state.reminder) return;
   $("reminder-dialog").close();
-  const added = subscription ? [subscription.endpoint] : [];
-  changeState(current => ({ ...current, reminder: { hour, timeZone, devices: [...(current.reminder?.devices ?? []), ...added] } }),
-    { op: "set-reminder", hour, timeZone, ...(subscription && { subscription }) },
+  changeState({ op: "set-reminder", hour, timeZone, ...(subscription && { subscription }) },
     () => notify("You’ll get a reminder at " + hourLabel(hour) + " on days you haven’t weighed in."));
 });
 $("clear-reminder").addEventListener("click", () => {
+  if (navigator.onLine === false) {
+    showReminderStatus(reminderOffline);
+    return;
+  }
   $("reminder-dialog").close();
-  changeState(current => ({ ...current, reminder: null }), { op: "clear-reminder" }, async () => {
+  changeState({ op: "clear-reminder" }, async () => {
     notify("Reminders turned off.");
     // The server has forgotten every device, so this one starts afresh next time.
     try { await (await worker?.pushManager?.getSubscription())?.unsubscribe(); } catch { /* Harmless: the server no longer sends to it. */ }
@@ -1581,7 +1872,7 @@ $("waist-form").addEventListener("submit", event => {
   const sex = chosenSex();
   if (!validDate(date) || date > today || !validWaist(size) || !SEXES.includes(sex)) return;
   $("waist-dialog").close();
-  changeState(current => saveWaist(current, date, size, sex), { op: "save-waist", date, waist: size, sex }, () => {
+  changeState({ op: "save-waist", date, waist: size, sex }, () => {
     const estimate = fat.find(point => point.date === date)?.bodyFat;
     notify((existing ? "Waist updated" : "Waist saved") + " for " + prettyDate(date) + "." + (estimate == null ? "" : " Body fat " + percent(estimate) + "."));
   });
@@ -1600,8 +1891,7 @@ $("keep-waist").addEventListener("click", () => {
 $("confirm-waist-delete").addEventListener("click", () => {
   const date = deletingWaist;
   $("waist-dialog").close();
-  changeState(current => ({ ...current, waists: current.waists.filter(item => item.date !== date) }), { op: "delete-waist", date },
-    () => notify("Waist measurement deleted."));
+  changeState({ op: "delete-waist", date }, () => notify("Waist measurement deleted."));
 });
 $("waist-dialog").addEventListener("close", () => { deletingWaist = null; });
 $("profile-form").addEventListener("submit", event => {
@@ -1609,7 +1899,7 @@ $("profile-form").addEventListener("submit", event => {
   const height = roundHeight(readHeight(state.height));
   if (!positive(height)) return;
   $("profile-dialog").close();
-  changeState(current => ({ ...current, started: true, height }), { op: "set-height", height }, () => notify("Height saved."));
+  changeState({ op: "set-height", height }, () => notify("Height saved."));
 });
 
 $("entry-table").addEventListener("click", event => {
@@ -1633,9 +1923,7 @@ $("edit-form").addEventListener("submit", event => {
   const note = cleanNote($("edit-note").value);
   if (!date || !positive(weight)) return;
   $("edit-dialog").close();
-  changeState(
-    current => current.entries.some(entry => entry.date === date) ? saveWeight(current, date, weight, note) : current,
-    { op: "update-weight", date, weight, note },
+  changeState({ op: "update-weight", date, weight, note },
     result => notify(result.found ? "Weigh-in updated." : "This weigh-in has already been removed."));
 });
 $("delete-entry").addEventListener("click", () => {
@@ -1651,8 +1939,7 @@ $("keep-entry").addEventListener("click", () => {
 $("confirm-delete").addEventListener("click", () => {
   const date = editingDate;
   $("edit-dialog").close();
-  changeState(current => ({ ...current, entries: current.entries.filter(item => item.date !== date) }), { op: "delete-weight", date },
-    () => notify("Weigh-in deleted."));
+  changeState({ op: "delete-weight", date }, () => notify("Weigh-in deleted."));
 });
 $("edit-dialog").addEventListener("close", () => { editingDate = null; });
 for (const button of document.querySelectorAll("[data-close]")) button.addEventListener("click", () => button.closest("dialog").close());
@@ -1694,11 +1981,16 @@ $("toast").addEventListener("focusin", event => {
 });
 // Once focus has settled somewhere else.
 $("toast").addEventListener("focusout", () => setTimeout(startToastTimer));
+// Coming back to the tab, or back online, sends what's waiting on this device
+// and picks up changes made elsewhere. iOS has no Background Sync, so the page
+// does this itself.
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) return;
   syncDay();
-  refreshLog();
+  reconnect();
 });
+window.addEventListener("online", reconnect);
+window.addEventListener("offline", () => { if (state) showLogStatus(); });
 window.addEventListener("focus", syncDay);
 startAuth();
 startWorker();

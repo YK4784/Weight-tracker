@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { CM_PER_IN, FORECAST_MAX_DAYS, KG_PER_LB, NOTE_MAX_LENGTH, averageChanges, bodyFat, bodyFatChange, bodyFatHistory, changeTarget, formatWaist, roundWaist, saveWaist, spokenWaist, validWaist, waistParts, formatAmount, formatWeight, fromTenths, heightParts, normalizeUnits, toTenths, weightParts, bmi, calculateRate, calculateTrend, cleanNote, dateOf, dayOf, fastGoalRate, fastLossCaution, forecastGoal, goalProgress, goalRateAllowed, goalRateLimit, groupByMonth, maxGoalRate, monthlyReports, normalizeGoal, normalizeReminder, validTimeZone, normalizeState, noteLength, overallRate, recentRange, saveWeight, shiftDate, validDate } from "../dist/model.mjs";
+import { QUEUEABLE_OPS, applyOp, applyOps } from "../dist/model.mjs";
 
 const first = dayOf("2026-03-01");
 const entry = (index, weight) => ({ date: dateOf(first + index), weight });
@@ -718,4 +719,96 @@ test("a change's target is what it replaces", () => {
   for (const change of [null, {}, { op: "import" }, { op: "start" }, { op: "save-weight" }, { op: "delete-waist", date: "2026-02-30" }]) {
     assert.equal(changeTarget(change), null, JSON.stringify(change));
   }
+});
+
+// A log as the server returns it, normalized as the app keeps it.
+const serverLog = () => normalizeState({
+  started: true, height: 178, sex: null, units: { weight: "kg", height: "cm" }, reminder: null,
+  goal: { weight: 80, startDate: "2026-11-01", startWeight: 85, rate: .5, milestones: 10 },
+  entries: [{ date: "2026-11-20", weight: 84.6, note: "after travel" }, { date: "2026-11-21", weight: 84.4, note: null }],
+  waists: [{ date: "2026-11-20", waist: 90 }]
+});
+
+test("each change that can wait applies as the server applies it", () => {
+  const log = serverLog();
+  // A new weigh-in, and a correction that leaves out the note keeps it.
+  assert.deepEqual(applyOp(log, { op: "save-weight", date: "2026-11-22", weight: 84.21, note: "new scale" }).entries.at(-1), { date: "2026-11-22", weight: 84.21, note: "new scale" });
+  assert.deepEqual(applyOp(log, { op: "save-weight", date: "2026-11-20", weight: 84.5 }).entries[0], { date: "2026-11-20", weight: 84.5, note: "after travel" });
+  assert.equal(applyOp(log, { op: "save-weight", date: "2026-11-20", weight: 84.5, note: null }).entries[0].note, null);
+  // An edit changes a weigh-in that's there and never adds one.
+  assert.deepEqual(applyOp(log, { op: "update-weight", date: "2026-11-21", weight: 84, note: "late" }).entries[1], { date: "2026-11-21", weight: 84, note: "late" });
+  assert.deepEqual(applyOp(log, { op: "update-weight", date: "2026-11-19", weight: 84, note: null }), log);
+  assert.deepEqual(applyOp(log, { op: "delete-weight", date: "2026-11-20" }).entries.map(entry => entry.date), ["2026-11-21"]);
+  assert.deepEqual(applyOp(log, { op: "delete-weight", date: "2026-11-19" }), log);
+  assert.equal(applyOp(log, { op: "set-height", height: 180.5 }).height, 180.5);
+  // A waist sets the body fat formula, and a deletion leaves the formula alone.
+  const waisted = applyOp(log, { op: "save-waist", date: "2026-11-21", waist: 88.5, sex: "female" });
+  assert.deepEqual(waisted.waists, [{ date: "2026-11-20", waist: 90 }, { date: "2026-11-21", waist: 88.5 }]);
+  assert.equal(waisted.sex, "female");
+  assert.deepEqual(applyOp(waisted, { op: "delete-waist", date: "2026-11-20" }).waists, [{ date: "2026-11-21", waist: 88.5 }]);
+  assert.equal(applyOp(waisted, { op: "delete-waist", date: "2026-11-20" }).sex, "female");
+  const goal = { weight: 78, startDate: "2026-11-21", startWeight: 84.4, rate: null, milestones: 5 };
+  assert.deepEqual(applyOp(log, { op: "set-goal", goal }).goal, goal);
+  assert.equal(applyOp(log, { op: "clear-goal" }).goal, null);
+  assert.deepEqual(applyOp(log, { op: "set-units", units: { weight: "st", height: "ft" } }).units, { weight: "st", height: "ft" });
+  // Each change leaves the log it was given untouched.
+  assert.deepEqual(log, serverLog());
+});
+
+test("every change that can wait is one the app sends, and reminders aren't among them", () => {
+  assert.deepEqual([...QUEUEABLE_OPS].sort(), ["clear-goal", "delete-waist", "delete-weight", "save-waist", "save-weight", "set-goal", "set-height", "set-units", "update-weight"]);
+  assert.ok(!QUEUEABLE_OPS.includes("set-reminder") && !QUEUEABLE_OPS.includes("clear-reminder") && !QUEUEABLE_OPS.includes("import"));
+});
+
+test("an empty log starts with its first change, as on the server", () => {
+  const empty = normalizeState({});
+  assert.equal(empty.started, false);
+  for (const change of [{ op: "set-height", height: 170 }, { op: "set-units", units: { weight: "lb", height: "cm" } }, { op: "save-waist", date: "2026-11-21", waist: 80, sex: "male" },
+    { op: "set-goal", goal: { weight: 60, startDate: "2026-11-21", startWeight: 65, rate: null, milestones: 10 } }, { op: "save-weight", date: "2026-11-21", weight: 65 }, { op: "start" }]) {
+    assert.equal(applyOp(empty, change).started, true, change.op);
+  }
+});
+
+test("reminders apply too, so the screen shows them while they're sent", () => {
+  const log = serverLog();
+  // A device that sends its subscription turns reminders on; without any device they stay off.
+  const on = applyOp(log, { op: "set-reminder", hour: 7, timeZone: "Europe/London", subscription: { endpoint: "https://push.example/a", keys: {} } });
+  assert.deepEqual(on.reminder, { hour: 7, timeZone: "Europe/London", devices: ["https://push.example/a"] });
+  assert.equal(applyOp(log, { op: "set-reminder", hour: 7, timeZone: "Europe/London" }).reminder, null);
+  // A new time keeps the devices, and another device joins them once.
+  assert.deepEqual(applyOp(on, { op: "set-reminder", hour: 9, timeZone: "Europe/Paris" }).reminder, { hour: 9, timeZone: "Europe/Paris", devices: ["https://push.example/a"] });
+  assert.deepEqual(applyOp(on, { op: "set-reminder", hour: 9, timeZone: "Europe/Paris", subscription: { endpoint: "https://push.example/a" } }).reminder.devices, ["https://push.example/a"]);
+  assert.equal(applyOp(on, { op: "clear-reminder" }).reminder, null);
+});
+
+test("a change that isn't valid, or that the app never sends, throws", () => {
+  const log = serverLog();
+  for (const change of [null, {}, { op: "import", log: {} }, { op: "drop-table" }, { op: "save-weight", date: "2026-11-31", weight: 80 },
+    { op: "save-weight", date: "2026-11-22", weight: 0 }, { op: "set-height", height: 0 }, { op: "set-height", height: 401 }, { op: "set-height", height: "180" },
+    { op: "save-waist", date: "2026-11-22", waist: 80, sex: "other" }, { op: "set-goal", goal: { weight: 80 } }, { op: "set-units", units: { weight: "g", height: "cm" } }]) {
+    assert.throws(() => applyOp(log, change), JSON.stringify(change));
+  }
+});
+
+test("changes replay in order, so a save then a delete leaves nothing, and a delete then a save leaves the weigh-in", () => {
+  const log = serverLog();
+  const save = { op: "save-weight", date: "2026-11-22", weight: 84.1, note: null };
+  const remove = { op: "delete-weight", date: "2026-11-22" };
+  assert.deepEqual(applyOps(log, [save, remove]).entries.map(entry => entry.date), ["2026-11-20", "2026-11-21"]);
+  assert.deepEqual(applyOps(log, [remove, save]).entries.at(-1), { date: "2026-11-22", weight: 84.1, note: null });
+  // The last write to a date wins, and an edit after a delete finds nothing to change.
+  assert.equal(applyOps(log, [save, { ...save, weight: 83.9 }]).entries.at(-1).weight, 83.9);
+  assert.deepEqual(applyOps(log, [remove, { op: "update-weight", date: "2026-11-22", weight: 83.9, note: null }]).entries.map(entry => entry.date), ["2026-11-20", "2026-11-21"]);
+  // A goal set then cleared, and units changed twice, end at the last change.
+  const goal = { weight: 78, startDate: "2026-11-21", startWeight: 84.4, rate: null, milestones: 10 };
+  assert.equal(applyOps(log, [{ op: "set-goal", goal }, { op: "clear-goal" }]).goal, null);
+  assert.equal(applyOps(log, [{ op: "set-units", units: { weight: "lb", height: "cm" } }, { op: "set-units", units: { weight: "st", height: "cm" } }]).units.weight, "st");
+});
+
+test("a change that can't apply is skipped, and the rest still show", () => {
+  const log = serverLog();
+  const result = applyOps(log, [{ op: "save-weight", date: "2026-11-22", weight: 84 }, { op: "save-weight", date: "not a date", weight: 84 }, { op: "nonsense" }, { op: "set-height", height: 181 }]);
+  assert.equal(result.entries.at(-1).date, "2026-11-22");
+  assert.equal(result.height, 181);
+  assert.deepEqual(applyOps(log, []), log);
 });

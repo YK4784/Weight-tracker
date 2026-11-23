@@ -76,6 +76,14 @@ To replace the key pair, run the following command, then put the public key in `
 node -e 'const k = require("node:crypto").generateKeyPairSync("ec", { namedCurve: "prime256v1" }).privateKey.export({ format: "jwk" }); console.log("PUSH_PUBLIC_KEY=" + Buffer.concat([Buffer.from([4]), Buffer.from(k.x, "base64url"), Buffer.from(k.y, "base64url")]).toString("base64url") + "\nVAPID_PRIVATE_KEY=" + k.d)'
 ```
 
+## Offline use
+
+The service worker in `baseline/dist/sw.js` keeps a copy of the app's own files: the page, its modules and styles, the font, the icons and the manifest. They're listed in `SHELL` at the top of the file. Each file comes from the network first, and the answer replaces the copy, so a deploy reaches the next load that has a connection. The copy is used when the network fails, returns an error or takes more than 3 seconds. A page that opened from the copy gets its modules from the copy too, so it never mixes versions. The worker never handles `/api/` requests, other sites such as Clerk, or anything but `GET`.
+
+When you add a file to `baseline/dist/`, add it to `SHELL`, or to the list of files left out on purpose in `baseline/tests/worker.test.mjs`. `npm test` fails until you do. When `SHELL` changes, bump the version in the cache's name, `baseline-shell-v1`, so the new worker starts a fresh cache and deletes the old one. Edits to a listed file need no bump.
+
+Clerk's scripts load from its servers on every start, through a redirect that browsers can't cache, so sign-in can't load offline. Baseline shows the copy of the log kept on the device instead, and loads sign-in when the connection returns.
+
 ## Run locally
 
 With Node.js 20.12 or later, run the following commands from the repository root.
@@ -86,7 +94,7 @@ vercel env pull .env.local
 npm start
 ```
 
-Open [Baseline locally](http://127.0.0.1:4173/). `npm start` serves the page from `baseline/dist/` and runs the API from `api/log.mjs`, using the `DATABASE_URL` in `.env.local`. Reminders can be turned on locally, but only Vercel sends them. Run `npm test` to check the calculations, including body fat against the Army's worked examples, the API's input checks, the reminder schedule, the push encryption and the copy of the log kept on the device. It also checks that `index.html` preloads every module and connects early to the Frontend API in `config.mjs`.
+Open [Baseline locally](http://127.0.0.1:4173/). `npm start` serves the page from `baseline/dist/` and runs the API from `api/log.mjs`, using the `DATABASE_URL` in `.env.local`. Reminders can be turned on locally, but only Vercel sends them. Run `npm test` to check the calculations, including body fat against the Army's worked examples, the API's input checks, the reminder schedule, the push encryption, the copy of the log kept on the device, and the changes that wait on the device and replay on top of it. It also checks that `index.html` preloads every module and connects early to the Frontend API in `config.mjs`, and that the service worker keeps every file in `baseline/dist/` that the app needs and leaves the API and Clerk alone.
 
 ## Using the tracker
 
@@ -100,17 +108,25 @@ Sign in to open your log. Use the avatar at the top right to manage your account
 
 Entries and their notes, height, waist measurements and the body fat formula you chose, your goal, your units and your reminder time are saved to your account, so the same log opens on any device you sign in on. A change shows right away and is saved in the background. Switching back to the tab picks up changes made on another device.
 
-If saving fails, the change is undone on screen and a message at the bottom of the page says so. It stays until you choose **Dismiss** or the change is saved. **Try again** sends the same change again, exactly as you entered it, and the message confirms it once it's saved. The date, weight and note you typed in **Log a weigh-in** also stay in the form, so you can save them from there instead. Other messages fade after about 4 seconds, but not while the mouse is over them or focus is in them.
+Once Baseline has loaded on a device, it opens there without a connection, and you can keep logging. A change made offline, or while the connection fails, shows right away and is kept on the device. A message says "Saved on this device. It’ll sync when you’re back online.", and the line "Saved on this device · syncing when you’re back online" stays under the heading until the change is sent. Waiting changes survive a reload. Baseline sends them in the order you made them, one at a time, without you doing anything: when it opens with a connection, when the device comes back online, when you return to the tab, and once a minute while the device reports a connection. iOS has no background sync, so on an iPhone they wait until Baseline is open. Once they've all been sent, a message says "Synced." If the server turns down a change that waited on the device, because it isn't valid, the change is dropped and a message names it. If the server can't be reached for another reason, the line reads "Saved on this device · not synced yet" and Baseline keeps trying.
 
-Baseline keeps a copy of your log on each device you use it on, so the next visit opens at once. It shows that copy straight away, with "Updating…" under the heading, while sign-in loads and the latest log is fetched. The latest log then replaces the copy and the line goes. If it can't be fetched, the line reads "Couldn't update. Showing your log as of" and the time the copy was saved. You can make changes in the meantime, and they're saved once sign-in has loaded. If by then nobody is signed in, the copy is removed and the sign-in page shows instead. If a different account is, the copy is removed and that account's log opens. Without a copy, the page shows the outline of the overview while your log loads.
+Weigh-ins, their edits and deletions, waist measurements, height, the goal and units can wait on the device. Reminders can't, because they change which devices get notifications, so offline the reminder dialog says they need a connection.
+
+Each date has one weigh-in and one waist measurement, and the last change to reach the server wins, as it does for height, the goal and units. A change made offline therefore replaces one made on another device in the meantime once it syncs, even if the other was made later. An edit to a weigh-in that another device deleted in the meantime changes nothing.
+
+If saving fails while you wait for it, because the server turned the change down or couldn't save it, the change is undone on screen and a message at the bottom of the page says so. It stays until you choose **Dismiss** or the change is saved. **Try again** sends the same change again, exactly as you entered it, and the message confirms it once it's saved. The date, weight and note you typed in **Log a weigh-in** also stay in the form, so you can save them from there instead. Other messages fade after about 4 seconds, but not while the mouse is over them or focus is in them.
+
+Baseline keeps a copy of your log on each device you use it on, so the next visit opens at once. It shows that copy straight away, with "Updating…" under the heading, while sign-in loads and the latest log is fetched. The latest log then replaces the copy and the line goes. If it can't be fetched, the line reads "Couldn't update. Showing your log as of" and the time the copy was saved, or "Offline · showing your log as of" and the time when the device is offline. Baseline tries again when the device comes back online and when you return to the tab. You can make changes in the meantime, and they wait on the device until sign-in has loaded and they can be sent. If by then nobody is signed in, the copy and any waiting changes are removed and the sign-in page shows instead. If a different account is, they're removed and that account's log opens. Without a copy, the page shows the outline of the overview while your log loads.
 
 Baseline stores these in the browser on your device:
 
 - **A copy of your log:** your entries and notes, height, waist measurements, the body fat formula you chose, your goal, your units, and your reminder time and which devices get reminders, as the server last returned them, with the time they arrived. It's stored under `baseline.log-cache.v1:` followed by your account's user ID. Only one account's copy is kept on a device.
 - **Your user ID,** under `baseline.last-user.v1`, so Baseline knows whose copy to show before sign-in has loaded. Your email address isn't stored.
+- **Changes waiting to sync:** each change you made that the server doesn't have yet, in order, under `baseline.outbox.v1:` and your user ID. A change goes in as you make it and comes out once the server has it.
 - **A hidden note:** the start date of the goal whose note about fast loss you hid, under `baseline.fast-loss-hidden:` and your user ID.
 - **A log from before accounts,** on a browser that used an earlier version, until it moves into an account as described below.
+- **Baseline's own files,** in the service worker's cache, so it opens offline. They hold none of your data.
 
-Signing out removes the copy of your log and your user ID, so a shared computer keeps none of your weights. Clerk keeps its own sign-in data, and signing out ends that session.
+Signing out removes the copy of your log, your user ID and any changes that haven't synced yet, so a shared computer keeps none of your weights. The avatar menu doesn't warn about changes that haven't synced, so before you sign out, check that the "Saved on this device" line has gone. Clerk keeps its own sign-in data, and signing out ends that session.
 
 Earlier versions kept logs only in the browser. The first time an account with an empty online log signs in on such a browser, that browser's log moves into the account and is removed from the browser. An account that already has entries keeps them, and the browser's log is left untouched.

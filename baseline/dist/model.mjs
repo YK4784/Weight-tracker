@@ -341,6 +341,62 @@ export function saveWeight(state, date, weight, note) {
   return normalizeState({ ...state, started: true, entries: [...state.entries, { date, weight, note: kept }] });
 }
 
+// The changes that can wait on the device while it's offline and be sent
+// later, in order (see the outbox in app.mjs). Reminders need a live push
+// subscription, so they aren't among them.
+export const QUEUEABLE_OPS = ["save-weight", "update-weight", "delete-weight", "set-height", "save-waist", "delete-waist", "set-goal", "clear-goal", "set-units"];
+
+// Applies a change the app sends (see server/ops.mjs) to a normalized log, as
+// server/store.mjs does on the server, so the screen can show changes that
+// haven't reached it yet. Throws for a change it can't apply.
+export function applyOp(state, change) {
+  switch (change?.op) {
+    case "save-weight":
+      return saveWeight(state, change.date, change.weight, change.note);
+    // An edit changes a weigh-in that's there, and adds none.
+    case "update-weight":
+      return state.entries.some(entry => entry.date === change.date) ? saveWeight(state, change.date, change.weight, change.note) : state;
+    case "delete-weight":
+      return normalizeState({ ...state, entries: state.entries.filter(entry => entry.date !== change.date) });
+    case "set-height":
+      if (!positive(change.height) || change.height < .1 || change.height > 400) throw new Error("Enter a valid height.");
+      return normalizeState({ ...state, started: true, height: change.height });
+    case "save-waist":
+      return saveWaist(state, change.date, change.waist, change.sex);
+    case "delete-waist":
+      return normalizeState({ ...state, waists: state.waists.filter(item => item.date !== change.date) });
+    case "set-goal":
+      if (!normalizeGoal(change.goal)) throw new Error("Enter a valid goal.");
+      return normalizeState({ ...state, started: true, goal: change.goal });
+    case "clear-goal":
+      return normalizeState({ ...state, goal: null });
+    case "set-units":
+      if (!WEIGHT_UNITS.includes(change.units?.weight) || !HEIGHT_UNITS.includes(change.units.height)) throw new Error("Choose valid units.");
+      return normalizeState({ ...state, started: true, units: change.units });
+    // The device that sent its subscription joins the others. Without any
+    // device, reminders are off, as the server has it.
+    case "set-reminder": {
+      const device = change.subscription?.endpoint;
+      const devices = [...(state.reminder?.devices ?? []), ...(device ? [device] : [])];
+      return normalizeState({ ...state, reminder: { hour: change.hour, timeZone: change.timeZone, devices } });
+    }
+    case "clear-reminder":
+      return normalizeState({ ...state, reminder: null });
+    case "start":
+      return normalizeState({ ...state, started: true });
+    default:
+      throw new Error("Unknown change: " + change?.op);
+  }
+}
+
+// Applies changes in order. One that can't be applied is skipped, so the rest
+// still show; the server turns it down when it's sent.
+export function applyOps(state, changes) {
+  return changes.reduce((current, change) => {
+    try { return applyOp(current, change); } catch { return current; }
+  }, state);
+}
+
 // The input is a normalized log (one entry per date, ascending). Emit averages
 // for unlogged days too, while there is still a measurement inside the window.
 // It sums whole hundredths of a kilogram, as stored, so no rounding error builds up.

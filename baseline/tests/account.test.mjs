@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { LAST_USER_KEY, LEGACY_STORAGE_KEY, LOG_CACHE_PREFIX, claimLegacyLog, clearLogCache, frontendApiFor, lastUser, logCacheKeyFor, readLogCache, storageKeyFor, writeLogCache } from "../dist/account.mjs";
+import { LAST_USER_KEY, LEGACY_STORAGE_KEY, LOG_CACHE_PREFIX, OUTBOX_PREFIX, claimLegacyLog, clearLogCache, clearOutbox, frontendApiFor, lastUser, logCacheKeyFor, outboxKeyFor, readLogCache, readOutbox, signOutWarning, storageKeyFor, writeLogCache, writeOutbox } from "../dist/account.mjs";
 import { normalizeState } from "../dist/model.mjs";
 
 const keyFor = (kind, host) => "pk_" + kind + "_" + btoa(host + "$");
@@ -125,14 +125,17 @@ test("only one user's log is kept on the device", () => {
   assert.equal(lastUser(storage), "user_b");
 });
 
-test("clearing the cache removes every cached log and the last user, and nothing else", () => {
+test("clearing the cache removes every cached log, the last user and every outbox, and nothing else", () => {
   const storage = new MemoryStorage({ [LEGACY_STORAGE_KEY]: "old", [storageKeyFor("user_a")]: "browser log", "baseline.fast-loss-hidden:user_a": "2026-11-01" });
   writeLogCache(storage, "user_a", log, 1);
   storage.setItem(logCacheKeyFor("user_c"), "stray");
+  writeOutbox(storage, "user_a", [{ id: "1", change: { op: "delete-weight", date: "2026-11-20" } }]);
+  storage.setItem(outboxKeyFor("user_c"), "stray");
   clearLogCache(storage);
   assert.equal(lastUser(storage), null);
   assert.equal(readLogCache(storage, "user_a"), null);
-  assert.deepEqual([...storage.items.keys()].filter(key => key.startsWith(LOG_CACHE_PREFIX)), []);
+  assert.deepEqual(readOutbox(storage, "user_a"), []);
+  assert.deepEqual([...storage.items.keys()].filter(key => key.startsWith(LOG_CACHE_PREFIX) || key.startsWith(OUTBOX_PREFIX)), []);
   assert.equal(storage.getItem(LEGACY_STORAGE_KEY), "old");
   assert.equal(storage.getItem(storageKeyFor("user_a")), "browser log");
   assert.equal(storage.getItem("baseline.fast-loss-hidden:user_a"), "2026-11-01");
@@ -162,4 +165,81 @@ test("the cache never looks like a log saved before sign-in", () => {
   assert.equal(storage.getItem(storageKeyFor("user_a")), null);
   assert.equal(claimLegacyLog(storage, "user_a"), false);
   assert.equal(storage.getItem(storageKeyFor("user_a")), null);
+});
+
+const weighIn = { id: "a1", change: { op: "save-weight", date: "2026-11-22", weight: 84.2, note: null } };
+const deletion = { id: "a2", change: { op: "delete-weight", date: "2026-11-22" } };
+
+test("an outbox keeps a user's changes in order until it's written again", () => {
+  const storage = new MemoryStorage();
+  assert.deepEqual(readOutbox(storage, "user_a"), []);
+  writeOutbox(storage, "user_a", [weighIn, deletion]);
+  assert.deepEqual(readOutbox(storage, "user_a"), [weighIn, deletion]);
+  assert.equal(JSON.parse(storage.getItem(outboxKeyFor("user_a"))).userId, "user_a");
+  // Another user's outbox is separate, and an empty one leaves no key behind.
+  assert.deepEqual(readOutbox(storage, "user_b"), []);
+  writeOutbox(storage, "user_a", [deletion]);
+  assert.deepEqual(readOutbox(storage, "user_a"), [deletion]);
+  writeOutbox(storage, "user_a", []);
+  assert.equal(storage.getItem(outboxKeyFor("user_a")), null);
+  assert.throws(() => writeOutbox(storage, "", [weighIn]));
+});
+
+test("an outbox stored under one user's key never reads back for another", () => {
+  const storage = new MemoryStorage();
+  writeOutbox(storage, "user_a", [weighIn]);
+  storage.setItem(outboxKeyFor("user_b"), storage.getItem(outboxKeyFor("user_a")));
+  assert.deepEqual(readOutbox(storage, "user_b"), []);
+  assert.deepEqual(readOutbox(storage, ""), []);
+  assert.deepEqual(readOutbox(storage, null), []);
+});
+
+test("an outbox skips anything that isn't a change that can wait", () => {
+  const storage = new MemoryStorage();
+  for (const value of ["not json", "null", "[]", JSON.stringify({ userId: "user_a" }), JSON.stringify({ userId: "user_a", changes: {} })]) {
+    storage.setItem(outboxKeyFor("user_a"), value);
+    assert.deepEqual(readOutbox(storage, "user_a"), [], value);
+  }
+  storage.setItem(outboxKeyFor("user_a"), JSON.stringify({ userId: "user_a", changes: [
+    weighIn, null, { id: "", change: weighIn.change }, { id: "b", change: { op: "set-reminder", hour: 8, timeZone: "UTC" } },
+    { id: "c", change: { op: "import", log: {} } }, { id: "d" }, { ...deletion, extra: true }, { id: "a1", change: deletion.change }
+  ] }));
+  // Valid items keep their order; a repeated id keeps its first change.
+  assert.deepEqual(readOutbox(storage, "user_a"), [weighIn, deletion]);
+});
+
+test("clearing the cache can keep the outbox, when nobody signed out", () => {
+  const storage = new MemoryStorage();
+  writeLogCache(storage, "user_a", log, 1);
+  writeOutbox(storage, "user_a", [weighIn]);
+  clearLogCache(storage, { keepOutbox: true });
+  assert.equal(readLogCache(storage, "user_a"), null);
+  assert.equal(lastUser(storage), null);
+  assert.deepEqual(readOutbox(storage, "user_a"), [weighIn]);
+});
+
+test("clearing outboxes removes every user's and nothing else", () => {
+  const storage = new MemoryStorage({ other: "kept" });
+  writeLogCache(storage, "user_a", log, 1);
+  writeOutbox(storage, "user_a", [weighIn]);
+  writeOutbox(storage, "user_b", [deletion]);
+  clearOutbox(storage);
+  assert.deepEqual(readOutbox(storage, "user_a"), []);
+  assert.deepEqual(readOutbox(storage, "user_b"), []);
+  assert.equal(storage.getItem("other"), "kept");
+  assert.equal(readLogCache(storage, "user_a").savedAt, 1);
+});
+
+test("an outbox that can't be written says so, and storage that can't be read counts as empty", () => {
+  const storage = new MemoryStorage();
+  storage.setItem = () => { throw new Error("QuotaExceededError"); };
+  assert.throws(() => writeOutbox(storage, "user_a", [weighIn]), /Quota/);
+  assert.deepEqual(readOutbox({ getItem() { throw new Error("SecurityError"); } }, "user_a"), []);
+});
+
+test("signing out with changes waiting asks first, counting them", () => {
+  assert.equal(signOutWarning(0), null);
+  assert.equal(signOutWarning(undefined), null);
+  assert.equal(signOutWarning(1), "1 change on this device hasn’t synced yet. Sign out anyway?");
+  assert.equal(signOutWarning(2), "2 changes on this device haven’t synced yet. Sign out anyway?");
 });

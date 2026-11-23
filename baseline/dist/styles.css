@@ -120,8 +120,10 @@ h1 { font-size: 1.125rem; font-weight: 600; color: var(--ink-2); }
 body[data-view="log"] h1 { font-size: 2.25rem; font-weight: 700; line-height: 1.1; letter-spacing: -.025em; color: var(--ink); }
 .page-detail { margin-top: 8px; color: var(--ink-3); }
 .page-detail:empty { display: none; }
-/* Says the log on screen is the copy kept on this device. */
+/* Says the log on screen is the copy kept on this device, and that changes are
+   waiting on it, each on its own line. */
 .log-status { margin-top: 6px; color: var(--ink-3); font-size: .875rem; }
+.log-status span { display: block; }
 .button.quick-log { display: none; }
 body[data-view="log"] .button.quick-log { display: inline-flex; }
 /* The log's views, under its heading. */
