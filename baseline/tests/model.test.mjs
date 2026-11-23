@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { CM_PER_IN, FORECAST_MAX_DAYS, KG_PER_LB, NOTE_MAX_LENGTH, averageChanges, bodyFat, bodyFatChange, bodyFatHistory, changeTarget, formatWaist, roundWaist, saveWaist, spokenWaist, validWaist, waistParts, formatAmount, formatWeight, fromTenths, heightParts, normalizeUnits, toTenths, weightParts, bmi, calculateRate, calculateTrend, cleanNote, dateOf, dayOf, fastGoalRate, fastLossCaution, forecastGoal, goalProgress, goalRateAllowed, goalRateLimit, groupByMonth, maxGoalRate, monthlyReports, normalizeGoal, normalizeReminder, validTimeZone, normalizeState, noteLength, overallRate, recentRange, saveWeight, shiftDate, validDate } from "../dist/model.mjs";
 import { PREFERENCE_KEYS, QUEUEABLE_OPS, applyOp, applyOps, normalizePreferences, preferencesChange, validPreference } from "../dist/model.mjs";
-import { CONSENT_VERSION, hasConsent, normalizeConsent } from "../dist/model.mjs";
+import { CONSENT_VERSION, hasConsent, normalizeConsent, roundWeight } from "../dist/model.mjs";
 
 const first = dayOf("2026-03-01");
 const entry = (index, weight) => ({ date: dateOf(first + index), weight });
@@ -769,7 +769,7 @@ test("each change that can wait applies as the server applies it", () => {
 });
 
 test("every change that can wait is one the app sends, and reminders aren't among them", () => {
-  assert.deepEqual([...QUEUEABLE_OPS].sort(), ["clear-goal", "consent", "delete-waist", "delete-weight", "save-waist", "save-weight", "set-goal", "set-height", "set-preferences", "set-units", "update-weight"]);
+  assert.deepEqual([...QUEUEABLE_OPS].sort(), ["clear-goal", "consent", "delete-waist", "delete-weight", "save-waist", "save-weight", "set-goal", "set-height", "set-preferences", "set-units", "start", "update-weight"]);
   assert.ok(!QUEUEABLE_OPS.includes("set-reminder") && !QUEUEABLE_OPS.includes("clear-reminder") && !QUEUEABLE_OPS.includes("import"));
 });
 
@@ -917,4 +917,168 @@ test("the log sheet's heading names today with its weekday", async () => {
   assert.equal(todayHeading("2027-01-01"), "Today, Fri Jan 1");
   // Calendar dates, whatever the time zone the tests run in.
   assert.equal(todayHeading("2026-03-08"), "Today, Sun Mar 8");
+});
+
+test("a new account's units come from the browser's region: pounds in the US, kilograms elsewhere", async () => {
+  const { defaultUnits } = await import("../dist/model.mjs");
+  assert.deepEqual(defaultUnits("en-US"), { weight: "lb", height: "ft" });
+  assert.deepEqual(defaultUnits("es-US"), { weight: "lb", height: "ft" }, "the region decides, not the language");
+  assert.deepEqual(defaultUnits("en_US"), { weight: "lb", height: "ft" }, "some browsers report an underscore");
+  // The UK and Ireland get kilograms, with stones beside them on the first-run screen.
+  assert.deepEqual(defaultUnits("en-GB"), { weight: "kg", height: "cm" });
+  assert.deepEqual(defaultUnits("en-IE"), { weight: "kg", height: "cm" });
+  assert.deepEqual(defaultUnits("de-DE"), { weight: "kg", height: "cm" });
+  assert.deepEqual(defaultUnits("zh-Hant-TW"), { weight: "kg", height: "cm" });
+  // A locale without a region doesn't say where, and junk falls back to the default.
+  assert.deepEqual(defaultUnits("en"), { weight: "kg", height: "cm" });
+  for (const junk of ["", "not a locale!", "en-", "e", undefined, null, 42, {}]) {
+    assert.deepEqual(defaultUnits(junk), { weight: "kg", height: "cm" }, String(junk));
+  }
+  // Each call gives a fresh object, so changing one never changes the default.
+  const units = defaultUnits("fr-FR");
+  units.weight = "st";
+  assert.deepEqual(normalizeUnits(null), { weight: "kg", height: "cm" });
+});
+
+const checkLog = (...items) => items.map(([date, weight]) => ({ date, weight, note: null }));
+
+test("a weigh-in that reads right in another unit is a likely unit mix-up, in either direction", async () => {
+  const { checkWeighIn } = await import("../dist/model.mjs");
+  const yesterday = checkLog(["2026-11-22", 85]);
+  const ask = (weight, unit, entries = yesterday) => checkWeighIn({ weight, date: "2026-11-23", entries, unit });
+  // 190 typed into a kg field, from someone who weighs 190 lb.
+  const pounds = ask(190, "kg");
+  assert.equal(pounds.reason, "unit");
+  assert.deepEqual(pounds.suggestion, { unit: "lb", weight: 86.18 });
+  assert.deepEqual(pounds.reference, { kind: "weigh-in", weight: 85, date: "2026-11-22", age: 1, last: true });
+  assert.ok(Math.abs(pounds.change - (190 / 85 - 1)) < 1e-12);
+  // 13 typed into a kg field, from someone who weighs 13 stone.
+  assert.deepEqual(ask(13, "kg").suggestion, { unit: "st", weight: 82.55 });
+  // The other way: 85 typed into a pounds field, which saves 38.56 kg.
+  const kilos = ask(roundWeight(85 * KG_PER_LB), "lb");
+  assert.equal(kilos.reason, "unit");
+  assert.deepEqual(kilos.suggestion, { unit: "kg", weight: 85 });
+  assert.deepEqual(ask(roundWeight(13.4 * KG_PER_LB), "lb").suggestion, { unit: "st", weight: 85.09 }, "13.4 lb read as 13.4 stone");
+  // Into a stones field: 85 st, from someone who weighs 85 kg, and 187 st from someone who weighs 187 lb.
+  assert.deepEqual(ask(roundWeight(85 * 14 * KG_PER_LB), "st").suggestion, { unit: "kg", weight: 85 });
+  assert.deepEqual(ask(roundWeight(187 * 14 * KG_PER_LB), "st").suggestion, { unit: "lb", weight: 84.82 });
+});
+
+test("a weigh-in that reads right with the decimal point moved is a likely slip", async () => {
+  const { checkWeighIn } = await import("../dist/model.mjs");
+  const entries = checkLog(["2026-11-22", 84.9]);
+  const ask = (weight, unit) => checkWeighIn({ weight, date: "2026-11-23", entries, unit });
+  const tenTimes = ask(849, "kg");
+  assert.equal(tenTimes.reason, "decimal");
+  assert.deepEqual(tenTimes.suggestion, { unit: "kg", weight: 84.9 });
+  assert.deepEqual(ask(8.5, "kg").suggestion, { unit: "kg", weight: 85 });
+  // In pounds: 1872 for 187.2 lb, saved as 187.2 lb would be.
+  const pounds = ask(roundWeight(1872 * KG_PER_LB), "lb");
+  assert.equal(pounds.reason, "decimal");
+  assert.deepEqual(pounds.suggestion, { unit: "lb", weight: roundWeight(187.2 * KG_PER_LB) });
+  assert.equal(ask(roundWeight(1872 * KG_PER_LB), "lb").suggestion.weight, 84.91);
+  // A unit mix-up is tried first, so 190 is pounds before it's anything else.
+  assert.equal(ask(190, "kg").reason, "unit");
+});
+
+test("anything else far from the reference is a jump, and nearer is no question", async () => {
+  const { checkWeighIn } = await import("../dist/model.mjs");
+  const entries = checkLog(["2026-11-22", 84.9]);
+  const ask = (weight, unit = "kg") => checkWeighIn({ weight, date: "2026-11-23", entries, unit });
+  const jump = ask(79);
+  assert.equal(jump.reason, "jump");
+  assert.equal(jump.suggestion, null);
+  assert.equal(Math.round(jump.change * 100), -7);
+  assert.equal(ask(120).reason, "jump");
+  assert.equal(ask(82), null, "3.4% below");
+  assert.equal(ask(87.5), null, "3.1% above");
+  // Exactly 5% is allowed, and a hair over isn't.
+  const hundred = checkLog(["2026-11-22", 100]);
+  for (const [weight, asked] of [[105, false], [95, false], [105.01, true], [94.99, true]]) {
+    assert.equal(checkWeighIn({ weight, date: "2026-11-23", entries: hundred, unit: "kg" }) !== null, asked, String(weight));
+  }
+  // The same for lb and st users, whose weights are saved in kg.
+  assert.equal(ask(roundWeight(171 * KG_PER_LB), "lb").reason, "jump");
+  assert.equal(ask(roundWeight(185 * KG_PER_LB), "lb"), null);
+  assert.equal(ask(roundWeight(12 * 14 * KG_PER_LB), "st").reason, "jump");
+  assert.equal(ask(roundWeight((13 * 14 + 5) * KG_PER_LB), "st"), null);
+});
+
+test("a gap widens the check by a point a week, and after 180 days there's no check", async () => {
+  const { checkWeighIn } = await import("../dist/model.mjs");
+  const entries = checkLog(["2026-01-01", 100]);
+  const ask = (days, weight) => checkWeighIn({ weight, date: dateOf(dayOf("2026-01-01") + days), entries, unit: "kg" });
+  // Within a week, 5%.
+  assert.equal(ask(7, 105), null);
+  assert.equal(ask(7, 105.5).reason, "jump");
+  // Into the second week, 6%, and the third, 7%.
+  assert.equal(ask(8, 105.5), null);
+  assert.equal(ask(14, 106), null);
+  assert.equal(ask(14, 106.5).reason, "jump");
+  assert.equal(ask(15, 106.5), null);
+  assert.equal(ask(15, 93), null);
+  assert.equal(ask(15, 92.9).reason, "jump");
+  // At 180 days, 30%. A unit mix-up still shows, since it's further off than that.
+  assert.equal(ask(180, 129), null);
+  assert.equal(ask(180, 131).reason, "jump");
+  assert.equal(ask(180, 220).reason, "unit");
+  // Past 180 days the last weigh-in says too little.
+  assert.equal(ask(181, 220), null);
+});
+
+test("the reference is the 14-day average before the date, or the nearest weigh-in before it", async () => {
+  const { checkWeighIn, weighInReference } = await import("../dist/model.mjs");
+  // A first weigh-in has nothing to check against, nor one dated before every other.
+  assert.equal(checkWeighIn({ weight: 190, date: "2026-11-23", entries: [], unit: "kg" }), null);
+  assert.equal(checkWeighIn({ weight: 190, date: "2026-11-01", entries: checkLog(["2026-11-22", 85]), unit: "kg" }), null);
+  // Two or more weigh-ins in the 13 days before: their average. Older ones don't count.
+  const entries = checkLog(["2026-11-01", 60], ["2026-11-10", 84], ["2026-11-20", 86], ["2026-11-22", 85]);
+  assert.deepEqual(weighInReference(entries, "2026-11-23"), { kind: "average", weight: 85, date: "2026-11-23", age: 1, last: true });
+  // The date's own weigh-in, which a save replaces, doesn't count, nor do later ones.
+  const editing = [...entries, { date: "2026-11-23", weight: 190, note: null }, { date: "2026-11-25", weight: 70, note: null }];
+  assert.deepEqual(weighInReference(editing, "2026-11-23"), { kind: "average", weight: 85, date: "2026-11-23", age: 1, last: false });
+  assert.equal(checkWeighIn({ weight: 190, date: "2026-11-23", entries: editing, unit: "kg" }).reason, "unit");
+  // With only one weigh-in in those days, it's that weigh-in.
+  assert.deepEqual(weighInReference(entries, "2026-11-16"), { kind: "weigh-in", weight: 84, date: "2026-11-10", age: 6, last: false });
+  // With none, the nearest before, however old, and its age widens the check.
+  assert.deepEqual(weighInReference(checkLog(["2026-09-01", 90], ["2026-11-23", 80]), "2026-11-20"), { kind: "weigh-in", weight: 90, date: "2026-09-01", age: 80, last: false });
+  // Nothing to check without a weight or a date.
+  for (const weight of [0, -1, NaN, null, "85"]) assert.equal(checkWeighIn({ weight, date: "2026-11-23", entries, unit: "kg" }), null, String(weight));
+  assert.equal(checkWeighIn({ weight: 190, date: "2026-11-31", entries, unit: "kg" }), null);
+  assert.equal(checkWeighIn({ weight: 190, date: "2026-11-23", entries, unit: "g" }), null);
+});
+
+test("the question under the weight field names the reference and what each button saves", async () => {
+  const { checkWeighIn, weighInQuestion } = await import("../dist/model.mjs");
+  const today = "2026-11-23";
+  const ask = (weight, unit, entries, date = today) => weighInQuestion(checkWeighIn({ weight, date, entries, unit }), weight, unit, today);
+  const yesterday = checkLog(["2026-11-22", 84.9]);
+  const unit = ask(190, "kg", yesterday);
+  assert.equal(unit.text, "That’s 124% above your last weigh-in (84.9 kg on Nov 22). Did you mean 190.0 lb?");
+  assert.deepEqual(unit.choices, [
+    { label: "Save as 190.0 lb", spoken: "Save as 190.0 pounds", weight: 86.18, unit: "lb" },
+    { label: "Save 190.0 kg", spoken: "Save 190.0 kilograms", weight: 190, unit: null }
+  ]);
+  const decimal = ask(849, "kg", yesterday);
+  assert.equal(decimal.text, "Did you mean 84.9 kg?");
+  assert.deepEqual(decimal.choices.map(choice => [choice.label, choice.weight, choice.unit]), [["Save 84.9 kg", 84.9, null], ["Save 849.0 kg", 849, null]]);
+  const jump = ask(79, "kg", yesterday);
+  assert.equal(jump.text, "That’s 7% below your last weigh-in (84.9 kg on Nov 22). Save it anyway?");
+  assert.deepEqual(jump.choices.map(choice => [choice.label, choice.weight]), [["Save 79.0 kg", 79], ["Change it", null]]);
+  // In the user's unit, and read out in full for stones.
+  const stones = ask(roundWeight(12 * 14 * KG_PER_LB), "st", yesterday);
+  assert.equal(stones.text, "That’s 10% below your last weigh-in (13 st 5.2 lb on Nov 22). Save it anyway?");
+  assert.deepEqual([stones.choices[0].label, stones.choices[0].spoken], ["Save 12 st 0.0 lb", "Save 12 stone 0.0 pounds"]);
+  const kilos = ask(roundWeight(85 * KG_PER_LB), "lb", yesterday);
+  assert.equal(kilos.text, "That’s 55% below your last weigh-in (187.2 lb on Nov 22). Did you mean 85.0 kg?");
+  assert.deepEqual(kilos.choices.map(choice => [choice.label, choice.unit]), [["Save as 85.0 kg", "kg"], ["Save 85.0 lb", null]]);
+  // An average, today or on an earlier date, and a weigh-in before a later one.
+  const daily = checkLog(["2026-11-20", 85], ["2026-11-22", 84.8]);
+  assert.equal(ask(79, "kg", daily).text, "That’s 7% below your 14-day average (84.9 kg). Save it anyway?");
+  assert.equal(ask(79, "kg", [...daily, ...checkLog(["2026-11-23", 85])], "2026-11-23").text, "That’s 7% below your 14-day average (84.9 kg). Save it anyway?");
+  const backdated = checkLog(["2026-11-01", 85], ["2026-11-03", 85], ["2026-11-23", 84]);
+  assert.equal(ask(79, "kg", backdated, "2026-11-05").text, "That’s 7% below your 14-day average on Nov 5 (85.0 kg). Save it anyway?");
+  assert.equal(ask(79, "kg", checkLog(["2026-11-01", 85], ["2026-11-23", 84]), "2026-11-05").text, "That’s 7% below your previous weigh-in (85.0 kg on Nov 1). Save it anyway?");
+  // A date in another year shows its year.
+  assert.equal(ask(79, "kg", checkLog(["2025-12-30", 85]), "2026-01-02").text.includes("(85.0 kg on Dec 30, 2025)"), true);
 });

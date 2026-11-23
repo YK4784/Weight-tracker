@@ -31,6 +31,16 @@ export function claimLegacyLog(storage, userId) {
   return true;
 }
 
+// Whether this browser holds a log from before accounts that would move into
+// the user's account while it's empty: the one the user has claimed, or else
+// the unclaimed one (see claimLegacyLog and importBrowserLog in app.mjs). It
+// claims nothing. The first-run screen waits while there is one.
+export function hasLegacyLog(storage, userId) {
+  const saved = storage.getItem(storageKeyFor(userId)) ?? storage.getItem(LEGACY_STORAGE_KEY);
+  if (saved === null) return false;
+  try { return normalizeState(JSON.parse(saved)).started; } catch { return false; }
+}
+
 // The copy of the log kept on this device, so the page can show it before
 // sign-in and the server answer. It has its own keys: under storageKeyFor, a
 // cached copy would be imported again into any account that became empty.

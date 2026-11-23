@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { LAST_USER_KEY, LEGACY_STORAGE_KEY, LOG_CACHE_PREFIX, OUTBOX_PREFIX, claimLegacyLog, clearDeviceData, clearLogCache, clearOutbox, fastLossHiddenKeyFor, frontendApiFor, lastUser, logCacheKeyFor, outboxKeyFor, readLogCache, readOutbox, signOutWarning, storageKeyFor, writeLogCache, writeOutbox } from "../dist/account.mjs";
+import { LAST_USER_KEY, LEGACY_STORAGE_KEY, LOG_CACHE_PREFIX, OUTBOX_PREFIX, claimLegacyLog, clearDeviceData, clearLogCache, clearOutbox, fastLossHiddenKeyFor, frontendApiFor, hasLegacyLog, lastUser, logCacheKeyFor, outboxKeyFor, readLogCache, readOutbox, signOutWarning, storageKeyFor, writeLogCache, writeOutbox } from "../dist/account.mjs";
 import { normalizeState } from "../dist/model.mjs";
 
 const keyFor = (kind, host) => "pk_" + kind + "_" + btoa(host + "$");
@@ -59,6 +59,24 @@ test("nothing happens when there is no old log", () => {
   const storage = new MemoryStorage();
   assert.equal(claimLegacyLog(storage, "user_a"), false);
   assert.equal(storage.items.size, 0);
+});
+
+test("the first-run screen knows when an old log is waiting to move in, without claiming it", () => {
+  const old = JSON.stringify({ started: true, entries: [{ date: "2026-11-01", weight: 80 }] });
+  // An unclaimed log, and one this account claimed, wait for it.
+  const unclaimed = new MemoryStorage({ [LEGACY_STORAGE_KEY]: old });
+  assert.equal(hasLegacyLog(unclaimed, "user_a"), true);
+  assert.equal(unclaimed.getItem(LEGACY_STORAGE_KEY), old, "nothing is claimed");
+  assert.equal(hasLegacyLog(new MemoryStorage({ [storageKeyFor("user_a")]: old }), "user_a"), true);
+  // Another account's claimed log isn't this one's.
+  assert.equal(hasLegacyLog(new MemoryStorage({ [storageKeyFor("user_b")]: old }), "user_a"), false);
+  // The claimed log is the one that moves in, so an empty one wins over an unclaimed one.
+  assert.equal(hasLegacyLog(new MemoryStorage({ [storageKeyFor("user_a")]: JSON.stringify({ entries: [] }), [LEGACY_STORAGE_KEY]: old }), "user_a"), false);
+  // An empty, unreadable or missing log has nothing to import.
+  for (const saved of [JSON.stringify({ started: false, entries: [] }), "not json", "null"]) {
+    assert.equal(hasLegacyLog(new MemoryStorage({ [LEGACY_STORAGE_KEY]: saved }), "user_a"), false, saved);
+  }
+  assert.equal(hasLegacyLog(new MemoryStorage(), "user_a"), false);
 });
 
 const log = {

@@ -135,13 +135,29 @@ a { color: inherit; }
 .consent-other h2 { font-size: 1rem; font-weight: 700; }
 .consent-other p { margin-top: 4px; color: var(--ink-2); text-wrap: pretty; }
 .consent-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+/* The first-run screen: one sentence, then a large switch for the unit, the
+   weight and Save, in one column under the page heading. */
+.first-run { max-width: 28rem; }
+.first-run-lead { font-size: 1.125rem; text-wrap: pretty; }
+#first-run-form { margin-top: 24px; }
+.choice-group.unit-choice { margin-top: 0; }
+.unit-choice .choices { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.unit-choice .choice { position: relative; flex-direction: column; justify-content: center; gap: 0; min-height: 64px; padding: 8px 4px; text-align: center; }
+/* The radio stays for the keyboard and screen readers; the frame shows the choice. */
+.unit-choice .choice input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.unit-choice .choice:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.choice-unit { font-size: 1.375rem; font-weight: 700; line-height: 1.2; }
+.choice-name { color: var(--ink-3); font-size: .8125rem; }
+.unit-choice + .field-label { margin-top: 20px; }
+.first-run-skip { margin-top: 16px; text-align: center; }
+.first-run-skip .text-button { margin-block: -10px; padding-block: 10px; }
 
 /* Page */
 .page { padding-block: 32px 48px; }
 .page:focus { outline: none; }
 .page-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
 h1 { font-size: 1.125rem; font-weight: 600; color: var(--ink-2); }
-body:is([data-view="log"], [data-view="settings"], [data-view="data"]) h1 { font-size: 2.25rem; font-weight: 700; line-height: 1.1; letter-spacing: -.025em; color: var(--ink); }
+body:is([data-view="log"], [data-view="settings"], [data-view="data"], [data-view="first-run"]) h1 { font-size: 2.25rem; font-weight: 700; line-height: 1.1; letter-spacing: -.025em; color: var(--ink); }
 .page-detail { margin-top: 8px; color: var(--ink-3); }
 .page-detail:empty { display: none; }
 /* Says the log on screen is the copy kept on this device, and that changes are
@@ -170,6 +186,11 @@ body[data-weight-unit="st"] .hero:not(.is-empty) { font-size: clamp(3.5rem, 9vw 
 .hero-rate { margin-top: 4px; color: var(--ink-2); }
 .hero-rate strong { font-weight: 700; color: var(--ink); }
 .hero-rate.is-pending { color: var(--ink-3); }
+/* "Set a goal when you're ready": a quiet line for the first two weeks, with
+   a 44px hit area that takes no room. */
+.hero-goal { margin-top: 4px; }
+.quiet-button { margin-block: -10px; padding-block: 10px; color: var(--ink-2); text-decoration: underline 1px var(--field-border); text-underline-offset: 3px; }
+.quiet-button:hover { color: var(--ink); text-decoration-color: currentColor; }
 /* Progress toward the goal: a rule split at each milestone. */
 .goal-progress { max-width: 34rem; margin-top: 22px; }
 .progress-track { position: relative; height: 6px; margin-bottom: 10px; border-radius: 3px; background: var(--rule); overflow: hidden; }
@@ -228,6 +249,13 @@ body[data-weight-unit="st"] .hero:not(.is-empty) { font-size: clamp(3.5rem, 9vw 
 .button.secondary:hover { background: var(--surface); }
 .button.danger { background: var(--danger); color: var(--on-danger); }
 .save-button { width: 100%; margin-top: 22px; }
+/* The question under a weight field before saving a weigh-in that looks
+   mistyped (see checkWeighIn in model.mjs). Closed, it takes no room but its
+   live region stays on the page, so screen readers hear it open. */
+.weigh-in-check.is-open { margin-top: 12px; padding: 12px 14px; border-radius: 8px; background: var(--paper); }
+.check-text { color: var(--ink); text-wrap: pretty; }
+.check-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.weigh-in-check + :is(.field-label, .field-head) { margin-top: 16px; }
 .form-hint { margin-top: 10px; font-size: .875rem; color: var(--ink-3); text-align: center; text-wrap: pretty; }
 .text-button, .text-link { color: var(--accent); font-weight: 700; text-decoration: underline 1px transparent; text-underline-offset: 3px; }
 .text-button:hover, .text-link:hover { text-decoration-color: currentColor; }
@@ -506,7 +534,7 @@ dialog.sheet[open] { display: flex; flex-direction: column; overflow: hidden; }
   body:is([data-view="overview"], [data-view="log"]) .page { padding-bottom: calc(48px + var(--bar-height)); }
   body:is([data-view="overview"], [data-view="log"]) #main:not([hidden]) ~ .toast { bottom: calc(12px + var(--bar-height)); }
   body[data-view="log"] .button.quick-log { display: none; }
-  body:is([data-view="log"], [data-view="settings"], [data-view="data"]) h1 { font-size: 1.875rem; }
+  body:is([data-view="log"], [data-view="settings"], [data-view="data"], [data-view="first-run"]) h1 { font-size: 1.875rem; }
   .policy { padding-top: 24px; }
   .policy h1 { font-size: 1.875rem; }
   /* A name over what it covers. */

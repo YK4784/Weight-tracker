@@ -93,6 +93,33 @@ test("every weight field has the pounds input and unit label that applyUnits set
   for (const id of fields) for (const suffix of ["", "-lb", "-unit"]) assert.match(page, new RegExp('id="' + id + suffix + '"'), id + suffix);
 });
 
+test("the first-run screen offers kg, lb and st, and its weight field has the inputs each needs", async () => {
+  const firstRun = section(page, "first-run");
+  assert.deepEqual([...firstRun.matchAll(/name="first-run-unit" value="(\w+)"/g)].map(match => match[1]), ["kg", "lb", "st"]);
+  for (const suffix of ["", "-lb", "-unit"]) assert.match(firstRun, new RegExp('id="first-run-weight' + suffix + '"'), suffix);
+  assert.match(firstRun, /<button class="button primary save-button" type="submit">Save</);
+  assert.match(firstRun, /id="first-run-skip"[^>]*>Skip for now</);
+  // Its field is in the unit picked there, so it isn't among the fields that follow the saved unit.
+  const app = await read("app.mjs");
+  assert.ok(!JSON.parse(/^const WEIGHT_FIELDS = (\[[^\]]*\]);$/m.exec(app)[1]).includes("first-run-weight"));
+});
+
+test("each form that saves a weigh-in has room for a question under the weight, in a live region", async () => {
+  const app = await read("app.mjs");
+  const forms = JSON.parse(/^const CHECKED_FIELDS = (\{[^}]*\});$/m.exec(app)[1].replace(/(\w+):/g, '"$1":'));
+  assert.deepEqual(forms, { entry: "entry-weight", sheet: "sheet-weight", edit: "edit-weight" });
+  for (const [form, field] of Object.entries(forms)) {
+    const html = section(page, form + "-form");
+    const check = html.indexOf('id="' + form + '-check"');
+    assert.ok(check > html.indexOf('id="' + field + '-lb"'), form + ": under the weight");
+    assert.ok(check < html.indexOf('type="submit"'), form + ": above Save");
+    // The live region stays on the page while empty, so screen readers hear it fill.
+    assert.doesNotMatch(html, new RegExp('id="' + form + '-check"[^>]*hidden'), form);
+    assert.match(html, new RegExp('<p class="check-text" id="' + form + '-check-text" role="status"></p>'), form);
+    assert.match(html, new RegExp('id="' + form + '-check-actions"[^>]*hidden'), form);
+  }
+});
+
 test("the log sheet saves from the keyboard, and the page can reach the safe area", () => {
   const sheet = section(page, "log-sheet");
   assert.match(sheet, /<dialog class="sheet" id="log-sheet"/);

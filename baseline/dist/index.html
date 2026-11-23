@@ -133,6 +133,30 @@
       <a id="months-link" href="#monthly-summary">Monthly summary</a>
     </nav>
 
+    <!-- A new account's overview, until its first weigh-in or "Skip for now"
+         (see showFirstRun in app.mjs). It comes after the consent step. The
+         page heading reads "Your first weigh-in". -->
+    <section class="first-run" id="first-run" aria-labelledby="page-title" hidden>
+      <p class="first-run-lead" id="first-run-lead">Your weight swings by a kilo or more from day to day, so Baseline shows the average of your last 14 days.</p>
+      <form id="first-run-form">
+        <fieldset class="choice-group unit-choice">
+          <legend class="field-label">Unit</legend>
+          <div class="choices">
+            <label class="choice"><input type="radio" name="first-run-unit" value="kg"><span class="choice-unit">kg</span><span class="choice-name">kilograms</span></label>
+            <label class="choice"><input type="radio" name="first-run-unit" value="lb"><span class="choice-unit">lb</span><span class="choice-name">pounds</span></label>
+            <label class="choice"><input type="radio" name="first-run-unit" value="st"><span class="choice-unit">st</span><span class="choice-name">stones</span></label>
+          </div>
+        </fieldset>
+        <label class="field-label" for="first-run-weight">Today’s weight</label>
+        <div class="split-field">
+          <div class="input-frame"><input id="first-run-weight" name="weight" type="number" inputmode="decimal" enterkeyhint="done" placeholder="0.0" min="0.1" max="2000" step="0.1" aria-describedby="first-run-weight-unit" required><span class="input-unit" id="first-run-weight-unit">kg</span></div>
+          <div class="input-frame" hidden><input id="first-run-weight-lb" name="pounds" type="number" inputmode="decimal" enterkeyhint="done" placeholder="0.0" min="0" max="13.9" step="0.1" aria-label="Pounds"><span class="input-unit" aria-hidden="true">lb</span></div>
+        </div>
+        <button class="button primary save-button" type="submit">Save</button>
+        <p class="first-run-skip"><button class="text-button" type="button" id="first-run-skip">Skip for now</button></p>
+      </form>
+    </section>
+
     <div id="overview-view">
       <div class="top">
         <section class="summary" aria-labelledby="avg-title">
@@ -140,6 +164,7 @@
           <p class="hero is-empty" id="hero">—</p>
           <p class="hero-note" id="avg-detail"></p>
           <p class="hero-rate" id="rate-detail" hidden></p>
+          <p class="hero-goal" id="goal-invite" hidden><button class="quiet-button" type="button" data-goal>Set a goal when you’re ready</button></p>
           <div class="goal-progress" id="goal-progress" hidden>
             <div class="progress-track" id="progress-track" aria-hidden="true"><span class="progress-fill" id="progress-fill"></span></div>
             <p class="progress-note" id="progress-note"></p>
@@ -174,6 +199,7 @@
               <div class="input-frame"><input id="entry-weight" name="weight" type="number" inputmode="decimal" placeholder="0.0" min="0.1" max="2000" step="0.1" aria-describedby="entry-weight-unit" required><span class="input-unit" id="entry-weight-unit">kg</span></div>
               <div class="input-frame" hidden><input id="entry-weight-lb" name="pounds" type="number" inputmode="decimal" placeholder="0.0" min="0" max="13.9" step="0.1" aria-label="Pounds"><span class="input-unit" aria-hidden="true">lb</span></div>
             </div>
+            <div class="weigh-in-check" id="entry-check"><p class="check-text" id="entry-check-text" role="status"></p><div class="check-actions" id="entry-check-actions" role="group" aria-labelledby="entry-check-text" hidden></div></div>
             <label class="field-label" for="entry-note">Note <span class="optional">(optional)</span></label>
             <div class="input-frame"><input id="entry-note" name="note" type="text" maxlength="100" placeholder="e.g. after travel" autocomplete="off"></div>
             <button class="button primary save-button" type="submit"><span id="save-label">Save entry</span></button>
@@ -474,6 +500,7 @@
           <div class="input-frame"><input id="sheet-weight" name="weight" type="number" inputmode="decimal" enterkeyhint="done" placeholder="0.0" min="0.1" max="2000" step="0.1" aria-describedby="sheet-weight-unit" required><span class="input-unit" id="sheet-weight-unit">kg</span></div>
           <div class="input-frame" hidden><input id="sheet-weight-lb" name="pounds" type="number" inputmode="decimal" enterkeyhint="done" placeholder="0.0" min="0" max="13.9" step="0.1" aria-label="Pounds"><span class="input-unit" aria-hidden="true">lb</span></div>
         </div>
+        <div class="weigh-in-check" id="sheet-check"><p class="check-text" id="sheet-check-text" role="status"></p><div class="check-actions" id="sheet-check-actions" role="group" aria-labelledby="sheet-check-text" hidden></div></div>
         <button class="text-button sheet-add-note" type="button" id="sheet-add-note">Add a note</button>
         <div class="sheet-note" id="sheet-note-field" hidden>
           <label class="field-label" for="sheet-note">Note <span class="optional">(optional)</span></label>
@@ -589,6 +616,7 @@
         <div class="input-frame"><input id="edit-weight" name="weight" type="number" inputmode="decimal" placeholder="0.0" min="0.1" max="2000" step="0.1" aria-describedby="edit-weight-unit" required><span class="input-unit" id="edit-weight-unit">kg</span></div>
         <div class="input-frame" hidden><input id="edit-weight-lb" name="pounds" type="number" inputmode="decimal" placeholder="0.0" min="0" max="13.9" step="0.1" aria-label="Pounds"><span class="input-unit" aria-hidden="true">lb</span></div>
       </div>
+      <div class="weigh-in-check" id="edit-check"><p class="check-text" id="edit-check-text" role="status"></p><div class="check-actions" id="edit-check-actions" role="group" aria-labelledby="edit-check-text" hidden></div></div>
       <label class="field-label" for="edit-note">Note <span class="optional">(optional)</span></label>
       <div class="input-frame"><input id="edit-note" name="note" type="text" maxlength="100" placeholder="e.g. after travel" autocomplete="off"></div>
       <div class="dialog-actions edit-actions"><button class="danger-link" type="button" id="delete-entry">Delete entry</button><button class="button primary" type="submit">Save changes</button></div>

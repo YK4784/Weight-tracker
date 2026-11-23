@@ -75,6 +75,17 @@ export function normalizeUnits(value) {
   };
 }
 
+// The units a new account starts with, from the region of a browser locale
+// such as "en-US" (navigator.languages[0]): pounds and feet in the United
+// States, and kilograms and centimeters everywhere else, the UK and Ireland
+// included, where stones sit beside them on the first-run screen. A locale
+// without a region, such as "en", doesn't say where, so it gets the default.
+export function defaultUnits(locale) {
+  let region;
+  try { region = new Intl.Locale(String(locale).replaceAll("_", "-")).region; } catch { region = undefined; }
+  return region === "US" ? { weight: "lb", height: "ft" } : { ...UNITS };
+}
+
 // A weight in kg as a whole number of the tenths shown in `unit` (0.1 kg or
 // 0.1 lb), and back. For kg these are the same sums as Math.round(kg * 10) / 10.
 export function toTenths(kg, unit = "kg") {
@@ -420,11 +431,120 @@ export function todayHeading(today) {
   return "Today, " + prettyDate(today, "dayName") + " " + prettyDate(today);
 }
 
+// What a weigh-in is checked against before it's saved (see checkWeighIn):
+// the 14-day average on its date, from the weigh-ins in the 13 days before
+// it, or, without two of those, the nearest weigh-in before the date. The
+// date's own weigh-in, which a save replaces, and later ones don't count.
+// `age` is how many days before the date the latest of them was. `last` says
+// whether no other weigh-in comes after the date. Null without a weigh-in
+// before the date.
+export function weighInReference(entries, date) {
+  const day = dayOf(date);
+  const before = entries.filter(entry => entry.date < date);
+  const latest = before.at(-1);
+  if (!latest) return null;
+  const age = day - dayOf(latest.date);
+  const last = !entries.some(entry => entry.date > date);
+  const recent = before.filter(entry => dayOf(entry.date) > day - WINDOW_DAYS);
+  if (recent.length < 2) return { kind: "weigh-in", weight: latest.weight, date: latest.date, age, last };
+  // Whole hundredths of a kilogram, as calculateTrend sums them.
+  const hundredths = recent.reduce((sum, entry) => sum + Math.round(entry.weight * 100), 0);
+  return { kind: "average", weight: hundredths / (recent.length * 100), date, age, last };
+}
+
+// A weigh-in is checked when it differs from its reference by more than
+// CHECK_SHARE, plus CHECK_SHARE_PER_WEEK for each week the reference is older
+// than one, since weight drifts over a gap. A reference older than
+// CHECK_MAX_DAYS says too little to check against. A reading in another unit,
+// or with the decimal point moved, counts as the likely cause when it comes
+// within CHECK_MATCH of the reference.
+export const CHECK_SHARE = .05;
+export const CHECK_SHARE_PER_WEEK = .01;
+export const CHECK_MAX_DAYS = 180;
+export const CHECK_MATCH = .03;
+const KG_PER_UNIT = { kg: 1, lb: KG_PER_LB, st: 14 * KG_PER_LB };
+
+// Whether two weights differ by no more than `share` of the second, to 0.01%,
+// so that a difference of exactly 5% counts as 5%.
+const within = (weight, reference, share) => Math.round(Math.abs(weight / reference - 1) * 10_000) <= Math.round(share * 10_000);
+
+// The number typed for a weight of `kg` in `unit`: kilograms, pounds to 0.1,
+// or stones as a decimal, from stones and pounds to 0.1 lb.
+function typedNumber(kg, unit) {
+  if (unit === "kg") return kg;
+  const pounds = toTenths(kg, unit) / 10;
+  return unit === "st" ? pounds / 14 : pounds;
+}
+
+// Checks a weigh-in before it's saved, for a slip that would skew the
+// average for two weeks. `weight` is in kg, as it would be saved, and `unit`
+// is the unit it was typed in. Returns null when it's within reach of its
+// reference (see weighInReference), or when there's nothing recent enough to
+// check against. Otherwise returns { reason, suggestion, reference, change }:
+// - "unit": the number typed, read in another unit (lb or st typed into a kg
+//   field, kg or st into an lb field, kg or lb into a st field), comes within
+//   CHECK_MATCH of the reference. `suggestion` is { unit, weight } in kg.
+// - "decimal": the number divided or multiplied by 10 does, as 849 for 84.9.
+//   `suggestion` is in the same unit.
+// - "jump": neither does. `suggestion` is null.
+// `change` is how far the weight is from the reference, as a signed share of it.
+export function checkWeighIn({ weight, date, entries, unit = "kg" }) {
+  if (!positive(weight) || !validDate(date) || !WEIGHT_UNITS.includes(unit)) return null;
+  const reference = weighInReference(entries, date);
+  if (!reference || reference.age > CHECK_MAX_DAYS) return null;
+  const extraWeeks = Math.max(0, Math.ceil(reference.age / 7) - 1);
+  if (within(weight, reference.weight, CHECK_SHARE + CHECK_SHARE_PER_WEEK * extraWeeks)) return null;
+  const result = (reason, suggestion) => ({ reason, suggestion, reference, change: weight / reference.weight - 1 });
+  const typed = typedNumber(weight, unit);
+  const near = kg => within(kg, reference.weight, CHECK_MATCH);
+  // The closest reading in another unit, if any comes near. Their factors are
+  // far enough apart that only one can.
+  const readings = WEIGHT_UNITS.filter(other => other !== unit)
+    .map(other => ({ unit: other, weight: roundWeight(typed * KG_PER_UNIT[other]) }))
+    .filter(reading => near(reading.weight))
+    .sort((a, b) => Math.abs(a.weight - reference.weight) - Math.abs(b.weight - reference.weight));
+  if (readings.length) return result("unit", readings[0]);
+  for (const factor of [.1, 10]) {
+    const moved = roundWeight(typed * factor * KG_PER_UNIT[unit]);
+    if (near(moved)) return result("decimal", { unit, weight: moved });
+  }
+  return result("jump", null);
+}
+
+// A date in a sentence: "Nov 22" this year, or "Nov 22, 2025" before.
+const dateIn = (date, today) => date.slice(0, 4) === today.slice(0, 4) ? prettyDate(date) : prettyDate(date, "full");
+
+// What Baseline asks under the weight field about a weigh-in checkWeighIn
+// flagged, for a weight of `weight` kg typed in `unit`, which is also the unit
+// Baseline shows weights in. Returns { text, choices }. Each choice is
+// { label, spoken, weight, unit }: the weight in kg it saves, or null for
+// "Change it", which saves nothing; `unit` is set when it saves the weight read
+// in another unit, which Baseline then offers to show weights in.
+export function weighInQuestion(check, weight, unit, today) {
+  const { reference, suggestion } = check;
+  const shown = (kg, as = unit) => formatWeight(kg, as);
+  const save = (prefix, kg, as = unit) => ({ label: prefix + shown(kg, as), spoken: prefix + spokenWeight(kg, as), weight: kg, unit: as === unit ? null : as });
+  const against = reference.kind === "average"
+    ? "your 14-day average" + (reference.date === today ? "" : " on " + dateIn(reference.date, today)) + " (" + shown(reference.weight) + ")"
+    : (reference.last ? "your last weigh-in" : "your previous weigh-in") + " (" + shown(reference.weight) + " on " + dateIn(reference.date, today) + ")";
+  const percent = Math.round(Math.abs(check.change) * 100);
+  const away = "That’s " + percent + "% " + (check.change > 0 ? "above " : "below ") + against + ".";
+  switch (check.reason) {
+    case "unit":
+      return { text: away + " Did you mean " + shown(suggestion.weight, suggestion.unit) + "?", choices: [save("Save as ", suggestion.weight, suggestion.unit), save("Save ", weight)] };
+    case "decimal":
+      return { text: "Did you mean " + shown(suggestion.weight) + "?", choices: [save("Save ", suggestion.weight), save("Save ", weight)] };
+    default:
+      return { text: away + " Save it anyway?", choices: [save("Save ", weight), { label: "Change it", spoken: "Change it", weight: null, unit: null }] };
+  }
+}
+
 // The changes that can wait on the device while it's offline and be sent
 // later, in order (see the outbox in app.mjs). Reminders need a live push
 // subscription, so they aren't among them. Agreeing to the health data policy
 // can wait too, and goes ahead of the changes it allows (see agree in app.mjs).
-export const QUEUEABLE_OPS = ["save-weight", "update-weight", "delete-weight", "set-height", "save-waist", "delete-waist", "set-goal", "clear-goal", "set-units", "set-preferences", "consent"];
+// So can skipping the first-run screen ("start"), which only starts the log.
+export const QUEUEABLE_OPS = ["save-weight", "update-weight", "delete-weight", "set-height", "save-waist", "delete-waist", "set-goal", "clear-goal", "set-units", "set-preferences", "consent", "start"];
 
 // Applies a change the app sends (see server/ops.mjs) to a normalized log, as
 // server/store.mjs does on the server, so the screen can show changes that

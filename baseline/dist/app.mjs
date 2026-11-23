@@ -1,6 +1,6 @@
-import { CM_PER_IN, CONSENT_VERSION, FAST_LOSS_DAYS, FORECAST_MAX_DAYS, GOAL_MILESTONES, GOAL_RATE_CAP, KG_PER_LB, OVERALL_MIN_DAYS, QUEUEABLE_OPS, RATE_DAYS, RATE_MIN_ENTRIES, RATE_MIN_SPAN, SEXES, WINDOW_DAYS, applyOps, averageChanges, bmi, bodyFat, bodyFatChange, bodyFatHistory, calculateRate, changeTarget, calculateTrend, cleanNote, dateOf, dayOf, fastGoalRate, fastLossCaution, forecastGoal, formatAmount, formatWaist, formatWeight, fromTenths, goalProgress, goalRateAllowed, goalRateLimit, groupByMonth, hasConsent, heightParts, localToday, maxGoalRate, monthlyReports, normalizeGoal, normalizeState, oneDecimal, overallRate, positive, prettyDate, recentRange, roundHeight, roundWaist, roundWeight, shiftDate, spokenHeight, spokenWeight, toTenths, todayHeading, todayLabel, validDate, validWaist, waistParts, waistTenths, weightParts } from "./model.mjs";
+import { CM_PER_IN, CONSENT_VERSION, FAST_LOSS_DAYS, FORECAST_MAX_DAYS, GOAL_MILESTONES, GOAL_RATE_CAP, KG_PER_LB, OVERALL_MIN_DAYS, QUEUEABLE_OPS, RATE_DAYS, RATE_MIN_ENTRIES, RATE_MIN_SPAN, SEXES, WINDOW_DAYS, applyOps, averageChanges, bmi, bodyFat, bodyFatChange, bodyFatHistory, calculateRate, changeTarget, calculateTrend, checkWeighIn, cleanNote, dateOf, dayOf, defaultUnits, fastGoalRate, fastLossCaution, forecastGoal, formatAmount, formatWaist, formatWeight, fromTenths, goalProgress, goalRateAllowed, goalRateLimit, groupByMonth, hasConsent, heightParts, localToday, maxGoalRate, monthlyReports, normalizeGoal, normalizeState, oneDecimal, overallRate, positive, prettyDate, recentRange, roundHeight, roundWaist, roundWeight, shiftDate, spokenHeight, spokenWeight, toTenths, todayHeading, todayLabel, validDate, validWaist, waistParts, waistTenths, weighInQuestion, weightParts } from "./model.mjs";
 import { BodyFatChart, TrendChart } from "./chart.mjs";
-import { claimLegacyLog, clearDeviceData, clearLogCache, fastLossHiddenKeyFor, lastUser, readLogCache, readOutbox, signOutWarning, storageKeyFor, writeLogCache, writeOutbox } from "./account.mjs";
+import { claimLegacyLog, clearDeviceData, clearLogCache, fastLossHiddenKeyFor, hasLegacyLog, lastUser, readLogCache, readOutbox, signOutWarning, storageKeyFor, writeLogCache, writeOutbox } from "./account.mjs";
 import { csvFileName, exportJson, jsonFileName, weighInsCsv } from "./export.mjs";
 import { AuthSetupError, startClerk } from "./auth.mjs";
 import { PUSH_PUBLIC_KEY } from "./config.mjs";
@@ -33,8 +33,9 @@ let queue = Promise.resolve(); // Requests reach the server one at a time, in or
 // time. Changes that need a connection, such as reminders, skip it (see sendNow).
 let outbox = []; // [{ id, change }], oldest first.
 let outboxInPage = false; // Whether storage failed, so the outbox lives only in this page.
-// Changes made in this page that are in the outbox, by id: { done, kept, announced, resolve }.
+// Changes made in this page that are in the outbox, by id: { done, kept, offer, announced, resolve }.
 // `announced` is whether the user has been told the change is saved on this device.
+// `offer` is an action the message about it carries (see changeState).
 const madeHere = new Map();
 let sending = []; // Changes that skip the outbox, sent and not yet answered: [{ change }].
 let syncing = null; // The running syncOutbox, or null.
@@ -70,6 +71,8 @@ let deviceEndpoint = null; // This device's push subscription, if it has one.
 // Anything else fades after `duration` ms, but not while the mouse is over it
 // or focus is in it.
 const TOAST_DURATION = 4000;
+// A message that offers something, such as showing weights in another unit, stays longer.
+const OFFER_DURATION = 10_000;
 let toast = null; // What the toast shows: { error, duration, acting, target }. Null while it's closed.
 let toastTimer;
 let toastHover = false;
@@ -274,12 +277,14 @@ function showState() {
 // or on this device; `done(reply)` runs once the server has it, at first or on
 // a retry. Resolves to the server's reply, or null if the server doesn't have
 // the change yet. The agreement to the health data policy goes ahead of
-// everything waiting, since the server saves nothing without it.
-function changeState(change, done = null, kept = null) {
+// everything waiting, since the server saves nothing without it. `offer`, an
+// action { label, run }, goes with the message that the change is saved on
+// this device; `done` shows its own message, so it offers it there.
+function changeState(change, done = null, kept = null, offer = null) {
   if (!QUEUEABLE_OPS.includes(change.op)) return sendNow(change, done);
   const item = { id: newId(), change };
   editOutbox(items => change.op === "consent" ? [item, ...items] : [...items, item]);
-  const reply = new Promise(resolve => madeHere.set(item.id, { done, kept, announced: false, resolve }));
+  const reply = new Promise(resolve => madeHere.set(item.id, { done, kept, offer, announced: false, resolve }));
   showState();
   syncOutbox();
   return reply;
@@ -320,10 +325,10 @@ function savedChange(change, kept, done, result) {
   done?.(result);
 }
 
-function saveFailed(change, done = null, kept = null) {
+function saveFailed(change, done = null, kept = null, offer = null) {
   notify("Couldn’t save that change. Check your connection and try again.", {
     error: true,
-    action: { label: "Try again", run: () => changeState(change, done, kept) }
+    action: { label: "Try again", run: () => changeState(change, done, kept, offer) }
   }).target = changeTarget(change);
 }
 
@@ -425,7 +430,7 @@ async function sendOutbox(current) {
     if (fresh && !(failure instanceof Unreachable)) {
       // As before the outbox, a change that fails while the user waits for it is undone.
       showState();
-      saveFailed(item.change, local.done, local.kept);
+      saveFailed(item.change, local.done, local.kept, local.offer);
       local.resolve(null);
       continue;
     }
@@ -449,6 +454,7 @@ async function sendOutbox(current) {
 // yet are saved on this device, once each.
 function announceKept() {
   let told = false;
+  let offer = null; // What one of them offers, if any (see changeState).
   for (const item of outbox) {
     const local = madeHere.get(item.id);
     if (!local || local.announced) continue;
@@ -458,11 +464,12 @@ function announceKept() {
     local.kept?.();
     local.resolve(null);
     told = true;
+    offer = local.offer ?? offer;
   }
   if (told) {
     notify(syncProblem === "offline" ? "Saved on this device. It’ll sync when you’re back online."
       : syncProblem === "consent" ? "Saved on this device. It’ll sync once you agree to the health data policy."
-      : "Saved on this device. It’ll sync once Baseline can reach your account.");
+      : "Saved on this device. It’ll sync once Baseline can reach your account.", offered(offer));
   }
   showLogStatus();
 }
@@ -593,7 +600,11 @@ function showMetrics() {
   $("fat-fact").hidden = !state.preferences.showBodyFat;
   showFatFact();
   showGoal();
+  // A quiet offer of a goal, for the first two weeks of a log without one.
+  $("goal-invite").hidden = Boolean(state.goal) || !latest || dayOf(today) - dayOf(state.entries[0].date) >= GOAL_INVITE_DAYS;
 }
+
+const GOAL_INVITE_DAYS = 14;
 
 // Body fat as shown, to 0.1 of a percent: "24.3%".
 const percent = value => oneDecimal(value) + "%";
@@ -1070,13 +1081,17 @@ function showPage() {
   // three; Your data has no link of its own there.
   const section = view === "entries" || view === "months" ? "log" : view;
   const isLog = section === "log";
-  document.body.dataset.view = section;
-  document.title = VIEW_TITLES[view];
+  // A new account's overview is the first-run screen (see showFirstRun).
+  const firstRun = section === "overview" && wantsFirstRun();
+  const overview = section === "overview" && !firstRun;
+  document.body.dataset.view = firstRun ? "first-run" : section;
+  document.title = firstRun ? "Your first weigh-in · Baseline" : VIEW_TITLES[view];
   // The overview is a page for today, so today's date is its heading.
-  $("page-title").textContent = PAGE_TITLES[section] ?? prettyDate(today, "day");
-  $("overview-view").hidden = section !== "overview";
+  $("page-title").textContent = firstRun ? "Your first weigh-in" : PAGE_TITLES[section] ?? prettyDate(today, "day");
+  $("overview-view").hidden = !overview;
+  showFirstRun(firstRun);
   $("log-tabs").hidden = !isLog;
-  $("entries").hidden = !(section === "overview" || view === "entries");
+  $("entries").hidden = !(overview || view === "entries");
   $("months").hidden = view !== "months";
   $("settings-view").hidden = section !== "settings";
   $("data-view").hidden = section !== "data";
@@ -1092,12 +1107,59 @@ function showPage() {
     : (first === last ? prettyDate(first.date, "full") : prettyDate(first.date, "full") + " – " + prettyDate(last.date, "full")) +
       " · " + total + (total === 1 ? " entry" : " entries");
   if (view === "months") showMonths();
-  else if (section === "overview" || isLog) showTable(isLog);
+  else if (overview || isLog) showTable(isLog);
   // Body fat sits under the recent entries, on the overview only, unless it's hidden in Settings.
-  const bodyFatShown = section === "overview" && state.preferences.showBodyFat;
+  const bodyFatShown = overview && state.preferences.showBodyFat;
   $("body-fat").hidden = !bodyFatShown;
-  if (section === "overview") drawChart();
+  if (overview) drawChart();
   if (bodyFatShown) showBodyFat();
+}
+
+// A new account's overview: one screen that takes the first weigh-in, in a
+// unit picked from the browser's language (see defaultUnits in model.mjs). It
+// shows in the overview's place once the account has agreed to the health
+// data policy, until anything is saved or "Skip for now" starts the log. It
+// waits while a log from before accounts is on its way into the account (see
+// importAfterConsent), so an account that takes one in never sees it.
+let firstRunUnits = null; // The units it offers: from the browser's language, then as picked. Null until it shows.
+let firstRunOpen = false; // Whether it's on the page.
+
+function wantsFirstRun() {
+  if (!state || state.started || !hasConsent(state)) return false;
+  try { return !hasLegacyLog(localStorage, account.id); } catch { return true; }
+}
+
+function showFirstRun(open) {
+  const appearing = open && !firstRunOpen;
+  firstRunOpen = open;
+  $("first-run").hidden = !open;
+  if (!open) return;
+  firstRunUnits ??= defaultUnits(navigator.languages?.[0] ?? navigator.language);
+  pickFirstRunUnit(firstRunUnits.weight);
+  if (appearing) $("first-run-weight").focus({ preventScroll: true });
+}
+
+// Picking a unit says what the number typed is in, so the number stays as it is.
+function pickFirstRunUnit(choice) {
+  firstRunUnits = { ...firstRunUnits, weight: choice };
+  for (const input of document.querySelectorAll('[name="first-run-unit"]')) input.checked = input.value === choice;
+  setWeightInput("first-run-weight", choice);
+  $("first-run-lead").textContent = "Your weight swings by " + (choice === "kg" ? "a kilo" : "two pounds") +
+    " or more from day to day, so Baseline shows the average of your last " + WINDOW_DAYS + " days.";
+}
+
+// Saving the first weigh-in, or skipping it, saves the unit picked, with the
+// height unit that goes with the browser's language, unless they're the
+// units already saved.
+function saveFirstRunUnits() {
+  const units = { weight: firstRunUnits.weight, height: firstRunUnits.height };
+  if (units.weight !== state.units.weight || units.height !== state.units.height) changeState({ op: "set-units", units });
+}
+
+// Either change starts the log, so the overview takes the screen's place.
+function leaveFirstRun() {
+  window.scrollTo({ top: 0, behavior: "auto" });
+  $("main").focus({ preventScroll: true });
 }
 
 function drawChart() {
@@ -1182,7 +1244,8 @@ function showConsentChoices() {
 function agree() {
   if (!$("consent-agree").checked || !state || hasConsent(state)) return;
   changeState({ op: "consent", version: CONSENT_VERSION }, importAfterConsent);
-  if (!$("main").hidden) $("main").focus({ preventScroll: true });
+  // Unless the first-run screen has put focus in its weight field.
+  if (!$("main").hidden && !$("main").contains(document.activeElement)) $("main").focus({ preventScroll: true });
 }
 
 // A log saved in this browser before accounts moves into an empty account once
@@ -1287,6 +1350,10 @@ function showLog() {
   rateSource = null;
   allWaists = false;
   $("entry-date").value = today;
+  for (const form of Object.keys(CHECKED_FIELDS)) closeCheck(form);
+  firstRunUnits = null;
+  $("first-run-weight").value = "";
+  $("first-run-weight-lb").value = "";
   showState();
 }
 
@@ -1446,6 +1513,11 @@ function focusEntry(field = "entry-weight") {
     return;
   }
   requestAnimationFrame(() => {
+    // A new account's first weigh-in comes from the first-run screen, in the unit it picks.
+    if (firstRunOpen) {
+      $("first-run-weight").focus();
+      return;
+    }
     $("entry-panel").scrollIntoView({ block: "center", behavior: "auto" });
     $(field).focus({ preventScroll: true });
   });
@@ -1527,7 +1599,7 @@ function fitSheet() {
 // Today's weigh-in, from a reminder, the home-screen shortcut or a #log link:
 // the sheet on phones, and the log form on wider screens.
 function openLogEntry() {
-  if (phoneLayout.matches) openSheet();
+  if (phoneLayout.matches && !wantsFirstRun()) openSheet();
   else focusEntry();
 }
 
@@ -1549,9 +1621,9 @@ const WEIGHT_FIELDS = ["entry-weight", "sheet-weight", "edit-weight", "goal-weig
 
 // The weight typed into a field, in kg, or NaN. A field that still shows
 // `stored` as it was filled in returns it unchanged, so saving again never
-// rounds away hundredths that another unit needed.
-function readWeight(id, stored) {
-  const weightUnit = fieldUnits.weight;
+// rounds away hundredths that another unit needed. The first-run screen's
+// field is in the unit picked there, rather than the saved one.
+function readWeight(id, stored, weightUnit = fieldUnits.weight) {
   const main = $(id).valueAsNumber;
   const pounds = $(id + "-lb").valueAsNumber;
   const kg = weightUnit === "kg" ? main
@@ -1611,6 +1683,17 @@ function setInput(id, attributes) {
   for (const [name, value] of Object.entries(attributes)) $(id).setAttribute(name, value);
 }
 
+// Sets a weight field and its pounds field up for kg, lb or st: limits that
+// keep to the 0.1 to 2,000 kg that can be saved, the unit, and the pounds
+// field for stones.
+function setWeightInput(id, weightUnit) {
+  const stones = weightUnit === "st";
+  setInput(id, stones ? { min: 0, max: 314, step: 1, placeholder: "0", inputmode: "numeric" }
+    : { min: 0.1, max: weightUnit === "kg" ? 2000 : 4409.2, step: 0.1, placeholder: "0.0", inputmode: "decimal" });
+  $(id + "-unit").textContent = weightUnit;
+  $(id + "-lb").parentElement.hidden = !stones;
+}
+
 // Sets the inputs up for the saved units. Anything typed is converted, so it
 // still means the same weight or height.
 function applyUnits() {
@@ -1623,14 +1706,10 @@ function applyUnits() {
     const weights = previous ? WEIGHT_FIELDS.map(id => readWeight(id)) : [];
     const rate = previous ? readRate() : null;
     fieldUnits = { ...fieldUnits, weight: weightUnit };
-    const stones = weightUnit === "st";
-    for (const id of WEIGHT_FIELDS) {
-      setInput(id, stones ? { min: 0, max: 314, step: 1, placeholder: "0", inputmode: "numeric" }
-        : { min: 0.1, max: weightUnit === "kg" ? 2000 : 4409.2, step: 0.1, placeholder: "0.0", inputmode: "decimal" });
-      $(id + "-unit").textContent = weightUnit;
-      $(id + "-lb").parentElement.hidden = !stones;
-    }
+    for (const id of WEIGHT_FIELDS) setWeightInput(id, weightUnit);
     WEIGHT_FIELDS.forEach((id, index) => writeWeight(id, weights[index]));
+    // A question about a weigh-in names weights in the old unit.
+    for (const form of Object.keys(CHECKED_FIELDS)) closeCheck(form);
     $("goal-rate-unit").textContent = rateUnit() + "/wk";
     $("goal-rate").placeholder = weightUnit === "kg" ? "e.g. 0.5" : "e.g. 1";
     writeRate(rate);
@@ -2230,6 +2309,7 @@ function scheduleMidnight() {
 }
 
 function dateChanged() {
+  closeCheck("entry");
   if (state.entries.some(item => item.date === $("entry-date").value)) autoFill = true;
   syncEntryForm();
 }
@@ -2259,14 +2339,80 @@ for (const id of ["entry-weight", "entry-weight-lb", "entry-note"]) $(id).addEve
 // the average past a milestone. A failed save offers "Try again" (see
 // changeState). `kept` runs once it's saved, on the server or on this device.
 // Leaving out `note` keeps the date's note as it is. Returns false, saving
-// nothing, for a date or weight that can't be saved.
-function saveWeighIn({ date, weight, note }, kept = null) {
+// nothing, for a date or weight that can't be saved. `offer` goes with the
+// message (see changeState).
+function saveWeighIn({ date, weight, note }, kept = null, offer = null) {
   if (!validDate(date) || date > today || !positive(weight)) return false;
   const updating = state.entries.some(entry => entry.date === date);
   const before = progress;
   const change = note === undefined ? { op: "save-weight", date, weight } : { op: "save-weight", date, weight, note };
-  changeState(change, () => notify((updating ? "Weigh-in updated" : "Weigh-in saved") + " for " + prettyDate(date) + "." + celebrate(before, progress)), kept);
+  changeState(change, () => notify((updating ? "Weigh-in updated" : "Weigh-in saved") + " for " + prettyDate(date) + "." + celebrate(before, progress), offered(offer)), kept, offer);
   return true;
+}
+
+// The options for a message that carries an offer.
+const offered = offer => offer ? { action: offer, duration: OFFER_DURATION } : undefined;
+
+// The question Baseline asks under a weight field before it saves a weigh-in
+// that looks like a wrong unit, a slipped decimal point or an unlikely jump
+// (see checkWeighIn in model.mjs): in the log form, the log sheet and the edit
+// dialog. It's part of the form rather than a dialog. Its text goes through a
+// live region and focus moves to its first button. Nothing is saved, and no
+// weight changes, until a button is tapped. Typing a weight, picking another
+// date or closing the form takes it away. Each form's weight field, by form.
+const CHECKED_FIELDS = { entry: "entry-weight", sheet: "sheet-weight", edit: "edit-weight" };
+
+// Saves `weight` (kg) for `date` through `save(weight, offer)` at once, or once
+// a button in the question is tapped. Saving a weigh-in again as it was, as to
+// change its note, asks nothing. `offer` is null, or after a unit mix-up, the
+// offer to show weights in that unit (see changeState).
+function saveChecked(form, { date, weight, unchanged }, save) {
+  closeCheck(form);
+  const check = unchanged ? null : checkWeighIn({ weight, date, entries: state.entries, unit: unit() });
+  if (!check) {
+    save(weight, null);
+    return;
+  }
+  const question = weighInQuestion(check, weight, unit(), today);
+  const buttons = question.choices.map(choice => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "button secondary";
+    button.textContent = choice.label;
+    // Screen readers may read "st" as "street".
+    if (unit() === "st" || choice.unit === "st") button.setAttribute("aria-label", choice.spoken);
+    button.addEventListener("click", () => {
+      closeCheck(form);
+      if (choice.weight === null) $(CHECKED_FIELDS[form]).focus();
+      else save(choice.weight, choice.unit && unitOffer(choice.unit));
+    });
+    return button;
+  });
+  $(form + "-check-text").textContent = question.text;
+  $(form + "-check-actions").replaceChildren(...buttons);
+  $(form + "-check-actions").hidden = false;
+  $(form + "-check").classList.add("is-open");
+  buttons[0].focus();
+}
+
+function closeCheck(form) {
+  if (!$(form + "-check").classList.contains("is-open")) return;
+  $(form + "-check").classList.remove("is-open");
+  $(form + "-check-text").textContent = "";
+  $(form + "-check-actions").replaceChildren();
+  $(form + "-check-actions").hidden = true;
+}
+
+// After a weigh-in typed in the wrong unit is saved in the right one, the
+// message offers to show every weight in that unit.
+const offerNames = { kg: "kg", lb: "lb", st: "stones and pounds" };
+const unitOffer = choice => ({
+  label: "Show weights in " + offerNames[choice] + " from now on",
+  run: () => { if (state) changeUnits({ ...state.units, weight: choice }, "Weights now show in " + unitNames[choice] + "."); }
+});
+
+for (const [form, id] of Object.entries(CHECKED_FIELDS)) {
+  for (const field of [id, id + "-lb"]) $(field).addEventListener("input", () => closeCheck(form));
 }
 
 $("entry-form").addEventListener("submit", event => {
@@ -2274,19 +2420,25 @@ $("entry-form").addEventListener("submit", event => {
   syncDay();
   const date = $("entry-date").value;
   const existing = state.entries.find(entry => entry.date === date);
-  // What was typed stays in the form until the weigh-in is saved, so a failed
-  // save loses nothing. Then the form shows the saved weigh-in, unless
-  // something new was typed meanwhile.
-  const edits = entryEdits;
-  saveWeighIn({
-    date,
-    weight: roundWeight(readWeight("entry-weight", existing?.weight)),
-    // The form shows the date's note, so an empty field removes it.
-    note: cleanNote($("entry-note").value)
-  }, () => {
-    if (entryEdits !== edits) return;
-    autoFill = true;
-    syncEntryForm();
+  const weight = roundWeight(readWeight("entry-weight", existing?.weight));
+  if (!validDate(date) || date > today || !positive(weight)) return;
+  saveChecked("entry", { date, weight, unchanged: weight === existing?.weight }, (chosen, offer) => {
+    // What was typed stays in the form until the weigh-in is saved, so a failed
+    // save loses nothing. Then the form shows the saved weigh-in, unless
+    // something new was typed meanwhile.
+    const edits = entryEdits;
+    saveWeighIn({
+      date,
+      weight: chosen,
+      // The form shows the date's note, so an empty field removes it.
+      note: cleanNote($("entry-note").value)
+    }, () => {
+      if (entryEdits !== edits) return;
+      autoFill = true;
+      syncEntryForm();
+    }, offer);
+    // A button in the question had focus, and it has gone.
+    if (!$("entry-form").contains(document.activeElement)) $("entry-form").querySelector(".save-button").focus();
   });
 });
 
@@ -2297,25 +2449,55 @@ for (const id of ["sheet-weight", "sheet-weight-lb", "sheet-note"]) $(id).addEve
   sheetAutoFill = false;
   sheetEdits++;
 });
-$("log-bar-button").addEventListener("click", openSheet);
+// Until a new account has used the first-run screen, the bar on the log leads there.
+$("log-bar-button").addEventListener("click", () => wantsFirstRun() ? focusEntry() : openSheet());
+// A question about the weight (see saveChecked) keeps the sheet open until it's answered.
 $("sheet-form").addEventListener("submit", event => {
   event.preventDefault();
   syncDay();
   const date = today;
   const existing = state.entries.find(entry => entry.date === date);
-  const edits = sheetEdits;
-  const sent = saveWeighIn({
-    date,
-    weight: roundWeight(readWeight("sheet-weight", existing?.weight)),
-    // Today's note shows in the sheet, so an empty field removes it. Left
-    // behind "Add a note", the field changes nothing.
-    note: $("sheet-note-field").hidden ? undefined : cleanNote($("sheet-note").value)
-  }, () => {
-    if (sheetEdits !== edits) return;
-    sheetAutoFill = true;
-    syncSheet();
+  const weight = roundWeight(readWeight("sheet-weight", existing?.weight));
+  if (!positive(weight)) return;
+  saveChecked("sheet", { date, weight, unchanged: weight === existing?.weight }, (chosen, offer) => {
+    const edits = sheetEdits;
+    const sent = saveWeighIn({
+      date,
+      weight: chosen,
+      // Today's note shows in the sheet, so an empty field removes it. Left
+      // behind "Add a note", the field changes nothing.
+      note: $("sheet-note-field").hidden ? undefined : cleanNote($("sheet-note").value)
+    }, () => {
+      if (sheetEdits !== edits) return;
+      sheetAutoFill = true;
+      syncSheet();
+    }, offer);
+    if (sent) $("log-sheet").close();
   });
-  if (sent) $("log-sheet").close();
+});
+$("first-run-form").addEventListener("change", event => {
+  if (event.target.name === "first-run-unit") pickFirstRunUnit(event.target.value);
+});
+// The first weigh-in has nothing to check against, so it's saved straight away.
+$("first-run-form").addEventListener("submit", event => {
+  event.preventDefault();
+  syncDay();
+  if (!firstRunOpen) return;
+  const weight = roundWeight(readWeight("first-run-weight", undefined, firstRunUnits.weight));
+  if (!positive(weight)) return;
+  saveFirstRunUnits();
+  // If the save fails, the screen comes back with the weight as it was typed.
+  saveWeighIn({ date: today, weight }, () => {
+    $("first-run-weight").value = "";
+    $("first-run-weight-lb").value = "";
+  });
+  leaveFirstRun();
+});
+$("first-run-skip").addEventListener("click", () => {
+  if (!firstRunOpen) return;
+  saveFirstRunUnits();
+  changeState({ op: "start" });
+  leaveFirstRun();
 });
 $("sheet-add-note").addEventListener("click", () => {
   showSheetNote(true);
@@ -2342,6 +2524,7 @@ $("sheet-other-day").addEventListener("click", () => {
   focusEntry("entry-date");
 });
 $("log-sheet").addEventListener("close", () => {
+  closeCheck("sheet");
   window.visualViewport?.removeEventListener("resize", fitSheet);
   window.visualViewport?.removeEventListener("scroll", fitSheet);
   $("log-sheet").classList.remove("over-keyboard");
@@ -2538,12 +2721,15 @@ $("entry-table").addEventListener("click", event => {
 $("edit-form").addEventListener("submit", event => {
   event.preventDefault();
   const date = editingDate;
-  const weight = roundWeight(readWeight("edit-weight", state.entries.find(entry => entry.date === date)?.weight));
-  const note = cleanNote($("edit-note").value);
+  const existing = state.entries.find(entry => entry.date === date);
+  const weight = roundWeight(readWeight("edit-weight", existing?.weight));
   if (!date || !positive(weight)) return;
-  $("edit-dialog").close();
-  changeState({ op: "update-weight", date, weight, note },
-    result => notify(result.found ? "Weigh-in updated." : "This weigh-in has already been removed."));
+  saveChecked("edit", { date, weight, unchanged: weight === existing?.weight }, (chosen, offer) => {
+    const note = cleanNote($("edit-note").value);
+    $("edit-dialog").close();
+    changeState({ op: "update-weight", date, weight: chosen, note },
+      result => notify(result.found ? "Weigh-in updated." : "This weigh-in has already been removed.", result.found ? offered(offer) : undefined), null, offer);
+  });
 });
 $("delete-entry").addEventListener("click", () => {
   $("edit-form").hidden = true;
@@ -2560,7 +2746,10 @@ $("confirm-delete").addEventListener("click", () => {
   $("edit-dialog").close();
   changeState({ op: "delete-weight", date }, () => notify("Weigh-in deleted."));
 });
-$("edit-dialog").addEventListener("close", () => { editingDate = null; });
+$("edit-dialog").addEventListener("close", () => {
+  editingDate = null;
+  closeCheck("edit");
+});
 $("settings-view").addEventListener("change", event => {
   const key = event.target.dataset.preference;
   if (key) changePreference(key, event.target.checked);
