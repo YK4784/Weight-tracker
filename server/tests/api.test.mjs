@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createHandler } from "../api.mjs";
 import { readFile } from "node:fs/promises";
-import { DELETE_WORD, MAX_IMPORT_ENTRIES, latestDate, parseOp } from "../ops.mjs";
+import { CONSENT_ERROR_CODE, ConsentRequired, DELETE_WORD, MAX_IMPORT_ENTRIES, OPS_WITHOUT_CONSENT, latestDate, needsConsent, parseOp } from "../ops.mjs";
 import { schema } from "../schema.mjs";
+import { createStore } from "../store.mjs";
+import { CONSENT_VERSION } from "../../baseline/dist/model.mjs";
 
 const NOW = new Date("2026-11-22T23:30:00Z");
 
@@ -277,4 +279,120 @@ test("deleting an account reaches every table", async () => {
   assert.deepEqual(tables.sort(), ["profiles", "push_subscriptions", "waist_measurements", "weigh_ins"]);
   const deleteRows = /const deleteRows = userId => \[([^\]]*)\]/.exec(store)[1];
   for (const table of tables) assert.match(deleteRows, new RegExp("DELETE FROM " + table + " WHERE user_id = \\$\\{userId\\}`"), table);
+});
+
+test("agreeing to the health data policy accepts only the current version", () => {
+  assert.deepEqual(parseOp({ op: "consent", version: CONSENT_VERSION, at: "2020-01-01", userId: "user_2" }, NOW), { op: "consent", version: CONSENT_VERSION });
+  for (const version of [undefined, null, "", "2025-01-01", CONSENT_VERSION + " ", 20261123, [CONSENT_VERSION]]) {
+    assert.equal(parseOp({ op: "consent", version }, NOW), null, JSON.stringify(version));
+  }
+});
+
+// Every op parseOp accepts, in a valid form.
+const VALID_OPS = {
+  "save-weight": { date: "2026-11-22", weight: 80 },
+  "update-weight": { date: "2026-11-22", weight: 80 },
+  "delete-weight": { date: "2026-11-22" },
+  "set-height": { height: 178 },
+  "save-waist": { date: "2026-11-22", waist: 86, sex: "male" },
+  "delete-waist": { date: "2026-11-22" },
+  "set-goal": { goal: { weight: 60, startDate: "2026-09-13", startWeight: 66, rate: 0.5, milestones: 10 } },
+  "set-units": { units: { weight: "lb", height: "ft" } },
+  "set-preferences": { preferences: { showBmi: false } },
+  "set-reminder": { hour: 8, timeZone: "UTC" },
+  "clear-reminder": {},
+  "clear-goal": {},
+  "start": {},
+  "consent": { version: CONSENT_VERSION },
+  "delete-data": { confirm: "delete" },
+  "delete-account": { confirm: "delete" },
+  "import": { log: { entries: [] } }
+};
+
+test("every change that saves data needs the agreement, and only removing data or agreeing doesn't", () => {
+  const ops = Object.keys(VALID_OPS);
+  for (const op of ops) assert.ok(parseOp({ op, ...VALID_OPS[op] }, NOW), op + " is valid");
+  assert.deepEqual(ops.filter(op => !needsConsent({ op })).sort(), [...OPS_WITHOUT_CONSENT].sort());
+  assert.deepEqual(ops.filter(op => needsConsent({ op })).sort(),
+    ["import", "save-waist", "save-weight", "set-goal", "set-height", "set-preferences", "set-reminder", "set-units", "start", "update-weight"]);
+  // Reading the log, and any op added later, follow the safe default.
+  assert.equal(needsConsent(null), false);
+  assert.equal(needsConsent({ op: "something-new" }), true);
+});
+
+test("the API answers a change refused for want of agreement with a 403 and the reason", async () => {
+  const runs = [];
+  const { send } = setup({ store: { run: async (userId, change) => { runs.push(change.op); throw new ConsentRequired(); } } });
+  const response = await send("POST", { op: "save-weight", date: "2026-11-22", weight: 80 });
+  assert.equal(response.status, 403);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.deepEqual(await response.json(), { error: "Agree to the health data policy first." });
+  assert.deepEqual(runs, ["save-weight"]);
+});
+
+// A store over a fake Neon driver: it records each transaction's queries and
+// answers them with `answer`, which can throw as Postgres would.
+function fakeStore(answer) {
+  const transactions = [];
+  const sql = (strings, ...params) => ({ text: strings.join("$"), params });
+  sql.query = (text, params = []) => ({ text, params });
+  sql.transaction = async queries => {
+    // The schema runs first, once.
+    if (queries.length === schema.length && queries[0].text === schema[0]) return [];
+    transactions.push(queries);
+    return answer(queries);
+  };
+  return { store: createStore("postgres://fake", { connect: () => sql }), transactions };
+}
+
+// The read at the end of every transaction: a profile, weigh-ins, waists and devices.
+const READS = [[{ started: true, consent_version: CONSENT_VERSION, consented_at: "2026-11-23T09:41:00Z", weight_unit: "kg", height_unit: "cm", preferences: {} }], [], [], []];
+
+test("the store checks the agreement first, in the same transaction as a change that saves data", async () => {
+  const { store, transactions } = fakeStore(queries => [...queries.slice(0, -4).map(() => [{ "?column?": 1 }]), ...READS]);
+  await store.run("user_1", parseOp({ op: "save-weight", date: "2026-11-22", weight: 80 }, NOW));
+  const [guard, ...rest] = transactions[0];
+  assert.match(guard.text, /^SELECT require_consent\(\$/);
+  assert.deepEqual(guard.params, ["user_1", CONSENT_VERSION]);
+  assert.equal(rest.length, 2 + 4, "the weigh-in's two writes, then the four reads");
+  for (const op of ["delete-weight", "consent", "delete-data", "clear-goal"]) {
+    await store.run("user_1", parseOp({ op, ...VALID_OPS[op] }, NOW));
+    assert.doesNotMatch(transactions.at(-1)[0].text, /require_consent/, op);
+  }
+  await store.run("user_1");
+  assert.equal(transactions.at(-1).length, 4, "a read is only the reads");
+});
+
+test("the store reads the change's own result after the guard", async () => {
+  const { store } = fakeStore(queries => [[], ...queries.slice(1, -4).map(() => []), ...READS]);
+  assert.equal((await store.run("user_1", parseOp({ op: "update-weight", date: "2026-11-22", weight: 80 }, NOW))).found, false);
+  const found = fakeStore(queries => [[], [{ "?column?": 1 }], ...READS]).store;
+  assert.equal((await found.run("user_1", parseOp({ op: "update-weight", date: "2026-11-22", weight: 80 }, NOW))).found, true);
+  const imported = fakeStore(queries => [[], [{ imported: 1 }], ...READS]).store;
+  assert.equal((await imported.run("user_1", parseOp({ op: "import", log: { entries: [] } }, NOW))).imported, true);
+});
+
+test("the store turns the guard's error into ConsentRequired, and passes other errors on", async () => {
+  const refused = Object.assign(new Error("Agree to the health data policy first."), { code: CONSENT_ERROR_CODE });
+  const { store } = fakeStore(() => { throw refused; });
+  await assert.rejects(store.run("user_1", parseOp({ op: "save-weight", date: "2026-11-22", weight: 80 }, NOW)), ConsentRequired);
+  const broken = Object.assign(new Error("connection reset"), { code: "08006" });
+  await assert.rejects(fakeStore(() => { throw broken; }).store.run("user_1"), error => error === broken);
+});
+
+test("the log carries the agreement as the server recorded it", async () => {
+  const { store } = fakeStore(() => READS);
+  assert.deepEqual((await store.run("user_1")).log.consent, { version: CONSENT_VERSION, at: "2026-11-23T09:41:00Z" });
+  const none = fakeStore(() => [[], [], [], []]).store;
+  assert.equal((await none.run("user_2")).log.consent, null);
+});
+
+test("the agreement's columns and the guard are added to existing databases", () => {
+  const columns = schema.find(text => /consent_version/.test(text));
+  assert.match(columns, /ALTER TABLE profiles\s+ADD COLUMN IF NOT EXISTS consent_version text[^,]*,\s+ADD COLUMN IF NOT EXISTS consented_at timestamptz/);
+  const guard = schema.find(text => /require_consent/.test(text));
+  assert.match(guard, /^DO \$\$/, "made once, in a block that can run again");
+  assert.match(guard, /EXCEPTION WHEN duplicate_function OR unique_violation THEN NULL/);
+  assert.match(guard, new RegExp("ERRCODE = '" + CONSENT_ERROR_CODE + "'"));
+  assert.match(guard, /FOR SHARE/);
 });

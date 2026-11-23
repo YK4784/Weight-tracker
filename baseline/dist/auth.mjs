@@ -44,6 +44,11 @@ function loadScript(src, attributes = {}) {
 
 // Loads Clerk from the app's Frontend API, as Clerk's no-bundler setup does.
 // A Clerk instance already on the page (from script tags in the HTML) is reused.
+// Clerk keeps the account only. Weights, measurements, notes, the goal, sex and
+// anything else from the log must never go into Clerk, including its user
+// metadata (publicMetadata, privateMetadata and unsafeMetadata): Clerk's data
+// processing agreement forbids health data, and the health data policy says
+// none of the log goes to Clerk. See docs/processors.md.
 export async function startClerk() {
   const host = frontendApiFor(CLERK_PUBLISHABLE_KEY);
   if (!host) throw new AuthSetupError();

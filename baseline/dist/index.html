@@ -90,7 +90,32 @@
       </div>
     </div>
     <div class="sign-in" id="sign-in" hidden><div id="sign-in-card"></div></div>
-    <p class="auth-note" id="auth-note" hidden>Your weight log is saved to your account, so it’s there on any device you sign in on.</p>
+    <div class="auth-note" id="auth-note" hidden>
+      <p>Your weight log is saved to your account, so it’s there on any device you sign in on.</p>
+      <p><a href="./health-data-privacy.html">Health data privacy policy</a></p>
+    </div>
+    <!-- After sign-in, until the account has agreed to the current health data
+         policy (see CONSENT_VERSION in model.mjs). Nothing is saved before. -->
+    <section class="consent" id="consent" aria-labelledby="consent-title" hidden>
+      <h1 id="consent-title">Your health data</h1>
+      <p class="consent-change" id="consent-change" hidden></p>
+      <p class="consent-text" id="consent-text">Baseline stores the weights, measurements and notes you enter so it can show your trend. They’re kept private and never sold or used for ads.</p>
+      <p class="consent-policy"><a class="text-link" href="./health-data-privacy.html">Read the health data privacy policy</a></p>
+      <form id="consent-form">
+        <label class="consent-check"><input type="checkbox" id="consent-agree" name="agree" aria-describedby="consent-text"><span>I agree to Baseline storing my health data as described</span></label>
+        <button class="button primary consent-continue" type="submit" id="consent-continue" disabled>Continue</button>
+      </form>
+      <div class="consent-other" aria-labelledby="consent-other-title" role="group">
+        <h2 id="consent-other-title">If you don’t agree</h2>
+        <p id="consent-other-text"></p>
+        <div class="consent-actions">
+          <button class="small-button" type="button" id="consent-download">Download your data</button>
+          <button class="small-button" type="button" id="consent-sign-out">Sign out</button>
+          <button class="small-button danger-text" type="button" id="consent-delete-data">Delete my data</button>
+          <button class="small-button danger-text" type="button" id="consent-delete-account">Delete my account</button>
+        </div>
+      </div>
+    </section>
   </main>
 
   <main class="wrap page" id="main" tabindex="-1" hidden>
@@ -320,27 +345,13 @@
         <p class="note">Hiding one keeps its data, and the choice applies on every device you sign in on.</p>
       </section>
 
-      <section class="settings-section" id="your-data" aria-labelledby="data-title">
+      <section class="settings-section" aria-labelledby="data-title">
         <div class="section-head"><h2 id="data-title">Your data</h2></div>
-        <div class="setting-row wide-actions">
+        <div class="setting-row">
           <div class="setting-text">
-            <h3>Download</h3>
-            <p>Your weigh-ins as a spreadsheet, with each one’s note and 14-day average. Or everything in your log as JSON: weigh-ins and notes, waist measurements, height, the body fat formula, your goal, units, what the overview shows and reminder time.</p>
+            <p>What Baseline stores and where, who handles it, your agreement to the health data policy, and downloading or deleting your data.</p>
           </div>
-          <div class="setting-actions">
-            <button class="small-button" type="button" id="download-csv">Download weigh-ins (CSV)</button>
-            <button class="small-button" type="button" id="download-json">Download everything (JSON)</button>
-          </div>
-        </div>
-        <div class="setting-row wide-actions">
-          <div class="setting-text">
-            <h3>Delete</h3>
-            <p id="delete-note">Delete my data empties your log on every device and keeps your account.</p>
-          </div>
-          <div class="setting-actions">
-            <button class="small-button danger-text" type="button" id="delete-data">Delete my data</button>
-            <button class="small-button danger-text" type="button" id="delete-account" hidden>Delete my account</button>
-          </div>
+          <div class="setting-actions"><a class="small-button" href="#your-data">Open Your data</a></div>
         </div>
       </section>
 
@@ -362,7 +373,84 @@
         </div>
       </section>
     </div>
-    <p class="storage-status" id="storage-status"></p>
+
+    <!-- Your data: what Baseline keeps and where, who handles it, the agreement
+         to the health data policy, and downloading or deleting it all. Every
+         line here has to stay true to the code; README.md's "Privacy" section
+         lists what backs each one. -->
+    <div class="settings data-page" id="data-view" hidden>
+      <p class="data-lead">What Baseline keeps about you, where it’s kept and who handles it, and how to download or delete it. The <a class="text-link" href="./health-data-privacy.html">health data privacy policy</a> has the details.</p>
+
+      <section class="settings-section" aria-labelledby="stored-title">
+        <div class="section-head"><h2 id="stored-title">What Baseline stores</h2></div>
+        <dl class="data-list">
+          <div class="data-row"><dt>Your log</dt><dd>Weigh-ins and their notes, waist measurements and the body fat formula you chose, your height and goal, your units and what the overview shows, and your reminder time and time zone. In Baseline’s database at Neon, in the United States, until you delete it.</dd></div>
+          <div class="data-row"><dt>Reminder devices</dt><dd>A push address for each device you turn reminders on from, in the same database, until you turn reminders off.</dd></div>
+          <div class="data-row"><dt>Your agreement</dt><dd>Which version of the health data policy you agreed to, and when, in the same database.</dd></div>
+          <div class="data-row"><dt>Your account</dt><dd>Your email address, your name and picture if you sign in with Google, and a record of your sign-ins, such as the browser and IP address. Kept by Clerk, which runs sign-in. None of your log goes to Clerk.</dd></div>
+          <div class="data-row"><dt>On this device</dt><dd>A copy of your log and any changes waiting to sync, so Baseline opens offline. Signing out removes them.</dd></div>
+        </dl>
+      </section>
+
+      <section class="settings-section" aria-labelledby="never-title">
+        <div class="section-head"><h2 id="never-title">What Baseline never does</h2></div>
+        <ul class="data-never">
+          <li>No analytics, ads or trackers. The only code on Baseline’s pages that isn’t its own is Clerk’s sign-in, which can add a bot check from Cloudflare when you sign up.</li>
+          <li>No location. The time zone saved with a reminder is the only clue to where you are.</li>
+          <li>Your data is never sold or used for ads, and goes to no one but the services below.</li>
+        </ul>
+      </section>
+
+      <section class="settings-section" aria-labelledby="handlers-title">
+        <div class="section-head"><h2 id="handlers-title">Who handles it</h2></div>
+        <dl class="data-list">
+          <div class="data-row"><dt>Vercel</dt><dd>Runs Baseline’s site and server. Its logs record each request’s IP address, and the server’s errors, which can include a value that failed to save. They’re kept for up to a day.</dd></div>
+          <div class="data-row"><dt>Neon</dt><dd>Hosts the database, in the United States. Deleted data stays in its restore history for up to 6 hours.</dd></div>
+          <div class="data-row"><dt>Clerk</dt><dd>Runs sign-in and keeps your account.</dd></div>
+          <div class="data-row"><dt>Push services</dt><dd>Apple, Google, Microsoft or Mozilla, depending on your browser, deliver reminders if you turn them on. Each reminder is encrypted, so they can’t read it.</dd></div>
+        </dl>
+      </section>
+
+      <section class="settings-section" aria-labelledby="consent-heading">
+        <div class="section-head"><h2 id="consent-heading">Your agreement</h2></div>
+        <div class="setting-row">
+          <div class="setting-text">
+            <p class="setting-value" id="consent-value"></p>
+            <p>To the health data privacy policy of <span id="consent-version"></span>. Withdrawing your agreement deletes your log, as Delete my data does, and Baseline asks again before it saves anything new.</p>
+          </div>
+          <div class="setting-actions"><button class="small-button danger-text" type="button" id="withdraw-consent">Withdraw</button></div>
+        </div>
+      </section>
+
+      <section class="settings-section" aria-labelledby="files-title">
+        <div class="section-head"><h2 id="files-title">Download or delete</h2></div>
+        <div class="setting-row wide-actions">
+          <div class="setting-text">
+            <h3>Download</h3>
+            <p>Your weigh-ins as a spreadsheet, with each one’s note and 14-day average. Or everything in your log as JSON: weigh-ins and notes, waist measurements, height, the body fat formula, your goal, units, what the overview shows, reminder time and your agreement to the health data policy.</p>
+          </div>
+          <div class="setting-actions">
+            <button class="small-button" type="button" id="download-csv">Download weigh-ins (CSV)</button>
+            <button class="small-button" type="button" id="download-json">Download everything (JSON)</button>
+          </div>
+        </div>
+        <div class="setting-row wide-actions">
+          <div class="setting-text">
+            <h3>Delete</h3>
+            <p id="delete-note">Delete my data empties your log on every device and keeps your account.</p>
+          </div>
+          <div class="setting-actions">
+            <button class="small-button danger-text" type="button" id="delete-data">Delete my data</button>
+            <button class="small-button danger-text" type="button" id="delete-account" hidden>Delete my account</button>
+          </div>
+        </div>
+      </section>
+
+    </div>
+    <footer class="app-footer">
+      <p class="storage-status" id="storage-status"></p>
+      <p class="footer-links"><a href="#your-data" id="footer-data-link">Your data</a><a href="./health-data-privacy.html">Health data privacy policy</a></p>
+    </footer>
   </main>
 
   <dialog id="profile-dialog" aria-labelledby="profile-title">
@@ -486,6 +574,7 @@
       <li>Your goal and your height</li>
       <li>Your settings, which go back to kg and cm, with BMI and body fat shown</li>
       <li>Your reminders, which stop on every device</li>
+      <li>Your agreement to the health data policy, so Baseline asks again before it saves anything new</li>
     </ul>
     <p class="dialog-detail" id="erase-after"></p>
     <p class="erase-copy"><button class="text-button" type="button" id="erase-download">Download a copy first</button></p>

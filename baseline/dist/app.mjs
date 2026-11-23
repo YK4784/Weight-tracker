@@ -1,4 +1,4 @@
-import { CM_PER_IN, FAST_LOSS_DAYS, FORECAST_MAX_DAYS, GOAL_MILESTONES, GOAL_RATE_CAP, KG_PER_LB, OVERALL_MIN_DAYS, QUEUEABLE_OPS, RATE_DAYS, RATE_MIN_ENTRIES, RATE_MIN_SPAN, SEXES, WINDOW_DAYS, applyOps, averageChanges, bmi, bodyFat, bodyFatChange, bodyFatHistory, calculateRate, changeTarget, calculateTrend, cleanNote, dateOf, dayOf, fastGoalRate, fastLossCaution, forecastGoal, formatAmount, formatWaist, formatWeight, fromTenths, goalProgress, goalRateAllowed, goalRateLimit, groupByMonth, heightParts, localToday, maxGoalRate, monthlyReports, normalizeGoal, normalizeState, oneDecimal, overallRate, positive, prettyDate, recentRange, roundHeight, roundWaist, roundWeight, shiftDate, spokenHeight, spokenWeight, toTenths, validDate, validWaist, waistParts, waistTenths, weightParts } from "./model.mjs";
+import { CM_PER_IN, CONSENT_VERSION, FAST_LOSS_DAYS, FORECAST_MAX_DAYS, GOAL_MILESTONES, GOAL_RATE_CAP, KG_PER_LB, OVERALL_MIN_DAYS, QUEUEABLE_OPS, RATE_DAYS, RATE_MIN_ENTRIES, RATE_MIN_SPAN, SEXES, WINDOW_DAYS, applyOps, averageChanges, bmi, bodyFat, bodyFatChange, bodyFatHistory, calculateRate, changeTarget, calculateTrend, cleanNote, dateOf, dayOf, fastGoalRate, fastLossCaution, forecastGoal, formatAmount, formatWaist, formatWeight, fromTenths, goalProgress, goalRateAllowed, goalRateLimit, groupByMonth, hasConsent, heightParts, localToday, maxGoalRate, monthlyReports, normalizeGoal, normalizeState, oneDecimal, overallRate, positive, prettyDate, recentRange, roundHeight, roundWaist, roundWeight, shiftDate, spokenHeight, spokenWeight, toTenths, validDate, validWaist, waistParts, waistTenths, weightParts } from "./model.mjs";
 import { BodyFatChart, TrendChart } from "./chart.mjs";
 import { claimLegacyLog, clearDeviceData, clearLogCache, fastLossHiddenKeyFor, lastUser, readLogCache, readOutbox, signOutWarning, storageKeyFor, writeLogCache, writeOutbox } from "./account.mjs";
 import { csvFileName, exportJson, jsonFileName, weighInsCsv } from "./export.mjs";
@@ -37,7 +37,7 @@ let outboxInPage = false; // Whether storage failed, so the outbox lives only in
 const madeHere = new Map();
 let sending = []; // Changes that skip the outbox, sent and not yet answered: [{ change }].
 let syncing = null; // The running syncOutbox, or null.
-let syncProblem = null; // Why the outbox stopped: "offline", "server" or "sign-in". Null when it didn't.
+let syncProblem = null; // Why the outbox stopped: "offline", "server", "sign-in" or "consent". Null when it didn't.
 let syncTimer; // Tries the outbox again while the device seems to have a connection.
 const SYNC_RETRY = 60_000;
 // Whether a deletion of the log or the account is on its way to the server.
@@ -136,6 +136,11 @@ function startToastTimer() {
 
 // Loads Clerk and starts following who is signed in. Resolves to Clerk once
 // it has loaded and said who that is. After a failure, the next call tries again.
+// Clerk holds the account and nothing else: weights, measurements, notes, the
+// goal, sex and every other part of the log must never go into Clerk, including
+// its user metadata (publicMetadata, privateMetadata, unsafeMetadata). Clerk's
+// data processing agreement forbids health data, and the privacy policy says
+// none of the log goes to Clerk. The log lives only in Baseline's database.
 function connectClerk() {
   clerkReady ??= startClerk().then(instance => {
     clerk = instance;
@@ -238,9 +243,22 @@ function editOutbox(edit) {
 }
 
 // The log on screen: the server's copy with every change still on its way
-// replayed on top, in order.
+// replayed on top, in order. Until the account has agreed to the health data
+// policy, counting an agreement still on its way, the consent step shows in
+// the log's place (see showConsent).
 function showState() {
   state = applyOps(saved, [...outbox, ...sending].map(item => item.change));
+  if (!hasConsent(state)) {
+    showConsent();
+    return;
+  }
+  if ($("main").hidden) {
+    $("auth").hidden = true;
+    $("consent").hidden = true;
+    $("main").hidden = false;
+    $("main-nav").hidden = false;
+    $("account-bar").hidden = false;
+  }
   render();
 }
 
@@ -251,11 +269,12 @@ function showState() {
 // the same change again. `kept()` runs once the change is saved, on the server
 // or on this device; `done(reply)` runs once the server has it, at first or on
 // a retry. Resolves to the server's reply, or null if the server doesn't have
-// the change yet.
+// the change yet. The agreement to the health data policy goes ahead of
+// everything waiting, since the server saves nothing without it.
 function changeState(change, done = null, kept = null) {
   if (!QUEUEABLE_OPS.includes(change.op)) return sendNow(change, done);
   const item = { id: newId(), change };
-  editOutbox(items => [...items, item]);
+  editOutbox(items => change.op === "consent" ? [item, ...items] : [...items, item]);
   const reply = new Promise(resolve => madeHere.set(item.id, { done, kept, announced: false, resolve }));
   showState();
   syncOutbox();
@@ -271,13 +290,16 @@ async function sendNow(change, done) {
   sending.push(item);
   showState();
   let result = null;
-  try { result = await enqueue(() => sendLog(change, userId)); } catch (error) { console.error(error); }
+  let failure = null;
+  try { result = await enqueue(() => sendLog(change, userId)); } catch (error) { failure = error; console.error(error); }
   if (session !== current) return null;
   sending = sending.filter(other => other !== item);
   if (result) receive(result.log);
+  // The account hasn't agreed to the policy, so the consent step shows instead (see showState).
+  if (lacksConsent(failure)) forgetConsent();
   showState();
   if (!result) {
-    saveFailed(change, done);
+    if (!lacksConsent(failure)) saveFailed(change, done);
     return null;
   }
   savedChange(change, null, done, result);
@@ -315,12 +337,25 @@ function changeName(change) {
     case "set-height": return "your height";
     case "set-units": return "your choice of units";
     case "set-preferences": return "your choice of what the overview shows";
+    case "consent": return "your agreement to the health data policy";
     default: return "a change";
   }
 }
 
+// Whether the server turned a change down because the account hasn't agreed
+// to the health data policy (see needsConsent in server/ops.mjs). The change
+// waits for the agreement rather than being dropped.
+const lacksConsent = error => error instanceof Refused && error.status === 403;
+
 // Whether the server turned a change down for good, rather than failing for now.
-const turnedDown = error => error instanceof Refused && error.status >= 400 && error.status < 500 && ![401, 408, 429].includes(error.status);
+const turnedDown = error => error instanceof Refused && error.status >= 400 && error.status < 500 && ![401, 403, 408, 429].includes(error.status);
+
+// The server has no agreement for this account, as after the data was deleted
+// on another device, so the log on screen hasn't either. The consent step
+// shows until the user agrees again.
+function forgetConsent() {
+  if (saved?.consent) saved = normalizeState({ ...saved, consent: null });
+}
 
 // Sends the outbox to the server, oldest change first, one at a time, through
 // the queue. It stops at a change it can't send yet, so nothing goes out of
@@ -355,6 +390,16 @@ async function sendOutbox(current) {
     let failure = null;
     try { result = await enqueue(() => sendLog(item.change, userId)); } catch (error) { failure = error; }
     if (session !== current) return;
+    if (lacksConsent(failure)) {
+      loadOutbox();
+      // An agreement made meanwhile has gone to the front, so it goes next.
+      if (outbox[0]?.change.op === "consent" && outbox[0].id !== item.id) continue;
+      console.error(failure);
+      syncProblem = "consent";
+      forgetConsent();
+      showState();
+      break;
+    }
     if (result || turnedDown(failure) || fresh && !(failure instanceof Unreachable)) {
       editOutbox(items => items.filter(other => other.id !== item.id));
       madeHere.delete(item.id);
@@ -385,7 +430,8 @@ async function sendOutbox(current) {
   }
   if (syncProblem) {
     announceKept();
-    if (navigator.onLine !== false) syncTimer = setTimeout(reconnect, SYNC_RETRY);
+    // Without the agreement, trying again changes nothing until the user agrees (see agree).
+    if (navigator.onLine !== false && syncProblem !== "consent") syncTimer = setTimeout(reconnect, SYNC_RETRY);
     return;
   }
   if (!synced) return;
@@ -409,7 +455,11 @@ function announceKept() {
     local.resolve(null);
     told = true;
   }
-  if (told) notify(syncProblem === "offline" ? "Saved on this device. It’ll sync when you’re back online." : "Saved on this device. It’ll sync once Baseline can reach your account.");
+  if (told) {
+    notify(syncProblem === "offline" ? "Saved on this device. It’ll sync when you’re back online."
+      : syncProblem === "consent" ? "Saved on this device. It’ll sync once you agree to the health data policy."
+      : "Saved on this device. It’ll sync once Baseline can reach your account.");
+  }
   showLogStatus();
 }
 
@@ -462,7 +512,7 @@ function showLogStatus() {
   }
   // Changes from an earlier visit, or another tab, count as told.
   if (outbox.some(item => madeHere.get(item.id)?.announced !== false)) {
-    lines.push("Saved on this device · " + (syncing || cacheUpdating ? "syncing…" : syncProblem === "server" || syncProblem === "sign-in" ? "not synced yet" : "syncing when you’re back online"));
+    lines.push("Saved on this device · " + (syncing || cacheUpdating ? "syncing…" : syncProblem === "offline" || syncProblem === null ? "syncing when you’re back online" : "not synced yet"));
   }
   const element = $("log-status");
   element.hidden = !lines.length;
@@ -996,10 +1046,12 @@ function showMonths() {
   $("months-note").hidden = !reports.length;
 }
 
-const VIEWS = { "#weight-log": "entries", "#monthly-summary": "months", "#settings": "settings" };
-// "overview", one of the log's views ("entries" or "months"), or "settings".
+const VIEWS = { "#weight-log": "entries", "#monthly-summary": "months", "#settings": "settings", "#your-data": "data" };
+// "overview", one of the log's views ("entries" or "months"), "settings" or
+// "data" (Your data, linked from Settings and the footer).
 function currentView() { return VIEWS[location.hash] ?? "overview"; }
-const VIEW_TITLES = { overview: "Baseline", entries: "Weight log · Baseline", months: "Monthly summary · Baseline", settings: "Settings · Baseline" };
+const VIEW_TITLES = { overview: "Baseline", entries: "Weight log · Baseline", months: "Monthly summary · Baseline", settings: "Settings · Baseline", data: "Your data · Baseline" };
+const PAGE_TITLES = { log: "Weight log", settings: "Settings", data: "Your data" };
 
 function markCurrent(links, current) {
   for (const id of links) {
@@ -1010,20 +1062,23 @@ function markCurrent(links, current) {
 
 function showPage() {
   const view = currentView();
-  // The page the nav marks: "overview", "log" or "settings".
+  // The page: "overview", "log", "settings" or "data". The nav marks the first
+  // three; Your data has no link of its own there.
   const section = view === "entries" || view === "months" ? "log" : view;
   const isLog = section === "log";
   document.body.dataset.view = section;
   document.title = VIEW_TITLES[view];
   // The overview is a page for today, so today's date is its heading.
-  $("page-title").textContent = isLog ? "Weight log" : section === "settings" ? "Settings" : prettyDate(today, "day");
+  $("page-title").textContent = PAGE_TITLES[section] ?? prettyDate(today, "day");
   $("overview-view").hidden = section !== "overview";
   $("log-tabs").hidden = !isLog;
-  $("entries").hidden = section === "settings" || view === "months";
+  $("entries").hidden = !(section === "overview" || view === "entries");
   $("months").hidden = view !== "months";
   $("settings-view").hidden = section !== "settings";
-  // Settings shows the account in full, so the line about it would repeat it.
-  $("storage-status").hidden = section === "settings";
+  $("data-view").hidden = section !== "data";
+  // Settings and Your data show the account in full, so the line about it would repeat it.
+  $("storage-status").hidden = section === "settings" || section === "data";
+  $("footer-data-link").hidden = section === "data";
   markCurrent(["overview-link", "log-link", "settings-link"], section + "-link");
   markCurrent(["entries-link", "months-link"], view === "months" ? "months-link" : "entries-link");
   const first = trend.readings[0];
@@ -1033,7 +1088,7 @@ function showPage() {
     : (first === last ? prettyDate(first.date, "full") : prettyDate(first.date, "full") + " – " + prettyDate(last.date, "full")) +
       " · " + total + (total === 1 ? " entry" : " entries");
   if (view === "months") showMonths();
-  else if (section !== "settings") showTable(isLog);
+  else if (section === "overview" || isLog) showTable(isLog);
   // Body fat sits under the recent entries, on the overview only, unless it's hidden in Settings.
   const bodyFatShown = section === "overview" && state.preferences.showBodyFat;
   $("body-fat").hidden = !bodyFatShown;
@@ -1061,18 +1116,86 @@ function render() {
   showLogStatus();
 }
 
-// The account: the line at the bottom of the page and, in Settings, the email
-// and what "Your data" offers.
+// The account: the line at the bottom of the page, the email in Settings, the
+// agreement and what Your data offers, and the consent step's way out.
 function showAccount() {
   $("storage-status").textContent = (account.email ? "Signed in as " + account.email + ". " : "") + "Your log is saved to your account.";
   // Before Clerk has loaded, the log on screen is the copy on this device, which doesn't keep the email.
   $("account-email").textContent = account.email || "Shows once Baseline reaches your account.";
   $("account-email").classList.toggle("is-empty", !account.email);
   showYourData();
+  if (!$("consent").hidden) showConsentChoices();
+}
+
+// When the account agreed, in the reader's time zone: "Agreed on Nov 23, 2026".
+// An agreement made on this device has no time until the server records it.
+function showAgreement() {
+  // Clerk can report a profile change while a log is still loading.
+  if (!state) return;
+  const consent = state.consent;
+  $("consent-value").textContent = !consent ? "" : consent.at ? "Agreed on " + prettyDate(localToday(new Date(consent.at)), "full") : "Agreed on this device, not synced yet";
+  $("consent-version").textContent = prettyDate(CONSENT_VERSION, "full");
+}
+
+// Until the account agrees to the current health data policy, this step shows
+// in place of the log (see showState). Nothing is saved before, and the server
+// turns down any change that would save data (see needsConsent in
+// server/ops.mjs). An account that already holds a log can still download or
+// delete it without agreeing, or sign out.
+function showConsent() {
+  const appearing = $("consent").hidden;
+  showAuth("consent");
+  if (appearing) {
+    $("consent-agree").checked = false;
+    $("consent-continue").disabled = true;
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }
+  // The agreement on record, if any, is to an older version of the policy.
+  const earlier = state.consent;
+  const change = $("consent-change");
+  change.hidden = !earlier && !holdsData(state);
+  change.textContent = earlier ? "The health data policy has changed since you agreed to it" + (earlier.at ? " on " + prettyDate(localToday(new Date(earlier.at)), "full") : "") + ". Read what it says now, then agree to keep using Baseline."
+    : "Baseline now asks before it stores health data. Your log is still here, and nothing changes until you choose.";
+  showConsentChoices();
+}
+
+// Whether the account holds anything that a download would carry.
+const holdsData = log => log.entries.length > 0 || log.waists.length > 0 || log.height !== null || log.goal !== null || log.reminder !== null;
+
+function showConsentChoices() {
+  const data = holdsData(state);
+  const whole = canDeleteAccount();
+  $("consent-other-text").textContent = data ? "Your log stays as it is, and nothing new is saved. You can download it or delete it, or sign out."
+    : "Nothing has been saved. You can sign out" + (whole ? " or delete your account." : ".");
+  $("consent-download").hidden = !data;
+  $("consent-delete-data").hidden = !data;
+  $("consent-delete-account").hidden = !whole;
+}
+
+// Agreeing shows the log at once. The agreement can wait on this device like
+// any change, ahead of the rest, and the server records the time it arrives.
+function agree() {
+  if (!$("consent-agree").checked || !state || hasConsent(state)) return;
+  changeState({ op: "consent", version: CONSENT_VERSION }, importAfterConsent);
+  if (!$("main").hidden) $("main").focus({ preventScroll: true });
+}
+
+// A log saved in this browser before accounts moves into an empty account once
+// it has agreed to the policy, as it would have at sign-in (see importBrowserLog).
+async function importAfterConsent(reply) {
+  if (normalizeState(reply.log).started) return;
+  const current = session;
+  const userId = account.id;
+  let result;
+  try { result = await enqueue(() => importBrowserLog(reply, userId)); } catch (error) { console.error(error); return; }
+  if (session !== current || !result.imported) return;
+  receive(result.log);
+  showState();
 }
 
 // Until a log is open, the page shows one of these in place of the app.
-const authViews = ["auth-loading", "auth-setup", "auth-error", "sign-in", "log-loading", "log-error"];
+const authViews = ["auth-loading", "auth-setup", "auth-error", "sign-in", "log-loading", "log-error", "consent"];
+const AUTH_TITLES = { "sign-in": "Sign in · Baseline", consent: "Your health data · Baseline" };
 // A message over the sign-in form, such as the confirmation that an account
 // was deleted. It stays until someone signs in. Null when there is none.
 let authNotice = null;
@@ -1080,6 +1203,7 @@ let authNotice = null;
 function showAuth(view) {
   for (const id of authViews) $(id).hidden = id !== view;
   $("auth").dataset.view = view;
+  // The sign-in screen is Baseline's front page, so it links the health data policy.
   $("auth-note").hidden = view !== "sign-in";
   const notice = view === "sign-in" ? authNotice : null;
   $("auth-notice").textContent = notice ?? "";
@@ -1089,12 +1213,16 @@ function showAuth(view) {
   $("main").hidden = true;
   $("account-bar").hidden = !account;
   $("main-nav").hidden = true;
-  document.title = view === "sign-in" ? "Sign in · Baseline" : "Baseline";
+  document.title = AUTH_TITLES[view] ?? "Baseline";
 }
 
 function emailOf(user) {
   return user.primaryEmailAddress?.emailAddress ?? "";
 }
+
+// The server saves nothing for an account that hasn't agreed to the health data
+// policy, so a browser's old log waits for the agreement (see importAfterConsent).
+const importOnceAgreed = (read, userId) => hasConsent(read.log) ? importBrowserLog(read, userId) : read;
 
 // Logs from before accounts were saved online live in this browser. The first
 // time an account's online log is empty, the browser's log moves into it.
@@ -1143,7 +1271,8 @@ function forgetChanges() {
   clearTimeout(syncTimer);
 }
 
-// Puts the open log on the page, starting from the overview for today.
+// Puts the open log on the page, starting from the overview for today, or the
+// consent step until the account has agreed (see showState).
 function showLog() {
   today = localToday();
   page = 0;
@@ -1152,10 +1281,6 @@ function showLog() {
   rateSource = null;
   allWaists = false;
   $("entry-date").value = today;
-  $("auth").hidden = true;
-  $("main").hidden = false;
-  $("main-nav").hidden = false;
-  $("account-bar").hidden = false;
   showState();
 }
 
@@ -1177,7 +1302,7 @@ async function openLog(user) {
   showAuth("log-loading");
   let result;
   try {
-    result = await enqueue(() => sendLog(null, user.id).then(read => importBrowserLog(read, user.id)));
+    result = await enqueue(() => sendLog(null, user.id).then(read => importOnceAgreed(read, user.id)));
   } catch (error) {
     if (session !== current) return;
     console.error(error);
@@ -1202,7 +1327,7 @@ async function confirmLog(user) {
   showLogStatus();
   let result;
   try {
-    result = await enqueue(() => sendLog(null, user.id).then(read => importBrowserLog(read, user.id)));
+    result = await enqueue(() => sendLog(null, user.id).then(read => importOnceAgreed(read, user.id)));
   } catch (error) {
     if (session !== current) return;
     console.error(error);
@@ -1714,9 +1839,11 @@ async function startWorker() {
   if (state) showReminder();
 }
 
-// "Your data", in Settings: downloading the log, and deleting it or the whole account.
+// Your data: downloading the log, and deleting it or the whole account.
+// Withdrawing the agreement to the health data policy deletes the data too.
 const DELETE_WORD = "delete"; // What the user types to confirm, and what server/ops.mjs checks.
 let erasing = null; // What the delete dialog deletes: "data" or "account".
+let withdrawing = false; // Whether the data is deleted to withdraw the agreement.
 let accountDataGone = false; // The account's rows are deleted, and only the Clerk user is left.
 
 // Deleting the account needs the Clerk Dashboard setting that lets users delete
@@ -1729,6 +1856,7 @@ function showYourData() {
   $("delete-account").hidden = !whole;
   $("delete-note").textContent = "Delete my data empties your log on every device and keeps your account." +
     (whole ? " Delete my account deletes your log, then your account." : "");
+  showAgreement();
 }
 
 // An iPhone or iPad app on the Home Screen, where a download link does nothing useful.
@@ -1776,13 +1904,17 @@ function downloadJson() {
   download(jsonFileName(today), "application/json", exportJson(state, new Date()));
 }
 
-function openErase(kind) {
+// `withdraw` is when the user is withdrawing their agreement to the health data
+// policy, which deletes the data as Delete my data does.
+function openErase(kind, withdraw = false) {
   erasing = kind;
+  withdrawing = withdraw && kind === "data";
   accountDataGone = false;
   const whole = kind === "account";
-  $("erase-title").textContent = whole ? "Delete your account?" : "Delete your data?";
+  $("erase-title").textContent = whole ? "Delete your account?" : withdrawing ? "Withdraw your agreement?" : "Delete your data?";
+  $("erase-lead").textContent = (withdrawing ? "Withdrawing it permanently deletes" : "This permanently deletes") + " everything in your log, on every device:";
   $("erase-after").textContent = whole ? "Then your account is deleted and you’re signed out. This can’t be undone."
-    : "Your account stays, with an empty log, and you stay signed in. This can’t be undone.";
+    : "Your account stays, with an empty log, and you stay signed in. Baseline asks you to agree again before it saves anything new. This can’t be undone.";
   $("erase-word").value = "";
   eraseBusy(false);
   showEraseStatus("");
@@ -1801,7 +1933,7 @@ function eraseBusy(busy) {
   const submit = $("erase-submit");
   submit.setAttribute("aria-disabled", String(busy));
   submit.disabled = !busy && !eraseConfirmed();
-  submit.textContent = accountDataGone ? "Try again" : erasing === "account" ? "Delete my account" : "Delete my data";
+  submit.textContent = accountDataGone ? "Try again" : erasing === "account" ? "Delete my account" : withdrawing ? "Withdraw and delete" : "Delete my data";
 }
 
 // A line in the delete dialog, or a message at the bottom of the page if the
@@ -1866,7 +1998,7 @@ async function deleteData() {
   startAfresh(userId, result.log);
   $("erase-dialog").removeAttribute("data-busy");
   $("erase-dialog").close();
-  notify("Your data has been deleted.");
+  notify(withdrawing ? "Your agreement is withdrawn and your data has been deleted." : "Your data has been deleted.");
 }
 
 // Deletes every row for the account, then the Clerk user. If Clerk fails after
@@ -1990,7 +2122,8 @@ function syncDay() {
   if (now === today) return;
   if ($("entry-date").value === today && autoFill) $("entry-date").value = now;
   today = now;
-  if (state) render();
+  // The consent step draws the log once it gives way (see showState).
+  if (state && !$("main").hidden) render();
 }
 
 function scheduleMidnight() {
@@ -2277,6 +2410,16 @@ $("download-json").addEventListener("click", downloadJson);
 $("erase-download").addEventListener("click", downloadJson);
 $("delete-data").addEventListener("click", () => openErase("data"));
 $("delete-account").addEventListener("click", () => openErase("account"));
+$("withdraw-consent").addEventListener("click", () => openErase("data", true));
+$("consent-agree").addEventListener("change", () => { $("consent-continue").disabled = !$("consent-agree").checked; });
+$("consent-form").addEventListener("submit", event => {
+  event.preventDefault();
+  agree();
+});
+$("consent-download").addEventListener("click", downloadJson);
+$("consent-delete-data").addEventListener("click", () => openErase("data"));
+$("consent-delete-account").addEventListener("click", () => openErase("account"));
+$("consent-sign-out").addEventListener("click", signOut);
 $("erase-word").addEventListener("input", () => {
   if (!$("erase-dialog").hasAttribute("data-busy")) $("erase-submit").disabled = !eraseConfirmed();
 });
@@ -2302,7 +2445,8 @@ for (const dialog of document.querySelectorAll("dialog")) {
   });
 }
 window.addEventListener("hashchange", () => {
-  if (!state) return;
+  // The consent step stands in for the log until the account agrees.
+  if (!state || $("main").hidden) return;
   page = 0;
   showPage();
   window.scrollTo({ top: 0, behavior: "auto" });

@@ -113,13 +113,30 @@ a { color: inherit; }
 /* A one-off message over the sign-in form, such as after deleting an account. */
 .auth-notice { max-width: 25rem; margin: 0 auto 24px; color: var(--ink); font-weight: 600; text-align: center; text-wrap: pretty; }
 .auth-note { max-width: 25rem; margin: 20px auto 0; color: var(--ink-3); font-size: .875rem; text-align: center; text-wrap: pretty; }
+.auth-note p + p { margin-top: 8px; }
+.auth-note a { color: var(--ink-2); text-underline-offset: 3px; }
+/* The consent step: what Baseline stores, the box to tick and Continue, then
+   the ways out for someone who doesn't agree, under a hairline. */
+.consent { max-width: 34rem; margin-inline: auto; }
+.consent h1 { font-size: 1.5rem; font-weight: 700; letter-spacing: -.015em; color: var(--ink); }
+.consent-change { margin-top: 8px; color: var(--ink-2); text-wrap: pretty; }
+.consent-text { margin-top: 12px; font-size: 1.125rem; text-wrap: pretty; }
+.consent-policy { margin-top: 10px; }
+#consent-form { margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--ink); }
+.consent-check { display: flex; align-items: flex-start; gap: 12px; font-weight: 600; cursor: pointer; }
+.consent-check input { flex: none; width: 20px; height: 20px; margin: 2px 0 0; accent-color: var(--accent); cursor: pointer; }
+.consent-continue { width: 100%; margin-top: 20px; }
+.consent-other { margin-top: 40px; padding-top: 16px; border-top: 1px solid var(--rule); }
+.consent-other h2 { font-size: 1rem; font-weight: 700; }
+.consent-other p { margin-top: 4px; color: var(--ink-2); text-wrap: pretty; }
+.consent-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 
 /* Page */
 .page { padding-block: 32px 48px; }
 .page:focus { outline: none; }
 .page-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
 h1 { font-size: 1.125rem; font-weight: 600; color: var(--ink-2); }
-body:is([data-view="log"], [data-view="settings"]) h1 { font-size: 2.25rem; font-weight: 700; line-height: 1.1; letter-spacing: -.025em; color: var(--ink); }
+body:is([data-view="log"], [data-view="settings"], [data-view="data"]) h1 { font-size: 2.25rem; font-weight: 700; line-height: 1.1; letter-spacing: -.025em; color: var(--ink); }
 .page-detail { margin-top: 8px; color: var(--ink-3); }
 .page-detail:empty { display: none; }
 /* Says the log on screen is the copy kept on this device, and that changes are
@@ -341,7 +358,37 @@ tbody:first-of-type .month-row th { padding-top: 20px; }
 .setting-name { display: block; font-weight: 700; }
 .setting-hint { display: block; max-width: 60ch; margin-top: 2px; color: var(--ink-2); text-wrap: pretty; }
 .small-button.danger-text { color: var(--danger); }
-.storage-status { margin-top: 48px; color: var(--ink-3); font-size: .875rem; text-align: center; }
+a.small-button { display: inline-block; text-decoration: none; }
+/* Your data: rows of a name and what it covers, between hairlines. The policy
+   page lists things the same way. */
+.data-lead { max-width: 60ch; margin-bottom: 32px; color: var(--ink-2); text-wrap: pretty; }
+.data-list { margin: 0; }
+.data-row, .policy-list > div { display: grid; grid-template-columns: minmax(8rem, 11rem) minmax(0, 1fr); gap: 4px 24px; padding-block: 14px; border-bottom: 1px solid var(--rule); }
+:is(.data-row, .policy-list > div) dt { font-weight: 700; }
+:is(.data-row, .policy-list > div) dd { max-width: 60ch; color: var(--ink-2); text-wrap: pretty; }
+.data-never, .policy ul { margin: 0; padding: 0; list-style: none; }
+:is(.data-never, .policy ul) li { padding-block: 14px; border-bottom: 1px solid var(--rule); color: var(--ink-2); text-wrap: pretty; }
+/* The account line and the links to Your data and the policy. */
+.app-footer { margin-top: 48px; color: var(--ink-3); font-size: .875rem; text-align: center; }
+.footer-links { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 20px; }
+.storage-status:not([hidden]) + .footer-links { margin-top: 8px; }
+.footer-links a { color: var(--ink-2); text-underline-offset: 3px; }
+
+/* The health data policy: one column of plain text, in sections under ink rules. */
+.policy { max-width: 46rem; padding-block: 32px 64px; }
+.policy:focus { outline: none; }
+.policy-draft { margin-bottom: 28px; padding: 12px 14px; border: 1px solid var(--field-border); border-radius: 8px; color: var(--ink-2); text-wrap: pretty; }
+.policy-draft strong { color: var(--ink); }
+.policy h1 { font-size: 2.25rem; font-weight: 700; line-height: 1.1; letter-spacing: -.025em; color: var(--ink); }
+.policy-version { margin-top: 10px; color: var(--ink-3); }
+.policy-lead { max-width: 60ch; margin-top: 20px; font-size: 1.125rem; text-wrap: pretty; }
+.policy section { margin-top: 40px; }
+.policy h2 { padding-bottom: 10px; border-bottom: 1px solid var(--ink); font-size: 1.375rem; font-weight: 700; letter-spacing: -.015em; }
+.policy section > p { max-width: 60ch; margin-top: 12px; color: var(--ink-2); text-wrap: pretty; }
+.policy section > p + :is(dl, ul) { margin-top: 12px; border-top: 1px solid var(--rule); }
+.policy-list { margin: 0; }
+.policy-list strong { color: var(--ink); font-weight: 600; }
+.policy-back { margin-top: 40px; }
 
 /* Dialogs and toast */
 dialog { width: min(420px, calc(100% - 32px)); max-height: calc(100dvh - 32px); padding: 24px; border: 1px solid var(--rule); border-radius: 14px; background: var(--surface); color: var(--ink); box-shadow: var(--shadow); }
@@ -414,7 +461,11 @@ body[data-weight-unit="st"] .start-row { grid-template-columns: minmax(0, 1fr); 
   .skeleton .fact .bone { margin-block: 5px; }
   .page { padding-top: 24px; }
   .page-heading { margin-bottom: 16px; }
-  body:is([data-view="log"], [data-view="settings"]) h1 { font-size: 1.875rem; }
+  body:is([data-view="log"], [data-view="settings"], [data-view="data"]) h1 { font-size: 1.875rem; }
+  .policy { padding-top: 24px; }
+  .policy h1 { font-size: 1.875rem; }
+  /* A name over what it covers. */
+  .data-row, .policy-list > div { grid-template-columns: minmax(0, 1fr); }
   .top { padding-bottom: 32px; }
   .facts { display: block; margin-top: 24px; padding-top: 0; border-top: 0; }
   .trend-figures { display: block; margin-top: 12px; padding-bottom: 0; }

@@ -14,13 +14,14 @@
 // files are stored changes. The new worker then fills a new cache and deletes
 // this one. Edits to a listed file need no bump, since each load with a
 // connection stores the new copy.
-const CACHE = "baseline-shell-v2";
+const CACHE = "baseline-shell-v3";
 
 // Every file the app needs to open, relative to this worker. npm test checks
 // that each file in baseline/dist/ is listed here or deliberately left out.
 const SHELL = [
   "./",
   "index.html",
+  "health-data-privacy.html",
   "styles.css",
   "app.mjs",
   "model.mjs",

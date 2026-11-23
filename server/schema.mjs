@@ -90,5 +90,30 @@ export const schema = [
   // (see PREFERENCE_KEYS in model.mjs). A key that isn't set takes its default,
   // so a new key needs no migration. Changes merge into it (see store.mjs).
   `ALTER TABLE profiles
-    ADD COLUMN IF NOT EXISTS preferences jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(preferences) = 'object')`
+    ADD COLUMN IF NOT EXISTS preferences jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(preferences) = 'object')`,
+  // The version of the health data policy the account agreed to (see
+  // CONSENT_VERSION in model.mjs) and when the server received the agreement.
+  // Both null until the account agrees. Deleting the data deletes them too.
+  `ALTER TABLE profiles
+    ADD COLUMN IF NOT EXISTS consent_version text CHECK (char_length(consent_version) BETWEEN 1 AND 32),
+    ADD COLUMN IF NOT EXISTS consented_at timestamptz`,
+  // Runs first in the transaction of every change that saves data (see
+  // needsConsent in ops.mjs), and fails it unless the account agreed to
+  // `version`. FOR SHARE holds the profile row until the change commits, so a
+  // deletion of the data, which also withdraws the agreement, can't slip in
+  // between the check and the change. It is created once and never replaced:
+  // a different check needs a new name. Two cold starts that create it at once
+  // leave one copy, and the other's error is ignored.
+  `DO $$
+  BEGIN
+    CREATE FUNCTION require_consent(account text, version text) RETURNS void LANGUAGE plpgsql AS $body$
+    BEGIN
+      PERFORM 1 FROM profiles WHERE user_id = account AND consent_version = version FOR SHARE;
+      IF NOT FOUND THEN
+        RAISE EXCEPTION 'Agree to the health data policy first.' USING ERRCODE = 'BL403';
+      END IF;
+    END
+    $body$;
+  EXCEPTION WHEN duplicate_function OR unique_violation THEN NULL;
+  END $$`
 ];

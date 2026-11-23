@@ -7,7 +7,7 @@ const ENDPOINT = "https://fcm.googleapis.com/fcm/send/device-secret-123";
 
 // A log as the server returns it, with a reminder that lists this device's push endpoint.
 const log = () => normalizeState({
-  started: true, height: 178.5, sex: "female", units: { weight: "lb", height: "ft" }, preferences: { showBmi: false },
+  started: true, consent: { version: "2026-11-23", at: "2026-11-23T08:00:00Z" }, height: 178.5, sex: "female", units: { weight: "lb", height: "ft" }, preferences: { showBmi: false },
   goal: { weight: 75, startDate: "2026-11-01", startWeight: 84.91, rate: .5, milestones: 10 },
   reminder: { hour: 8, timeZone: "Europe/London", devices: [ENDPOINT] },
   entries: [
@@ -108,6 +108,7 @@ test("the JSON export holds the whole log, in metric units, under a named format
     sex: "female",
     goal: { weightKg: 75, startDate: "2026-11-01", startWeightKg: 84.91, rateKgPerWeek: .5, milestones: 10 },
     reminder: { hour: 8, timeZone: "Europe/London" },
+    consent: { version: "2026-11-23", agreedAt: "2026-11-23T08:00:00Z" },
     entries: [
       { date: "2026-11-01", weightKg: 85, note: null },
       { date: "2026-11-02", weightKg: 84.91, note: "=HYPERLINK(\"http://evil.test\")" },
@@ -131,8 +132,13 @@ test("an empty log exports with empty lists and nulls", () => {
   const data = JSON.parse(exportJson(normalizeState({}), new Date("2026-11-23T00:00:00Z")));
   assert.deepEqual(data, {
     format: "baseline-export", version: 1, exportedAt: "2026-11-23T00:00:00.000Z",
-    units: { weight: "kg", height: "cm" }, preferences: { showBmi: true, showBodyFat: true }, heightCm: null, sex: null, goal: null, reminder: null, entries: [], waists: []
+    units: { weight: "kg", height: "cm" }, preferences: { showBmi: true, showBodyFat: true }, heightCm: null, sex: null, goal: null, reminder: null, consent: null, entries: [], waists: []
   });
+});
+
+test("an agreement made on this device exports without a time until it syncs", () => {
+  const data = JSON.parse(exportJson(normalizeState({ consent: { version: "2026-11-23" } }), new Date("2026-11-23T00:00:00Z")));
+  assert.deepEqual(data.consent, { version: "2026-11-23", agreedAt: null });
 });
 
 test("download names carry the date", () => {

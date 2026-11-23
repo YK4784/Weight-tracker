@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { CM_PER_IN, FORECAST_MAX_DAYS, KG_PER_LB, NOTE_MAX_LENGTH, averageChanges, bodyFat, bodyFatChange, bodyFatHistory, changeTarget, formatWaist, roundWaist, saveWaist, spokenWaist, validWaist, waistParts, formatAmount, formatWeight, fromTenths, heightParts, normalizeUnits, toTenths, weightParts, bmi, calculateRate, calculateTrend, cleanNote, dateOf, dayOf, fastGoalRate, fastLossCaution, forecastGoal, goalProgress, goalRateAllowed, goalRateLimit, groupByMonth, maxGoalRate, monthlyReports, normalizeGoal, normalizeReminder, validTimeZone, normalizeState, noteLength, overallRate, recentRange, saveWeight, shiftDate, validDate } from "../dist/model.mjs";
 import { PREFERENCE_KEYS, QUEUEABLE_OPS, applyOp, applyOps, normalizePreferences, preferencesChange, validPreference } from "../dist/model.mjs";
+import { CONSENT_VERSION, hasConsent, normalizeConsent } from "../dist/model.mjs";
 
 const first = dayOf("2026-03-01");
 const entry = (index, weight) => ({ date: dateOf(first + index), weight });
@@ -768,7 +769,7 @@ test("each change that can wait applies as the server applies it", () => {
 });
 
 test("every change that can wait is one the app sends, and reminders aren't among them", () => {
-  assert.deepEqual([...QUEUEABLE_OPS].sort(), ["clear-goal", "delete-waist", "delete-weight", "save-waist", "save-weight", "set-goal", "set-height", "set-preferences", "set-units", "update-weight"]);
+  assert.deepEqual([...QUEUEABLE_OPS].sort(), ["clear-goal", "consent", "delete-waist", "delete-weight", "save-waist", "save-weight", "set-goal", "set-height", "set-preferences", "set-units", "update-weight"]);
   assert.ok(!QUEUEABLE_OPS.includes("set-reminder") && !QUEUEABLE_OPS.includes("clear-reminder") && !QUEUEABLE_OPS.includes("import"));
 });
 
@@ -858,4 +859,39 @@ test("a change to preferences needs at least one key, each known and of the righ
   for (const value of [undefined, null, {}, [], "showBmi", { showBmi: 1 }, { showBmi: null }, { showBmi: false, extra: true }, { hideNumbers: true }, JSON.parse('{"__proto__": {"showBmi": false}}')]) {
     assert.equal(preferencesChange(value), null, JSON.stringify(value));
   }
+});
+
+test("the agreement to the health data policy is a version and the time the server received it", () => {
+  assert.match(CONSENT_VERSION, /^\d{4}-\d{2}-\d{2}$/, "the policy's date");
+  assert.deepEqual(normalizeConsent({ version: CONSENT_VERSION, at: "2026-11-23T09:41:00Z", extra: 1 }), { version: CONSENT_VERSION, at: "2026-11-23T09:41:00Z" });
+  assert.deepEqual(normalizeConsent({ version: CONSENT_VERSION }), { version: CONSENT_VERSION, at: null }, "made on this device, not synced yet");
+  assert.deepEqual(normalizeConsent({ version: "2025-01-01", at: "not a time" }), { version: "2025-01-01", at: null });
+  for (const value of [null, undefined, {}, { version: "" }, { version: 20261123 }, { version: "a b" }, { version: "x".repeat(33) }, "2026-11-23"]) {
+    assert.equal(normalizeConsent(value), null, JSON.stringify(value));
+  }
+});
+
+test("a log has consent only for the current version, and agreeing doesn't start it", () => {
+  const empty = normalizeState({});
+  assert.equal(empty.consent, null);
+  assert.equal(hasConsent(empty), false);
+  assert.equal(hasConsent(null), false);
+  assert.equal(hasConsent(normalizeState({ consent: { version: "2025-01-01", at: "2025-01-01T00:00:00Z" } })), false, "an older policy");
+  const agreed = applyOp(empty, { op: "consent", version: CONSENT_VERSION });
+  assert.deepEqual(agreed.consent, { version: CONSENT_VERSION, at: null });
+  assert.equal(hasConsent(agreed), true);
+  assert.equal(agreed.started, false, "so a browser's old log can still move in");
+  assert.deepEqual({ ...agreed, consent: null }, empty, "it changes nothing else");
+  // Agreeing again keeps the time the server recorded, as the server does.
+  const recorded = normalizeState({ consent: { version: CONSENT_VERSION, at: "2026-11-23T09:41:00Z" } });
+  assert.equal(applyOp(recorded, { op: "consent", version: CONSENT_VERSION }), recorded);
+  // An agreement to a version this app doesn't show is turned down, and skipped among others.
+  assert.throws(() => applyOp(empty, { op: "consent", version: "2025-01-01" }));
+  assert.throws(() => applyOp(empty, { op: "consent" }));
+  assert.equal(applyOps(empty, [{ op: "consent", version: "old" }, { op: "save-weight", date: "2026-11-21", weight: 65 }]).consent, null);
+});
+
+test("an agreement replaces an earlier one that failed, and nothing else", () => {
+  assert.equal(changeTarget({ op: "consent", version: CONSENT_VERSION }), "consent");
+  assert.notEqual(changeTarget({ op: "consent", version: CONSENT_VERSION }), changeTarget({ op: "set-units", units: {} }));
 });

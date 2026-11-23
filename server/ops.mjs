@@ -1,9 +1,27 @@
-import { GOAL_MAX_MILESTONES, GOAL_MIN_RATE, GOAL_STORED_MAX_RATE, HEIGHT_UNITS, NOTE_MAX_LENGTH, SEXES, WAIST_MAX, WAIST_MIN, WEIGHT_UNITS, cleanNote, dateOf, dayOf, goalRateAllowed, noteLength, normalizeState, preferencesChange, roundHeight, roundRate, roundWaist, roundWeight, validDate, validTimeZone } from "../baseline/dist/model.mjs";
+import { CONSENT_VERSION, GOAL_MAX_MILESTONES, GOAL_MIN_RATE, GOAL_STORED_MAX_RATE, HEIGHT_UNITS, NOTE_MAX_LENGTH, SEXES, WAIST_MAX, WAIST_MIN, WEIGHT_UNITS, cleanNote, dateOf, dayOf, goalRateAllowed, noteLength, normalizeState, preferencesChange, roundHeight, roundRate, roundWaist, roundWeight, validDate, validTimeZone } from "../baseline/dist/model.mjs";
 import { parseSubscription } from "./push.mjs";
 
 export const MAX_IMPORT_ENTRIES = 20_000;
 // What a deletion's `confirm` must be. The app sends it once the user has typed it.
 export const DELETE_WORD = "delete";
+
+// Changes that save nothing new, so an account that hasn't agreed to the
+// health data policy can still make them: agreeing, and taking data away.
+// Every other change needs the agreement, including any op added later.
+export const OPS_WITHOUT_CONSENT = ["consent", "delete-weight", "delete-waist", "clear-goal", "clear-reminder", "delete-data", "delete-account"];
+
+// Whether a change needs the account's agreement to the current policy (see
+// require_consent in schema.mjs). Reading the log never does.
+export const needsConsent = change => Boolean(change) && !OPS_WITHOUT_CONSENT.includes(change.op);
+
+// The SQLSTATE require_consent raises, and the error the store turns it into.
+export const CONSENT_ERROR_CODE = "BL403";
+export class ConsentRequired extends Error {
+  constructor() {
+    super("Agree to the health data policy first.");
+    this.name = "ConsentRequired";
+  }
+}
 
 const inRange = (value, min, max) => typeof value === "number" && Number.isFinite(value) && value >= min && value <= max;
 
@@ -74,6 +92,11 @@ export function parseOp(body, now = new Date()) {
       const subscription = parseSubscription(body.subscription);
       return subscription ? { ...change, subscription } : null;
     }
+    // Agreement to the health data policy, which the server records with the
+    // time it arrives. Only the current version counts, so an app that shows
+    // an older policy can't agree on the user's behalf to the newer one.
+    case "consent":
+      return body.version === CONSENT_VERSION ? { op: body.op, version: CONSENT_VERSION } : null;
     // Turns reminders off on every device.
     case "clear-reminder":
     case "clear-goal":

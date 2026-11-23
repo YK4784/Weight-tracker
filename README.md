@@ -80,7 +80,7 @@ node -e 'const k = require("node:crypto").generateKeyPairSync("ec", { namedCurve
 
 The service worker in `baseline/dist/sw.js` keeps a copy of the app's own files: the page, its modules and styles, the font, the icons and the manifest. They're listed in `SHELL` at the top of the file. Each file comes from the network first, and the answer replaces the copy, so a deploy reaches the next load that has a connection. The copy is used when the network fails, returns an error or takes more than 3 seconds. A page that opened from the copy gets its modules from the copy too, so it never mixes versions. The worker never handles `/api/` requests, other sites such as Clerk, or anything but `GET`.
 
-When you add a file to `baseline/dist/`, add it to `SHELL`, or to the list of files left out on purpose in `baseline/tests/worker.test.mjs`. `npm test` fails until you do. When `SHELL` changes, bump the version in the cache's name, now `baseline-shell-v2`, so the new worker starts a fresh cache and deletes the old one. Edits to a listed file need no bump.
+When you add a file to `baseline/dist/`, add it to `SHELL`, or to the list of files left out on purpose in `baseline/tests/worker.test.mjs`. `npm test` fails until you do. When `SHELL` changes, bump the version in the cache's name, now `baseline-shell-v3`, so the new worker starts a fresh cache and deletes the old one. Edits to a listed file need no bump.
 
 Clerk's scripts load from its servers on every start, through a redirect that browsers can't cache, so sign-in can't load offline. Baseline shows the copy of the log kept on the device instead, and loads sign-in when the connection returns.
 
@@ -94,7 +94,7 @@ vercel env pull .env.local
 npm start
 ```
 
-Open [Baseline locally](http://127.0.0.1:4173/). `npm start` serves the page from `baseline/dist/` and runs the API from `api/log.mjs`, using the `DATABASE_URL` in `.env.local`. Reminders can be turned on locally, but only Vercel sends them. Run `npm test` to check the calculations, including body fat against the Army's worked examples, the API's input checks, the reminder schedule, the push encryption, the copy of the log kept on the device, the changes that wait on the device and replay on top of it, the downloads, and the word a deletion needs. It also checks that deleting an account reaches every table in `server/schema.mjs`. And it checks that `index.html` preloads every module and connects early to the Frontend API in `config.mjs`, and that the service worker keeps every file in `baseline/dist/` that the app needs and leaves the API and Clerk alone.
+Open [Baseline locally](http://127.0.0.1:4173/). `npm start` serves the page from `baseline/dist/` and runs the API from `api/log.mjs`, using the `DATABASE_URL` in `.env.local`. Reminders can be turned on locally, but only Vercel sends them. Run `npm test` to check the calculations, including body fat against the Army's worked examples, the API's input checks, the reminder schedule, the push encryption, the copy of the log kept on the device, the changes that wait on the device and replay on top of it, the downloads, and the word a deletion needs. It also checks that deleting an account reaches every table in `server/schema.mjs`. And it checks that `index.html` preloads every module and connects early to the Frontend API in `config.mjs`, and that the service worker keeps every file in `baseline/dist/` that the app needs and leaves the API and Clerk alone. It checks the agreement to the health data policy too, as [Privacy](#privacy) describes.
 
 ## Using the tracker
 
@@ -104,7 +104,7 @@ Use **Add** or **Update** next to **Body fat**, or **Log waist** in the **Body f
 
 Use **Set** under **Reminder** in **Settings** to get a notification at a chosen hour on days you haven't logged a weigh-in. Your browser asks to allow notifications the first time. Each device you turn reminders on from gets them, and **Turn off reminders** stops them on all of them. On iPhone and iPad, add Baseline to the Home Screen first: in Safari, tap **Share**, then **Add to Home Screen**. Open Baseline from the Home Screen and turn reminders on there. The reminder uses the time zone of the device you last saved it from. Signing out doesn't stop reminders on a device, so turn them off first on a device you share.
 
-Sign in to open your log. A new account starts with an empty log. The **Weight log** shows every entry with its weekly trend and note, 15 to a page and grouped by month, and lets you edit a weigh-in's weight or note or delete it. A month that runs over onto the next page repeats its heading there. Choose **Monthly summary** at the top of the log to see each month's start and end averages, change, weekly trend and lowest weigh-in, along with any goal milestones reached that month.
+Sign in to open your log. The first time, Baseline asks you to agree to its health data policy before it saves anything, as [Privacy](#privacy) describes. A new account starts with an empty log. The **Weight log** shows every entry with its weekly trend and note, 15 to a page and grouped by month, and lets you edit a weigh-in's weight or note or delete it. A month that runs over onto the next page repeats its heading there. Choose **Monthly summary** at the top of the log to see each month's start and end averages, change, weekly trend and lowest weigh-in, along with any goal milestones reached that month.
 
 **Settings**, the last link at the top of the page, gathers what you set once:
 
@@ -112,14 +112,14 @@ Sign in to open your log. A new account starts with an empty log. The **Weight l
 - **Height:** the height BMI uses, with **Add** or **Edit**, which opens the height dialog and its **cm** or **ft** switch.
 - **Reminder:** the reminder's time, or **Off**, with **Set** or **Edit**, which opens the reminder dialog. "Not this device" means reminders are on, but not for the device you're using. A city's name, such as "London time", means the reminder was saved from a device in another time zone.
 - **Show on overview:** **BMI** and **Body fat estimate**, both on at first. Turning off **BMI** hides the BMI figure. Turning off **Body fat estimate** hides the body fat figure and the whole **Body fat** section, with its chart and waist measurements. Hiding one deletes nothing: your height and waist measurements stay saved, and turning it back on shows everything again. The choice is saved to your account, so it applies on every device you sign in on.
-- **Your data:** downloads your log or deletes it, as [Your data](#your-data) describes.
+- **Your data:** **Open Your data** goes to the Your data page, which [Your data](#your-data) describes.
 - **Account:** the email you're signed in with. **Manage account** opens Clerk's account page, where you change your email, password or sign-in methods. **Sign out** signs you out on this device. It needs a connection. If changes are still waiting to sync, it says how many and asks first, since signing out deletes them. The avatar at the top right can also manage your account or sign out.
 
-Entries and their notes, height, waist measurements and the body fat formula you chose, your goal, your units, what the overview shows and your reminder time are saved to your account, so the same log opens on any device you sign in on. A change shows right away and is saved in the background. Switching back to the tab picks up changes made on another device.
+Entries and their notes, height, waist measurements and the body fat formula you chose, your goal, your units, what the overview shows, your reminder time and your agreement to the health data policy are saved to your account, so the same log opens on any device you sign in on. A change shows right away and is saved in the background. Switching back to the tab picks up changes made on another device.
 
 Once Baseline has loaded on a device, it opens there without a connection, and you can keep logging. A change made offline, or while the connection fails, shows right away and is kept on the device. A message says "Saved on this device. It’ll sync when you’re back online.", and the line "Saved on this device · syncing when you’re back online" stays under the heading until the change is sent. Waiting changes survive a reload. Baseline sends them in the order you made them, one at a time, without you doing anything: when it opens with a connection, when the device comes back online, when you return to the tab, and once a minute while the device reports a connection. iOS has no background sync, so on an iPhone they wait until Baseline is open. Once they've all been sent, a message says "Synced." If the server turns down a change that waited on the device, because it isn't valid, the change is dropped and a message names it. If the server can't be reached for another reason, the line reads "Saved on this device · not synced yet" and Baseline keeps trying.
 
-Weigh-ins, their edits and deletions, waist measurements, height, the goal, units and what the overview shows can wait on the device. Reminders can't, because they change which devices get notifications, so offline the reminder dialog says they need a connection.
+Weigh-ins, their edits and deletions, waist measurements, height, the goal, units, what the overview shows and your agreement to the health data policy can wait on the device. The agreement goes ahead of everything else waiting, since the server saves nothing without it. Reminders can't, because they change which devices get notifications, so offline the reminder dialog says they need a connection.
 
 Each date has one weigh-in and one waist measurement, and the last change to reach the server wins, as it does for height, the goal, units and each choice of what the overview shows. A change made offline therefore replaces one made on another device in the meantime once it syncs, even if the other was made later. An edit to a weigh-in that another device deleted in the meantime changes nothing.
 
@@ -138,11 +138,11 @@ Baseline stores these in the browser on your device:
 
 Signing out removes the copy of your log, your user ID and any changes that haven't synced yet, so a shared computer keeps none of your weights. Deleting your data or your account also removes your weights and the changes waiting to sync from the device you delete it on, as [Your data](#your-data) describes. **Sign out** in **Settings** warns about changes that haven't synced and removes the copy before the session ends. The avatar menu doesn't warn, and it reloads the page as it signs out, so the copy goes once the page has loaded again. Before you sign out from the avatar menu, check that the "Saved on this device" line has gone. Clerk keeps its own sign-in data, and signing out ends that session.
 
-Earlier versions kept logs only in the browser. The first time an account with an empty online log signs in on such a browser, that browser's log moves into the account and is removed from the browser. An account that already has entries keeps them, and the browser's log is left untouched. An account whose data was deleted never takes in a browser's log, as [Your data](#your-data) describes.
+Earlier versions kept logs only in the browser. The first time an account with an empty online log signs in on such a browser, and once it has agreed to the health data policy, that browser's log moves into the account and is removed from the browser. An account that already has entries keeps them, and the browser's log is left untouched. An account whose data was deleted never takes in a browser's log, as [Your data](#your-data) describes.
 
 ## Your data
 
-**Your data**, in **Settings**, downloads your log or deletes it. Both downloads include changes still waiting on the device. On an iPhone or iPad with Baseline on the Home Screen, where a download does nothing useful, the share sheet opens instead, so you can save the file to Files.
+**Your data** is a page of its own, linked from **Settings** and from the bottom of every page of the app. It says what Baseline stores and where, what it never does and who handles your data, as the health data policy does in full (see [Privacy](#privacy)). It shows when you agreed to the policy, with **Withdraw**. And it downloads your log or deletes it. Both downloads include changes still waiting on the device. On an iPhone or iPad with Baseline on the Home Screen, where a download does nothing useful, the share sheet opens instead, so you can save the file to Files.
 
 **Download weigh-ins (CSV)** saves `baseline-weigh-ins-` and today's date, such as `baseline-weigh-ins-2026-11-23.csv`, for a spreadsheet. It has a row for each weigh-in, oldest first, with these columns:
 
@@ -167,12 +167,13 @@ The file is UTF-8 with a byte order mark and CRLF line ends, and a field with a 
   "sex": "female",
   "goal": { "weightKg": 75, "startDate": "2026-11-01", "startWeightKg": 84.91, "rateKgPerWeek": 0.5, "milestones": 10 },
   "reminder": { "hour": 8, "timeZone": "Europe/London" },
+  "consent": { "version": "2026-11-23", "agreedAt": "2026-11-23T09:40:12Z" },
   "entries": [{ "date": "2026-11-01", "weightKg": 85, "note": null }],
   "waists": [{ "date": "2026-11-02", "waistCm": 86.61 }]
 }
 ```
 
-`units` are the units Baseline shows, `preferences` says whether the overview shows BMI and body fat, and `sex` is the body fat formula you chose. `heightCm`, `sex`, `goal` and `reminder` are null when they aren't set, as is `rateKgPerWeek` for a goal without a target rate. The file holds no account ID, email address or push subscription.
+`units` are the units Baseline shows, `preferences` says whether the overview shows BMI and body fat, and `sex` is the body fat formula you chose. `consent` is the version of the health data policy you agreed to and when the server recorded it; `agreedAt` is null while an agreement made offline hasn't synced. `heightCm`, `sex`, `goal`, `reminder` and `consent` are null when they aren't set, as is `rateKgPerWeek` for a goal without a target rate. The file holds no account ID, email address or push subscription.
 
 **Delete my data** empties your log and keeps your account. **Delete my account** empties your log, then deletes your account and signs you out. Each opens a dialog that lists what goes and offers **Download a copy first**. It goes ahead only once you type "delete". Deleting needs a connection, and the log changes only once the server has deleted it. If that fails, the dialog says so and you can try again.
 
@@ -183,11 +184,86 @@ Either one deletes, from your account:
 - your goal and your height
 - your settings: units go back to kg and cm, and the overview shows BMI and body fat again
 - your reminder time and time zone, and every device that gets reminders, so reminders stop on all of them
+- your agreement to the health data policy, so Baseline asks for it again before it saves anything new
 
-**Delete my data** leaves an empty profile in its place. It counts as started, so a log from before accounts, in any browser, never moves back into the account. **Delete my account** leaves no row for your user ID in any table: `profiles`, `weigh_ins`, `waist_measurements` and `push_subscriptions`. Then it deletes your Clerk user, which signs you out, and the sign-in page says "Your account and all your data have been deleted." If your data is deleted but Clerk can't delete the account, the dialog says so, and **Try again** deletes only the account.
+**Withdraw**, next to your agreement, is **Delete my data** under another name: the dialog asks "Withdraw your agreement?", and its button reads **Withdraw and delete**. Withdrawing the agreement deletes the data it allowed Baseline to keep.
 
-On the device you delete on, Baseline also removes the copy of your log, changes waiting to sync, a log from before accounts and the hidden note about fast loss, and it unsubscribes the device from notifications. After **Delete my data**, the copy is replaced by the empty log. After **Delete my account**, your user ID goes too. Other devices show the empty log the next time they load it, and after an account is deleted they're signed out. A change still waiting on another device, because that device was offline, is saved into the emptied log when it syncs.
+**Delete my data** leaves an empty profile in its place, without the agreement, and the app shows the consent step until you agree again. The profile counts as started, so a log from before accounts, in any browser, never moves back into the account. **Delete my account** leaves no row for your user ID in any table: `profiles`, `weigh_ins`, `waist_measurements` and `push_subscriptions`. Then it deletes your Clerk user, which signs you out, and the sign-in page says "Your account and all your data have been deleted." If your data is deleted but Clerk can't delete the account, the dialog says so, and **Try again** deletes only the account.
+
+On the device you delete on, Baseline also removes the copy of your log, changes waiting to sync, a log from before accounts and the hidden note about fast loss, and it unsubscribes the device from notifications. After **Delete my data**, the copy is replaced by the empty log. After **Delete my account**, your user ID goes too. Other devices show the consent step the next time they load the log, and after an account is deleted they're signed out. A change still waiting on another device, because that device was offline, stays there when it tries to sync: the server turns it down for want of an agreement, and that device shows the consent step. Agreeing again saves it into the emptied log, and deleting the data there drops it.
 
 **Delete my account** needs the Clerk Dashboard setting that lets users delete their own accounts. Baseline reads it from the signed-in user's `deleteSelfEnabled`, and the button shows only when it's on. With it on, Clerk's own account page, from **Manage account** or the avatar menu, can delete the account too, but that removes only the Clerk user and leaves the log in the database. Use **Delete my account** in Baseline instead.
 
-Neon keeps a history of every change so the database can be restored to an earlier moment, and deleted rows stay in that history until its window passes. On Neon's Free plan, which the setup command above chooses, the window is 6 hours, which is both the plan's default and its maximum. The window shows under **Settings → Postgres → History window** in the Neon console. Paid plans default to 1 day and allow up to 7 days on Launch or 30 on Scale. A restore keeps the data it replaced in a backup branch named after the branch, `_old_` and the time. That branch keeps deleted rows until you delete it, so delete it once you've checked the restore.
+Neon keeps a history of every change so the database can be restored to an earlier moment, and deleted rows stay in that history until its window passes. On Neon's Free plan, which the setup command above chooses, the window is 6 hours, which is both the plan's default and its maximum. The window shows under **Settings → Postgres → History window** in the Neon console. Paid plans default to 1 day and allow up to 7 days on Launch or 30 on Scale. A restore keeps the data it replaced in a backup branch named after the branch, `_old_` and the time. That branch keeps deleted rows until you delete it, and the health data policy promises it's gone within 7 days, so delete it once you've checked the restore. `docs/breach-runbook.md` has the steps.
+
+## Privacy
+
+Baseline's privacy pages and documents:
+
+- **The health data privacy policy,** `baseline/dist/health-data-privacy.html`, served at `/health-data-privacy.html`. It's Baseline's consumer health data privacy policy, on a page of its own. It's linked from the sign-in screen, under the note about the log, and from the consent step, Your data and the bottom of every page of the app. The service worker keeps it, so it opens offline too.
+- **Your data,** at `#your-data` in the app. It's a one-page summary of the policy, as [Your data](#your-data) describes.
+- **[docs/processors.md](docs/processors.md):** each service that receives users' data, what it gets, where, and its data processing agreement, with the known gaps.
+- **[docs/breach-runbook.md](docs/breach-runbook.md):** what to do if data may have leaked. It covers rotating the keys, working out whose data was exposed, and the deadlines for telling people.
+
+All three are drafts and need a lawyer's review before Baseline relies on them. They name no person or business: `[name of the person or business responsible for Baseline]` and `[contact email address]` are placeholders to fill in. The policy shows a "Draft" notice at the top until it has been reviewed.
+
+### Agreeing to the policy
+
+After sign-in, before anything is saved, Baseline shows a consent step in place of the log. It says what Baseline stores and links the policy. It has an unticked box, "I agree to Baseline storing my health data as described", and **Continue**, which works only once the box is ticked.
+- Agreeing sends the `consent` op with the policy's version, `CONSENT_VERSION` in `model.mjs`, which is the policy's date.
+- The server stores the version in `profiles.consent_version`, and the time it received the agreement in `profiles.consented_at`.
+- Agreeing again to the same version keeps the first time.
+- An agreement made offline waits on the device ahead of other changes, and the log shows at once.
+
+Accounts made before this, existing logs included, see the same step on their next visit. Their log stays as it is, and nothing new is saved until they agree. Someone who doesn't agree can still sign out, delete their account, or download or delete their log, all from the step.
+
+The server enforces the agreement too:
+- Every change except agreeing and the ones that only remove data needs it. The exceptions are `delete-weight`, `delete-waist`, `clear-goal`, `clear-reminder`, `delete-data` and `delete-account` (`OPS_WITHOUT_CONSENT` in `server/ops.mjs`). An op added later needs the agreement unless it's added to that list.
+- The check runs first in the same transaction as the change: `require_consent`, a Postgres function in `server/schema.mjs`. It holds the profile row, so a deletion on another device can't slip in between.
+- Without the current version, the change is turned down with a 403, "Agree to the health data policy first.", and nothing changes.
+- Reading the log never needs the agreement.
+
+The app keeps a change the server turned down that way on the device, and shows the consent step until the user agrees. A log saved in the browser before accounts moves in only after the agreement.
+
+Deleting the data withdraws the agreement, since the profile is deleted with everything else. **Withdraw**, in Your data, opens that same deletion.
+
+**To change the policy:**
+1. Edit `health-data-privacy.html`.
+2. If the change is one people must agree to again, set `CONSENT_VERSION` and the date in the page's `<time id="policy-version">` to the new date. `npm test` fails until they match.
+3. Deploy. Everyone then sees the consent step again, which says the policy has changed since they agreed.
+
+Baseline sets no cookies of its own and no tracking cookies, so it has no cookie banner. The cookies Clerk sets keep people signed in.
+
+### What each promise rests on
+
+The policy and Your data make these promises. Each line says what makes it true. Where something outside the code makes it true, the line says so, and it needs checking when that changes.
+
+| Promise | What makes it true |
+|---|---|
+| Nothing is saved before you agree | `showState` in `app.mjs` shows the consent step until `hasConsent`, and the server's `require_consent` turns down every change in `needsConsent` (`server/ops.mjs`, `server/store.mjs`). Tests: `server/tests/api.test.mjs`. |
+| No analytics, ads or trackers, and the only outside code is Clerk's sign-in | `index.html` loads only `app.mjs`. `auth.mjs` loads scripts only from the Frontend API host in `config.mjs`. The app fetches only `/api/log`. Tests: `baseline/tests/page.test.mjs`. Clerk's sign-up can add Cloudflare's bot check, which the texts mention. |
+| Never sold or used for ads, and shared only with the services named | No code sends data anywhere but `/api/log`, as above. The server sends only the fixed reminder text to push services. The rest is a promise about conduct. |
+| No cookies of its own | No code sets `document.cookie` (`page.test.mjs`). Clerk's cookies are Clerk's. |
+| No location | No code uses `geolocation` (`page.test.mjs`). The time zone comes from `Intl` and is sent only with a reminder (`set-reminder`). IP addresses at Vercel and Clerk are mentioned. |
+| What's collected | The columns in `server/schema.mjs`, and Clerk's account data. |
+| Averages, BMI, body fat and forecasts aren't stored | They're calculated in `model.mjs` on each render, and `schema.mjs` has no column for them. |
+| The formula's sex is asked for only when logging a waist | The Formula choice is in the waist dialog. `save-waist` is the only op that sets `profiles.sex`. |
+| None of the log goes to Clerk | `app.mjs` and `auth.mjs` never write to the Clerk user. Comments in both say they never must. See `docs/processors.md`. |
+| Push services can't read a reminder | `encrypt` in `server/push.mjs` (RFC 8291), and the fixed `MESSAGE` in `server/reminders.mjs`. Tests: `server/tests/push.test.mjs`. |
+| Vercel's logs can include a value that failed to save | `console.error(error)` in `server/api.mjs` and `api/remind.mjs`. F4 is due to strip values from logs; update the texts then. |
+| Vercel keeps logs for up to a day | The Vercel plan: 1 hour on Hobby, 1 day on Pro. It isn't code; check the plan. |
+| The server is in the United States | `vercel.json` sets no regions, so functions run in Vercel's default, `iad1`. Check the project's settings. |
+| The database is in the United States, encrypted on disk | The setup command's `region=iad1`, and Neon's DPA. Check the Neon console. |
+| Deleted data stays in Neon's restore history for up to 6 hours | The Neon Free plan's history window. Check it in the Neon console, and change the texts if the plan changes. |
+| Baseline makes no other backups | No backup code exists. Check that the Neon project has no manual snapshot. |
+| A restore's backup branch goes within 7 days | A promise to keep by hand (`docs/breach-runbook.md`). |
+| Download has everything but the account and push addresses | `exportJson` in `export.mjs`. Tests: `baseline/tests/export.test.mjs`. |
+| Deleting takes effect on the server at once | `delete-data` and `delete-account` in `server/store.mjs` run in one transaction, and the app waits for the answer. |
+| Withdrawing deletes the log, and nothing new is saved until you agree again | **Withdraw** opens the `delete-data` dialog. `deleteRows` removes the profile and its agreement, and `require_consent` refuses changes until a new one. |
+| The device's copy goes when you sign out or delete | `clearLogCache` and `clearDeviceData` in `account.mjs`. Tests: `baseline/tests/account.test.mjs`. |
+| The server reads and writes only your own log | Every query in `server/store.mjs` is limited to the `user_id` from the session token that `server/auth.mjs` verifies. F4 adds row-level security. |
+| Encrypted connections | Vercel serves only HTTPS. It isn't code. |
+| Reminder devices are kept until reminders are turned off | `clear-reminder` and `removeDevices` in `server/store.mjs`. |
+| Unused accounts aren't deleted | No code deletes them. |
+| Changes to the policy ask again | `CONSENT_VERSION` and `hasConsent`. `page.test.mjs` checks that the policy's date matches. |
+| Answers to requests within one month, and appeals | A promise to keep by hand, at the contact address. |

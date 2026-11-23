@@ -1,9 +1,11 @@
-import { parseOp } from "./ops.mjs";
+import { ConsentRequired, parseOp } from "./ops.mjs";
 
 const reply = (status, body, headers = {}) => Response.json(body, { status, headers: { "Cache-Control": "no-store", ...headers } });
 
 // GET /api/log returns the signed-in user's log. POST /api/log applies one
-// change (see ops.mjs) and returns the updated log.
+// change (see ops.mjs) and returns the updated log. A change that saves data
+// gets a 403 until the account has agreed to the health data policy (see
+// needsConsent in ops.mjs); reading and deleting don't need the agreement.
 export function createHandler({ verifyUser, getStore, now = () => new Date() }) {
   return async function handle(request) {
     if (request.method !== "GET" && request.method !== "POST") return reply(405, { error: "Method not allowed." }, { Allow: "GET, POST" });
@@ -19,6 +21,7 @@ export function createHandler({ verifyUser, getStore, now = () => new Date() }) 
     try {
       return reply(200, await getStore().run(userId, change));
     } catch (error) {
+      if (error instanceof ConsentRequired) return reply(403, { error: error.message });
       console.error(error);
       return reply(500, { error: "Your log couldn't be reached. Try again." });
     }

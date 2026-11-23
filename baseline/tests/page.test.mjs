@@ -37,3 +37,51 @@ test("every module app.mjs loads, directly or not, is preloaded", async () => {
   assert.deepEqual([...seen].filter(name => !preloaded.has(name)), []);
   assert.deepEqual([...preloaded].filter(name => !seen.has(name)), []);
 });
+
+const policy = await read("health-data-privacy.html");
+// The part of index.html with this id, up to its closing tag.
+function section(html, id) {
+  const start = html.indexOf('id="' + id + '"');
+  assert.ok(start > 0, id);
+  const open = html.lastIndexOf("<", start);
+  const tag = /^<(\w+)/.exec(html.slice(open))[1];
+  return html.slice(open, html.indexOf("</" + tag + ">", start));
+}
+
+test("the health data policy carries the version people agree to", async () => {
+  const { CONSENT_VERSION } = await import("../dist/model.mjs");
+  assert.equal(/<time id="policy-version" datetime="([^"]+)"/.exec(policy)?.[1], CONSENT_VERSION, "change the policy's date with CONSENT_VERSION");
+  assert.match(policy, /<p class="policy-draft"><strong>Draft\.<\/strong>/, "marked as a draft until a lawyer has reviewed it");
+});
+
+test("the policy is linked from the sign-in screen, the consent step, Your data and the footer", () => {
+  const link = /href="\.\/health-data-privacy\.html"/;
+  for (const id of ["auth-note", "consent", "data-view"]) assert.match(section(page, id), link, id);
+  const footer = page.slice(page.indexOf('<footer class="app-footer">'), page.indexOf("</footer>"));
+  assert.match(footer, link);
+  assert.match(footer, /href="#your-data"/);
+});
+
+test("the consent step's box starts unticked, with the wording people agree to", () => {
+  const consent = section(page, "consent");
+  assert.match(consent, /Baseline stores the weights, measurements and notes you enter so it can show your trend\. They’re kept private and never sold or used for ads\./);
+  assert.match(consent, /I agree to Baseline storing my health data as described/);
+  const box = /<input type="checkbox" id="consent-agree"[^>]*>/.exec(consent)[0];
+  assert.doesNotMatch(box, /\bchecked\b/);
+});
+
+test("the pages run no outside code but Clerk's, and set no cookies", async () => {
+  // The app's one script is its own; the policy has none.
+  assert.deepEqual([...page.matchAll(/<script\b[^>]*>/g)].map(([tag]) => tag), ['<script type="module" src="./app.mjs">']);
+  assert.doesNotMatch(policy, /<script\b/);
+  const sources = Object.fromEntries(await Promise.all(["app.mjs", "model.mjs", "chart.mjs", "account.mjs", "export.mjs", "auth.mjs", "config.mjs", "sw.js"].map(async name => [name, await read(name)])));
+  for (const [name, source] of Object.entries(sources)) {
+    assert.doesNotMatch(source, /document\.cookie|sendBeacon|XMLHttpRequest|new WebSocket|new EventSource|geolocation/, name);
+    // The app talks only to its own API, and the worker only fetches what the page asked for.
+    for (const [call] of source.matchAll(/\bfetch\([^)]*\)?/g)) assert.match(call, /^fetch\(("\/api\/log"|request\))/, name + ": " + call);
+  }
+  // Clerk's scripts come only from the Frontend API host the publishable key names.
+  const loads = [...sources["auth.mjs"].matchAll(/loadScript\("([^"]*)" \+ (\w+) \+/g)].map(match => match[1] + match[2]);
+  assert.deepEqual(loads, ["https://host", "https://host"]);
+  assert.match(sources["auth.mjs"], /const host = frontendApiFor\(CLERK_PUBLISHABLE_KEY\)/);
+});

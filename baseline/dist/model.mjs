@@ -318,6 +318,28 @@ export function preferencesChange(value) {
   return entries.length && entries.every(([key, item]) => validPreference(key, item)) ? Object.fromEntries(entries) : null;
 }
 
+// The version of the health data policy (health-data-privacy.html) that the
+// consent step asks people to agree to: the date on the policy. The server
+// keeps the version each account agreed to (see the consent op in
+// server/ops.mjs), and turns down every change that saves data until it is
+// this one. Change it, with the date on the policy page, when the policy
+// changes in a way people must agree to again. npm test checks they match.
+export const CONSENT_VERSION = "2026-11-23";
+
+// The version of the policy an account agreed to, and when, as an ISO time
+// from the server. `at` is null while an agreement made on this device is on
+// its way to the server. Null when the account hasn't agreed to any version.
+export function normalizeConsent(value) {
+  const version = value?.version;
+  if (typeof version !== "string" || !/^[\w.-]{1,32}$/.test(version)) return null;
+  const at = typeof value.at === "string" && Number.isFinite(Date.parse(value.at)) ? value.at : null;
+  return { version, at };
+}
+
+// Whether a log's account has agreed to the current policy. Until it has, the
+// app shows the consent step in place of the log.
+export const hasConsent = log => log?.consent?.version === CONSENT_VERSION;
+
 export function normalizeState(value) {
   const byDate = new Map();
   for (const item of Array.isArray(value?.entries) ? value.entries : []) {
@@ -338,7 +360,9 @@ export function normalizeState(value) {
   const units = normalizeUnits(value?.units);
   const reminder = normalizeReminder(value?.reminder);
   const preferences = normalizePreferences(value?.preferences);
-  return { version: 1, started: Boolean(value?.started || entries.length || height || goal || waists.length), height, sex, goal, units, preferences, reminder, entries, waists };
+  // Agreeing to the policy saves no data, so it doesn't start the log.
+  const consent = normalizeConsent(value?.consent);
+  return { version: 1, started: Boolean(value?.started || entries.length || height || goal || waists.length), consent, height, sex, goal, units, preferences, reminder, entries, waists };
 }
 
 // Adds or replaces the waist measurement on `date`, and sets which body fat
@@ -358,7 +382,7 @@ const CHANGE_TARGETS = {
   "save-waist": "waist", "delete-waist": "waist",
   "set-goal": "goal", "clear-goal": "goal",
   "set-reminder": "reminder", "clear-reminder": "reminder",
-  "set-height": "height", "set-units": "units"
+  "set-height": "height", "set-units": "units", "consent": "consent"
 };
 
 export function changeTarget(change) {
@@ -382,8 +406,9 @@ export function saveWeight(state, date, weight, note) {
 
 // The changes that can wait on the device while it's offline and be sent
 // later, in order (see the outbox in app.mjs). Reminders need a live push
-// subscription, so they aren't among them.
-export const QUEUEABLE_OPS = ["save-weight", "update-weight", "delete-weight", "set-height", "save-waist", "delete-waist", "set-goal", "clear-goal", "set-units", "set-preferences"];
+// subscription, so they aren't among them. Agreeing to the health data policy
+// can wait too, and goes ahead of the changes it allows (see agree in app.mjs).
+export const QUEUEABLE_OPS = ["save-weight", "update-weight", "delete-weight", "set-height", "save-waist", "delete-waist", "set-goal", "clear-goal", "set-units", "set-preferences", "consent"];
 
 // Applies a change the app sends (see server/ops.mjs) to a normalized log, as
 // server/store.mjs does on the server, so the screen can show changes that
@@ -427,6 +452,11 @@ export function applyOp(state, change) {
     }
     case "clear-reminder":
       return normalizeState({ ...state, reminder: null });
+    // The server records when it receives the agreement, so until then it has
+    // no time. Agreeing again to the same version keeps the first time, as on the server.
+    case "consent":
+      if (change.version !== CONSENT_VERSION) throw new Error("Agree to the current policy.");
+      return hasConsent(state) ? state : normalizeState({ ...state, consent: { version: change.version, at: null } });
     case "start":
       return normalizeState({ ...state, started: true });
     default:

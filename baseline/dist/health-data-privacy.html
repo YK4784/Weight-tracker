@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f6f5f1" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#121315" media="(prefers-color-scheme: dark)">
+  <meta name="description" content="What health data Baseline collects, why, who handles it, how long it’s kept, and how to download it, delete it or withdraw your agreement.">
+  <title>Health data privacy policy · Baseline</title>
+  <link rel="icon" href="./mark.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+  <link rel="preload" href="./fonts/funnel-sans-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<!-- Baseline's consumer health data privacy policy. It is a separate page, with
+     only this policy on it, linked from the sign-in screen, the consent step,
+     Your data and the app's footer. Every sentence must stay true to the code:
+     README.md's "Privacy" section lists what backs each claim. The version date
+     below is CONSENT_VERSION in model.mjs; npm test checks they match. When the
+     policy changes in a way people must agree to again, change both. -->
+<body class="policy-page">
+  <a class="skip-link" href="#policy">Skip to content</a>
+  <header class="masthead">
+    <div class="wrap masthead-inner">
+      <a class="wordmark" href="./">Baseline</a>
+    </div>
+  </header>
+
+  <main class="wrap policy" id="policy" tabindex="-1">
+    <p class="policy-draft"><strong>Draft.</strong> This policy hasn’t been reviewed by a lawyer yet. Details in [square brackets] are still to be filled in.</p>
+
+    <h1>Health data privacy policy</h1>
+    <p class="policy-version">Version of <time id="policy-version" datetime="2026-11-23">November 23, 2026</time>. There are no earlier versions.</p>
+
+    <p class="policy-lead">This is Baseline’s consumer health data privacy policy. It covers the health data Baseline collects and why, who handles it, how long it’s kept, and how you can download it, delete it or withdraw your agreement. Baseline is run by [name of the person or business responsible for Baseline].</p>
+
+    <section aria-labelledby="short-title">
+      <h2 id="short-title">In short</h2>
+      <ul>
+        <li>Baseline stores the weights, measurements and notes you enter so it can show your trend.</li>
+        <li>It never sells your data or uses it for ads, and has no analytics or trackers.</li>
+        <li>Four services handle data for Baseline: Vercel, Neon, Clerk and, for reminders, your browser’s push service.</li>
+        <li>You can download your data or delete it at any time, in Your data.</li>
+        <li>Nothing is saved until you agree to this policy, and withdrawing your agreement deletes your data.</li>
+      </ul>
+    </section>
+
+    <section aria-labelledby="collect-title">
+      <h2 id="collect-title">What Baseline collects, and why</h2>
+      <dl class="policy-list">
+        <div><dt>Weigh-ins</dt><dd>The date and weight of each weigh-in, and any note you add, for your 14-day average, weekly trend, chart, forecasts and monthly summary. A note is whatever you type, so it can say something about your health. Write only what you want kept.</dd></div>
+        <div><dt>Height</dt><dd>For your BMI.</dd></div>
+        <div><dt>Waist measurements</dt><dd>Each waist measurement, and whether the male or female formula applies, for your body fat estimate. Baseline asks which formula to use only when you log a waist.</dd></div>
+        <div><dt>Your goal</dt><dd>Your goal weight, start date and start weight, an optional target rate and the number of milestones, for your progress and forecasts.</dd></div>
+        <div><dt>Your settings</dt><dd>Your units, and whether the overview shows BMI and body fat.</dd></div>
+        <div><dt>Reminders</dt><dd>If you turn them on: the hour, your time zone, and a push address for each device that gets them, so Baseline can send a reminder on days you haven’t weighed in.</dd></div>
+        <div><dt>Your agreement</dt><dd>Which version of this policy you agreed to, and when.</dd></div>
+        <div><dt>Your account</dt><dd>Your email address and, if you sign in with Google, your name and profile picture. Clerk, which runs sign-in, also records your sign-ins, such as the time, browser and IP address.</dd></div>
+      </dl>
+      <p>Baseline works out your averages, trend, BMI, body fat and forecasts in your browser each time it shows them, and doesn’t store them.</p>
+    </section>
+
+    <section aria-labelledby="source-title">
+      <h2 id="source-title">Where it comes from</h2>
+      <p>Only from you. Baseline doesn’t get health data from anyone else, and doesn’t buy data. If you sign in with Google, Google gives Clerk your name, email address and profile picture.</p>
+    </section>
+
+    <section aria-labelledby="not-title">
+      <h2 id="not-title">What Baseline doesn’t collect</h2>
+      <ul>
+        <li>No analytics, advertising or tracking code runs on Baseline’s pages. The only code on them that isn’t Baseline’s own is Clerk’s sign-in, which can add a bot check from Cloudflare when you sign up.</li>
+        <li>Baseline sets no cookies of its own. Clerk sets cookies that keep you signed in, and they aren’t used for tracking or ads.</li>
+        <li>Baseline never asks for your location. The time zone saved with a reminder is the only clue it keeps to where you are, though the IP addresses that Vercel and Clerk record can show roughly where a request came from.</li>
+        <li>Baseline reads nothing from other apps, your contacts, your photos or your device’s sensors.</li>
+      </ul>
+    </section>
+
+    <section aria-labelledby="who-title">
+      <h2 id="who-title">Who handles it</h2>
+      <p>These services handle data so that Baseline can work. None of them gets more than the description says.</p>
+      <dl class="policy-list">
+        <div><dt>Vercel</dt><dd>Hosts Baseline’s pages and runs its server, which is in the United States. Vercel sees every request, with your IP address and browser. The server writes its errors to Vercel’s logs, and an error from the database can include the value it was saving, such as a weight. Vercel keeps these logs for up to a day.</dd></div>
+        <div><dt>Neon</dt><dd>Hosts Baseline’s database in the United States. It holds everything under “What Baseline collects” except your account, and encrypts it on disk. Neon is part of Databricks.</dd></div>
+        <div><dt>Clerk</dt><dd>Runs sign-in and keeps your account. Its sign-in form and account menu run on Baseline’s pages. Baseline sends none of your health data to Clerk. Clerk is based in the United States.</dd></div>
+        <div><dt>Push services</dt><dd>Only if you turn reminders on. Your browser’s push service delivers them: Apple for Safari, Microsoft for Edge, Mozilla for Firefox, and Google for Chrome and most other browsers. Each reminder is encrypted for your device, so the service can’t read it. It does see when one is sent, which can show that you hadn’t weighed in that day.</dd></div>
+        <div><dt>Google</dt><dd>Only if you sign in with Google. Google knows you signed in to Baseline, and gets none of your health data.</dd></div>
+      </dl>
+      <p>Baseline shares your data with no one else. It never sells your data and never uses it for ads.</p>
+    </section>
+
+    <section aria-labelledby="keep-title">
+      <h2 id="keep-title">How long it’s kept</h2>
+      <dl class="policy-list">
+        <div><dt>Your log, settings and agreement</dt><dd>Until you delete them, your data or your account. Baseline doesn’t delete accounts that go unused.</dd></div>
+        <div><dt>Reminder devices</dt><dd>Until you turn reminders off or delete your data, or the push service ends the device’s subscription.</dd></div>
+        <div><dt>Your account at Clerk</dt><dd>Until you delete your account.</dd></div>
+        <div><dt>Server logs at Vercel</dt><dd>Up to a day.</dd></div>
+        <div><dt>Neon’s restore history</dt><dd>Neon keeps a history of every change, so the database can be put back as it was after a mistake. Deleted data stays in that history for up to 6 hours, and then it’s gone. If the database is ever restored, Neon keeps a copy from before the restore, and Baseline deletes that copy within 7 days. Baseline makes no other backups.</dd></div>
+        <div><dt>On your device</dt><dd>Baseline keeps a copy of your log and any changes waiting to sync in your browser, so it opens offline. Signing out, or deleting your data on that device, removes them.</dd></div>
+      </dl>
+    </section>
+
+    <section aria-labelledby="rights-title">
+      <h2 id="rights-title">Your choices</h2>
+      <p>Baseline gives everyone these choices, wherever they live. Most of them are in <a class="text-link" href="./#your-data">Your data</a>, linked from Settings and from the bottom of Baseline’s pages.</p>
+      <dl class="policy-list">
+        <div><dt>Download</dt><dd><strong>Download weigh-ins (CSV)</strong> saves your weigh-ins for a spreadsheet. <strong>Download everything (JSON)</strong> saves everything under “What Baseline collects” except your account and your devices’ push addresses.</dd></div>
+        <div><dt>Correct</dt><dd>Edit any weigh-in, waist measurement, goal or height in Baseline, and delete any weigh-in, waist measurement or goal. Change your email address in <strong>Manage account</strong>, in Settings.</dd></div>
+        <div><dt>Delete</dt><dd><strong>Delete my data</strong> deletes your log and keeps your account. <strong>Delete my account</strong> deletes your log and then your account. Either takes effect on the server at once, and leaves your data only in Neon’s restore history, for up to 6 hours. Your other devices drop their copy the next time they load your log.</dd></div>
+        <div><dt>Withdraw your agreement</dt><dd><strong>Withdraw</strong>, in Your data, deletes your log as Delete my data does, because Baseline keeps health data only with your agreement. Baseline then saves nothing new until you agree again.</dd></div>
+        <div><dt>Ask</dt><dd>To ask what Baseline holds about you and who has received it, for a copy, or about anything in this policy, email [contact email address]. Baseline answers within one month, at no charge.</dd></div>
+        <div><dt>Appeal</dt><dd>If Baseline turns down a request, reply to its answer with “Appeal” in the subject. Baseline answers an appeal within one month.</dd></div>
+        <div><dt>Complain</dt><dd>You can also complain to the data protection authority or attorney general where you live.</dd></div>
+      </dl>
+    </section>
+
+    <section aria-labelledby="safe-title">
+      <h2 id="safe-title">Keeping it safe</h2>
+      <p>Baseline’s pages and server talk over encrypted connections. The server answers only requests that carry your Clerk sign-in, and reads and writes only your own log. If your data is ever exposed in a breach, Baseline will tell you.</p>
+    </section>
+
+    <section aria-labelledby="changes-title">
+      <h2 id="changes-title">Changes to this policy</h2>
+      <p>When this policy changes, the date at the top changes too. If a change affects what Baseline does with your health data, Baseline asks you to agree again before it saves anything new.</p>
+    </section>
+
+    <section aria-labelledby="contact-title">
+      <h2 id="contact-title">Contact</h2>
+      <p>[Name of the person or business responsible for Baseline], [contact email address].</p>
+    </section>
+
+    <p class="policy-back"><a class="text-link" href="./">Back to Baseline</a></p>
+  </main>
+</body>
+</html>

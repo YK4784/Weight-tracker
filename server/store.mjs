@@ -1,15 +1,17 @@
 import { neon } from "@neondatabase/serverless";
 import { schema } from "./schema.mjs";
-import { normalizePreferences } from "../baseline/dist/model.mjs";
+import { CONSENT_VERSION, normalizeConsent, normalizePreferences } from "../baseline/dist/model.mjs";
+import { CONSENT_ERROR_CODE, ConsentRequired, needsConsent } from "./ops.mjs";
 
 // The most devices an account can get reminders on.
 export const MAX_DEVICES = 10;
 
 // Reads and writes logs in Postgres. Each call is one HTTP round trip: the
 // change and a fresh read of the log run together in a single transaction.
-export function createStore(url = process.env.DATABASE_URL) {
+// `connect` makes the query function from the URL; tests pass a fake one.
+export function createStore(url = process.env.DATABASE_URL, { connect = neon } = {}) {
   if (!url) throw new Error("DATABASE_URL is not set. Connect the Neon database to this project.");
-  const sql = neon(url);
+  const sql = connect(url);
   let ready;
   const ensureSchema = () => ready ??= sql.transaction(schema.map(text => sql.query(text))).catch(error => {
     ready = undefined;
@@ -104,16 +106,27 @@ export function createStore(url = process.env.DATABASE_URL) {
       case "start":
         return [sql`INSERT INTO profiles (user_id, started) VALUES (${userId}, true)
                     ON CONFLICT (user_id) DO UPDATE SET started = true, updated_at = now()`];
+      // Records the agreement and when it arrived. It doesn't start the log, so
+      // a log saved in this browser before accounts can still move in after it.
+      // Agreeing again to the same version keeps the first time.
+      case "consent":
+        return [sql`INSERT INTO profiles (user_id, consent_version, consented_at) VALUES (${userId}, ${change.version}, now())
+                    ON CONFLICT (user_id) DO UPDATE SET consent_version = excluded.consent_version,
+                      consented_at = CASE WHEN profiles.consent_version = excluded.consent_version THEN profiles.consented_at ELSE excluded.consented_at END,
+                      updated_at = now()`];
       case "import":
-        // Only into an account with nothing saved yet, so a stale copy never overwrites newer data.
+        // Only into an account with nothing saved yet, so a stale copy never
+        // overwrites newer data. The profile may already hold the agreement to
+        // the policy, or a reminder, but nothing that started the log.
         return [sql`
           WITH empty AS (
-            SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM profiles WHERE user_id = ${userId})
+            SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM profiles WHERE user_id = ${userId} AND started)
                        AND NOT EXISTS (SELECT 1 FROM weigh_ins WHERE user_id = ${userId})
           ), profile AS (
             INSERT INTO profiles (user_id, started, height_cm)
             SELECT ${userId}, true, ${change.height}::numeric FROM empty
-            ON CONFLICT (user_id) DO NOTHING
+            ON CONFLICT (user_id) DO UPDATE SET started = true, height_cm = excluded.height_cm, updated_at = now()
+              WHERE NOT profiles.started
             RETURNING 1
           ), entries AS (
             INSERT INTO weigh_ins (user_id, date, weight_kg, note)
@@ -139,22 +152,35 @@ export function createStore(url = process.env.DATABASE_URL) {
 
   return {
     // Applies `change` (or nothing, for a plain read) and returns the user's log.
+    // A change that saves data first checks, in the same transaction, that the
+    // account agreed to the current health data policy, and throws
+    // ConsentRequired without changing anything if it hasn't.
     async run(userId, change = null) {
       await ensureSchema();
+      const guard = needsConsent(change) ? [sql`SELECT require_consent(${userId}, ${CONSENT_VERSION})`] : [];
       const queries = writes(userId, change);
-      const results = await sql.transaction([
-        ...queries,
-        sql`SELECT started, height_cm::float8 AS height, goal_kg::float8 AS goal_weight,
-                   to_char(goal_start_date, 'YYYY-MM-DD') AS goal_start_date, goal_start_kg::float8 AS goal_start_weight,
-                   goal_rate_kg_week::float8 AS goal_rate, goal_milestones, weight_unit, height_unit, preferences, reminder_hour, time_zone, sex
-            FROM profiles WHERE user_id = ${userId}`,
-        sql`SELECT to_char(date, 'YYYY-MM-DD') AS date, weight_kg::float8 AS weight, note
-            FROM weigh_ins WHERE user_id = ${userId} ORDER BY date`,
-        sql`SELECT to_char(date, 'YYYY-MM-DD') AS date, waist_cm::float8 AS waist
-            FROM waist_measurements WHERE user_id = ${userId} ORDER BY date`,
-        sql`SELECT endpoint FROM push_subscriptions WHERE user_id = ${userId} ORDER BY created_at, endpoint`
-      ]);
+      let results;
+      try {
+        results = await sql.transaction([
+          ...guard,
+          ...queries,
+          sql`SELECT started, height_cm::float8 AS height, goal_kg::float8 AS goal_weight,
+                     to_char(goal_start_date, 'YYYY-MM-DD') AS goal_start_date, goal_start_kg::float8 AS goal_start_weight,
+                     goal_rate_kg_week::float8 AS goal_rate, goal_milestones, weight_unit, height_unit, preferences, reminder_hour, time_zone, sex,
+                     consent_version, to_char(consented_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS consented_at
+              FROM profiles WHERE user_id = ${userId}`,
+          sql`SELECT to_char(date, 'YYYY-MM-DD') AS date, weight_kg::float8 AS weight, note
+              FROM weigh_ins WHERE user_id = ${userId} ORDER BY date`,
+          sql`SELECT to_char(date, 'YYYY-MM-DD') AS date, waist_cm::float8 AS waist
+              FROM waist_measurements WHERE user_id = ${userId} ORDER BY date`,
+          sql`SELECT endpoint FROM push_subscriptions WHERE user_id = ${userId} ORDER BY created_at, endpoint`
+        ]);
+      } catch (error) {
+        throw error?.code === CONSENT_ERROR_CODE ? new ConsentRequired() : error;
+      }
       const [[profile], entries, waists, devices] = results.slice(-4);
+      // What the change's own query returned, after the guard.
+      const written = results[guard.length];
       const goal = profile?.goal_weight == null ? null : {
         weight: profile.goal_weight, startDate: profile.goal_start_date, startWeight: profile.goal_start_weight,
         rate: profile.goal_rate, milestones: profile.goal_milestones
@@ -165,9 +191,10 @@ export function createStore(url = process.env.DATABASE_URL) {
       // Reminders are off without a device to send them to.
       const reminder = profile?.reminder_hour == null || !devices.length ? null
         : { hour: profile.reminder_hour, timeZone: profile.time_zone, devices: devices.map(device => device.endpoint) };
-      const result = { log: { started: Boolean(profile?.started), height: profile?.height ?? null, sex: profile?.sex ?? null, goal, units, preferences, reminder, entries, waists } };
-      if (change?.op === "update-weight") result.found = results[0].length > 0;
-      if (change?.op === "import") result.imported = results[0][0]?.imported > 0;
+      const consent = normalizeConsent({ version: profile?.consent_version, at: profile?.consented_at });
+      const result = { log: { started: Boolean(profile?.started), consent, height: profile?.height ?? null, sex: profile?.sex ?? null, goal, units, preferences, reminder, entries, waists } };
+      if (change?.op === "update-weight") result.found = written.length > 0;
+      if (change?.op === "import") result.imported = written[0]?.imported > 0;
       return result;
     },
 
