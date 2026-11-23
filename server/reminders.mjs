@@ -1,3 +1,5 @@
+import { describeError } from "./log.mjs";
+
 // Weigh-in reminders. Vercel runs api/remind.mjs once an hour, a few minutes
 // after the hour. Each run finds the accounts whose reminder hour has come in
 // their own time zone and sends a push message to each of their devices,
@@ -63,7 +65,8 @@ export async function sendReminders({ store, send, now = new Date() }) {
     else if (status === 404 || status === 410) gone.push(devices[index].endpoint);
     else {
       summary.failed++;
-      console.error("A reminder couldn't be sent:", status ?? result.reason?.message);
+      // The push service's status, or the kind of error, never the device's endpoint.
+      console.error("A reminder couldn't be sent: " + (status ?? describeError(result.reason)));
     }
   });
   summary.gone = gone.length;

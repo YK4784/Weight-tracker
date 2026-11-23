@@ -1,4 +1,5 @@
 import { ConsentRequired, parseOp } from "./ops.mjs";
+import { logError } from "./log.mjs";
 
 const reply = (status, body, headers = {}) => Response.json(body, { status, headers: { "Cache-Control": "no-store", ...headers } });
 
@@ -22,7 +23,9 @@ export function createHandler({ verifyUser, getStore, now = () => new Date() }) 
       return reply(200, await getStore().run(userId, change));
     } catch (error) {
       if (error instanceof ConsentRequired) return reply(403, { error: error.message });
-      console.error(error);
+      // Only the kind of error and its code, since a database error can carry
+      // the values being saved (see log.mjs). The op is one parseOp knows.
+      logError(request.method + " /api/log" + (change ? " " + change.op : ""), error);
       return reply(500, { error: "Your log couldn't be reached. Try again." });
     }
   };

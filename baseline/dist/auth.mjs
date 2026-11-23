@@ -60,6 +60,9 @@ export async function startClerk() {
   }
   const clerk = window.Clerk;
   if (!clerk?.load) throw new Error("Clerk didn't initialize.");
-  await clerk.load({ ui: { ClerkUI: window.__internal_ClerkUICtor }, appearance });
+  // Without telemetry, a development instance doesn't report which of its
+  // components the page uses to clerk-telemetry.com, so Clerk's scripts talk
+  // only to the Frontend API, which the Content Security Policy allows.
+  await clerk.load({ ui: { ClerkUI: window.__internal_ClerkUICtor }, appearance, telemetry: false });
   return clerk;
 }

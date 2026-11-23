@@ -1,6 +1,7 @@
 import { createCipheriv, createECDH, createHmac, createPrivateKey, randomBytes } from "node:crypto";
 import { SignJWT } from "jose";
 import { PUSH_PUBLIC_KEY } from "../baseline/dist/config.mjs";
+import { SetupError } from "./log.mjs";
 
 // The push services of Chrome and other Chromium browsers, Edge, Firefox and
 // Safari. The server posts to a device's endpoint, so it only accepts endpoints
@@ -66,12 +67,12 @@ export function createPusher({
   subject = process.env.VAPID_SUBJECT || (process.env.VERCEL_PROJECT_PRODUCTION_URL && "https://" + process.env.VERCEL_PROJECT_PRODUCTION_URL),
   fetch = globalThis.fetch
 } = {}) {
-  if (!privateKey) throw new Error("VAPID_PRIVATE_KEY is not set. Add it to the project's environment variables.");
-  if (!subject) throw new Error("Set VAPID_SUBJECT to the site's https:// address or a mailto: address.");
+  if (!privateKey) throw new SetupError("VAPID_PRIVATE_KEY is not set. Add it to the project's environment variables.", "NO_VAPID_PRIVATE_KEY");
+  if (!subject) throw new SetupError("Set VAPID_SUBJECT to the site's https:// address or a mailto: address.", "NO_VAPID_SUBJECT");
   const ecdh = createECDH("prime256v1");
   ecdh.setPrivateKey(Buffer.from(privateKey, "base64url"));
   const raw = Buffer.from(publicKey, "base64url");
-  if (!ecdh.getPublicKey().equals(raw)) throw new Error("VAPID_PRIVATE_KEY doesn't match PUSH_PUBLIC_KEY in config.mjs.");
+  if (!ecdh.getPublicKey().equals(raw)) throw new SetupError("VAPID_PRIVATE_KEY doesn't match PUSH_PUBLIC_KEY in config.mjs.", "VAPID_KEY_MISMATCH");
   const signingKey = createPrivateKey({
     key: { kty: "EC", crv: "P-256", d: privateKey, x: raw.subarray(1, 33).toString("base64url"), y: raw.subarray(33).toString("base64url") },
     format: "jwk"
@@ -80,7 +81,7 @@ export function createPusher({
   // Resolves to the push service's HTTP status: 201 when it accepted the
   // message, and 404 or 410 when the subscription no longer exists.
   return async function send(subscription, message, { ttl = 3600, topic, urgency = "normal", now = Date.now() } = {}) {
-    if (!knownPushService(subscription.endpoint)) throw new Error("Not a known push service.");
+    if (!knownPushService(subscription.endpoint)) throw Object.assign(new Error("Not a known push service."), { code: "UNKNOWN_PUSH_SERVICE" });
     const token = await new SignJWT({ aud: new URL(subscription.endpoint).origin, exp: Math.floor(now / 1000) + 12 * 3600, sub: subject })
       .setProtectedHeader({ typ: "JWT", alg: "ES256" })
       .sign(signingKey);

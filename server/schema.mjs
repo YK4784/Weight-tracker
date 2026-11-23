@@ -115,5 +115,49 @@ export const schema = [
     END
     $body$;
   EXCEPTION WHEN duplicate_function OR unique_violation THEN NULL;
+  END $$`,
+  // Row-level security: a second lock behind the WHERE clauses in store.mjs.
+  // Each table shows and accepts only the rows whose user_id is the request's
+  // app.user_id, which store.mjs sets first in every request's transaction.
+  // Without the setting, no rows at all. It binds every role but the tables'
+  // owner, so the app's requests run as a role that owns nothing
+  // (DATABASE_URL_APP), and the owner (DATABASE_URL) keeps creating tables and
+  // running the reminder job, which reads across accounts. A new table keyed
+  // by user_id must be added to this list (npm test checks). Each step runs
+  // only when it's missing, and a policy another cold start has just created
+  // is left as it is.
+  `DO $$
+  DECLARE
+    tab text;
+  BEGIN
+    FOREACH tab IN ARRAY ARRAY['profiles', 'weigh_ins', 'waist_measurements', 'push_subscriptions'] LOOP
+      IF NOT EXISTS (SELECT 1 FROM pg_class WHERE oid = to_regclass(quote_ident(tab)) AND relrowsecurity) THEN
+        EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', tab);
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = current_schema() AND tablename = tab AND policyname = 'own_rows') THEN
+        BEGIN
+          EXECUTE format($policy$CREATE POLICY own_rows ON %I
+            USING (user_id = current_setting('app.user_id', true))
+            WITH CHECK (user_id = current_setting('app.user_id', true))$policy$, tab);
+        EXCEPTION WHEN duplicate_object OR unique_violation THEN NULL;
+        END;
+      END IF;
+    END LOOP;
+  END $$`,
+  // A device moves to whichever account turns reminders on with it last (see
+  // set-reminder in store.mjs). Under row-level security the account taking
+  // it can't see the other account's row, so this deletes that row first, as
+  // the owner. It touches only the one endpoint, and only while a request has
+  // set app.user_id. Created once, like require_consent, with the search path
+  // fixed to this schema, as a function that runs as its owner should be.
+  `DO $$
+  BEGIN
+    EXECUTE format($create$
+      CREATE FUNCTION release_device(device text) RETURNS void LANGUAGE sql SECURITY DEFINER SET search_path = %I, pg_temp AS $body$
+        DELETE FROM push_subscriptions
+        WHERE endpoint = device AND current_setting('app.user_id', true) <> '' AND user_id <> current_setting('app.user_id', true)
+      $body$
+    $create$, current_schema());
+  EXCEPTION WHEN duplicate_function OR unique_violation THEN NULL;
   END $$`
 ];

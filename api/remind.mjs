@@ -1,6 +1,7 @@
 import { createPusher } from "../server/push.mjs";
 import { isScheduleRun, sendReminders } from "../server/reminders.mjs";
 import { createStore } from "../server/store.mjs";
+import { logError } from "../server/log.mjs";
 
 let store;
 let send;
@@ -14,10 +15,11 @@ export default {
     try {
       store ??= createStore();
       send ??= createPusher();
+      // Counts only, without any account or device (see sendReminders).
       console.log("Reminders:", JSON.stringify(await sendReminders({ store, send })));
       return new Response(null, { status: 200 });
     } catch (error) {
-      console.error(error);
+      logError("The reminder run", error);
       return Response.json({ error: "The reminder run failed." }, { status: 500 });
     }
   }

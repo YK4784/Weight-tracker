@@ -5,6 +5,7 @@ import { readFile } from "node:fs/promises";
 import { CONSENT_ERROR_CODE, ConsentRequired, DELETE_WORD, MAX_IMPORT_ENTRIES, OPS_WITHOUT_CONSENT, latestDate, needsConsent, parseOp } from "../ops.mjs";
 import { schema } from "../schema.mjs";
 import { createStore } from "../store.mjs";
+import { SetupError, describeError, logError, requestId } from "../log.mjs";
 import { CONSENT_VERSION } from "../../baseline/dist/model.mjs";
 
 const NOW = new Date("2026-11-22T23:30:00Z");
@@ -348,28 +349,162 @@ function fakeStore(answer) {
 // The read at the end of every transaction: a profile, weigh-ins, waists and devices.
 const READS = [[{ started: true, consent_version: CONSENT_VERSION, consented_at: "2026-11-23T09:41:00Z", weight_unit: "kg", height_unit: "cm", preferences: {} }], [], [], []];
 
-test("the store checks the agreement first, in the same transaction as a change that saves data", async () => {
+// The first statement of every request: row-level security reads the user from it.
+const SETTING = /^SELECT set_config\('app\.user_id', \$\d*, true\)$/;
+
+test("the store sets the user for row-level security first, then checks the agreement, in the same transaction as the change", async () => {
   const { store, transactions } = fakeStore(queries => [...queries.slice(0, -4).map(() => [{ "?column?": 1 }]), ...READS]);
   await store.run("user_1", parseOp({ op: "save-weight", date: "2026-11-22", weight: 80 }, NOW));
-  const [guard, ...rest] = transactions[0];
+  const [setting, guard, ...rest] = transactions[0];
+  assert.match(setting.text, SETTING);
+  assert.deepEqual(setting.params, ["user_1"]);
   assert.match(guard.text, /^SELECT require_consent\(\$/);
   assert.deepEqual(guard.params, ["user_1", CONSENT_VERSION]);
   assert.equal(rest.length, 2 + 4, "the weigh-in's two writes, then the four reads");
   for (const op of ["delete-weight", "consent", "delete-data", "clear-goal"]) {
     await store.run("user_1", parseOp({ op, ...VALID_OPS[op] }, NOW));
-    assert.doesNotMatch(transactions.at(-1)[0].text, /require_consent/, op);
+    assert.match(transactions.at(-1)[0].text, SETTING, op);
+    assert.doesNotMatch(transactions.at(-1)[1].text, /require_consent/, op);
   }
   await store.run("user_1");
-  assert.equal(transactions.at(-1).length, 4, "a read is only the reads");
+  assert.equal(transactions.at(-1).length, 1 + 4, "a read is the setting and the reads");
 });
 
-test("the store reads the change's own result after the guard", async () => {
-  const { store } = fakeStore(queries => [[], ...queries.slice(1, -4).map(() => []), ...READS]);
+test("every request's transaction starts by setting the signed-in user, whatever the change", async () => {
+  const { store, transactions } = fakeStore(queries => [...queries.slice(0, -4).map(() => [{ imported: 0 }]), ...READS]);
+  for (const op of [null, ...Object.keys(VALID_OPS)]) {
+    await store.run("user_" + op, op && parseOp({ op, ...VALID_OPS[op] }, NOW));
+    const [first, ...others] = transactions.at(-1);
+    assert.match(first.text, SETTING, String(op));
+    assert.deepEqual(first.params, ["user_" + op], String(op));
+    assert.ok(!others.some(query => /set_config/.test(query.text)), "set only once");
+  }
+});
+
+test("the store reads the change's own result after the setting and the guard", async () => {
+  const { store } = fakeStore(queries => [[], [], ...queries.slice(2, -4).map(() => []), ...READS]);
   assert.equal((await store.run("user_1", parseOp({ op: "update-weight", date: "2026-11-22", weight: 80 }, NOW))).found, false);
-  const found = fakeStore(queries => [[], [{ "?column?": 1 }], ...READS]).store;
+  const found = fakeStore(queries => [[], [], [{ "?column?": 1 }], ...READS]).store;
   assert.equal((await found.run("user_1", parseOp({ op: "update-weight", date: "2026-11-22", weight: 80 }, NOW))).found, true);
-  const imported = fakeStore(queries => [[], [{ imported: 1 }], ...READS]).store;
+  const imported = fakeStore(queries => [[], [], [{ imported: 1 }], ...READS]).store;
   assert.equal((await imported.run("user_1", parseOp({ op: "import", log: { entries: [] } }, NOW))).imported, true);
+});
+
+// Two fake connections, one per role, each recording what ran on it.
+function twoRoles(appUrl) {
+  const ran = [];
+  const connect = url => {
+    const role = new URL(url).username;
+    const sql = (strings, ...params) => ({ text: strings.join("$"), params });
+    sql.query = (text, params = []) => ({ text, params });
+    sql.transaction = async queries => {
+      const schemaRun = queries.length === schema.length && queries[0].text === schema[0];
+      ran.push([role, schemaRun ? "schema" : queries.map(query => query.text.trim().split(/\s+/).slice(0, 2).join(" ")).join("; ")]);
+      return schemaRun ? [] : queries.length > 4 || /set_config/.test(queries[0].text) ? [...queries.slice(0, -4).map(() => []), ...READS] : [[]];
+    };
+    return sql;
+  };
+  const store = createStore("postgres://owner:secret@ep-one-pooler.example.aws.neon.tech/neondb", { connect, appUrl });
+  return { store, ran };
+}
+
+test("requests run as the app's role, and the schema and the reminder job as the owner", async () => {
+  const { store, ran } = twoRoles("postgres://baseline_app:other@ep-one.example.aws.neon.tech/neondb");
+  await store.run("user_1", parseOp({ op: "save-weight", date: "2026-11-22", weight: 80 }, NOW));
+  await store.reminderAccounts();
+  await store.claimReminders([{ userId: "user_1", day: "2026-11-22" }]);
+  await store.removeDevices(["https://fcm.googleapis.com/1"]);
+  assert.deepEqual(ran.map(([role, what]) => [role, what.split(";")[0]]), [
+    ["owner", "schema"], ["baseline_app", "SELECT set_config('app.user_id',"], ["owner", "SELECT user_id"], ["owner", "WITH due"], ["owner", "DELETE FROM"]
+  ]);
+});
+
+test("without DATABASE_URL_APP, requests run as the owner, as before", async () => {
+  const { store, ran } = twoRoles(undefined);
+  await store.run("user_1");
+  assert.deepEqual(ran.map(([role]) => role), ["owner", "owner"]);
+});
+
+test("DATABASE_URL_APP must reach the same database as DATABASE_URL", () => {
+  const connect = () => { throw new Error("not reached"); };
+  const owner = "postgres://owner:secret@ep-one-pooler.example.aws.neon.tech/neondb";
+  for (const appUrl of ["postgres://baseline_app:x@ep-two-pooler.example.aws.neon.tech/neondb", "postgres://baseline_app:x@ep-one-pooler.example.aws.neon.tech/other", "not a url"]) {
+    assert.throws(() => createStore(owner, { connect, appUrl }), error => error.name === "SetupError" && error.code === "APP_DATABASE_MISMATCH", appUrl);
+  }
+  assert.throws(() => createStore("", { connect }), error => error.code === "NO_DATABASE_URL");
+});
+
+test("turning reminders on releases the device from another account before adding it", async () => {
+  const { store, transactions } = fakeStore(queries => [...queries.slice(0, -4).map(() => []), ...READS]);
+  const subscription = { endpoint: "https://fcm.googleapis.com/fcm/send/abc", keys: { p256dh: Buffer.concat([Buffer.from([4]), Buffer.alloc(64, 1)]).toString("base64url"), auth: Buffer.alloc(16, 2).toString("base64url") } };
+  await store.run("user_1", parseOp({ op: "set-reminder", hour: 8, timeZone: "UTC", subscription }, NOW));
+  const texts = transactions[0].map(query => query.text);
+  const release = texts.findIndex(text => /^SELECT release_device\(\$\d*\)$/.test(text));
+  assert.ok(release > 0, "it releases the device");
+  assert.deepEqual(transactions[0][release].params, [subscription.endpoint]);
+  assert.ok(release < texts.findIndex(text => /INSERT INTO push_subscriptions/.test(text)), "before adding it");
+  await store.run("user_1", parseOp({ op: "set-reminder", hour: 8, timeZone: "UTC" }, NOW));
+  assert.ok(!transactions[1].some(query => /release_device/.test(query.text)), "not without a device");
+});
+
+test("row-level security covers every table, and binds every role but the owner", () => {
+  const tables = schema.flatMap(text => [.../CREATE TABLE IF NOT EXISTS (\w+)/g.exec(text)?.slice(1) ?? []]).sort();
+  const rls = schema.find(text => /ENABLE ROW LEVEL SECURITY/.test(text));
+  assert.match(rls, /^DO \$\$/, "in a block that can run again");
+  const listed = /FOREACH tab IN ARRAY ARRAY\[([^\]]*)\]/.exec(rls)[1].split(",").map(name => name.trim().replace(/'/g, "")).sort();
+  assert.deepEqual(listed, tables, "every table keyed by user_id");
+  assert.match(rls, /IF NOT EXISTS \(SELECT 1 FROM pg_policies WHERE schemaname = current_schema\(\) AND tablename = tab AND policyname = 'own_rows'\)/);
+  assert.match(rls, /USING \(user_id = current_setting\('app\.user_id', true\)\)\s+WITH CHECK \(user_id = current_setting\('app\.user_id', true\)\)/);
+  assert.doesNotMatch(schema.join("\n"), /FORCE ROW LEVEL SECURITY/, "the owner's schema changes and reminder job pass");
+  const release = schema.find(text => /release_device/.test(text));
+  assert.match(release, /SECURITY DEFINER SET search_path = %I, pg_temp/);
+  assert.match(release, /WHERE endpoint = device AND current_setting\('app\.user_id', true\) <> '' AND user_id <> current_setting\('app\.user_id', true\)/);
+  assert.match(release, /EXCEPTION WHEN duplicate_function OR unique_violation THEN NULL/);
+  // The DO blocks quote with $$, so nothing inside may contain it.
+  for (const text of schema.filter(text => text.startsWith("DO $$"))) assert.equal(text.split("$$").length, 3, text.slice(0, 40));
+});
+
+test("a database error's message and detail never reach the log, nor the user or the values", async () => {
+  // As the Neon driver reports a CHECK violation.
+  const error = Object.assign(new Error('new row for relation "weigh_ins" violates check constraint "weigh_ins_weight_kg_check"'), {
+    name: "NeonDbError", code: "23514", severity: "ERROR", table: "weigh_ins", constraint: "weigh_ins_weight_kg_check",
+    detail: "Failing row contains (user_1, 2026-11-22, 2001.00, 2026-11-22 09:41:00+00, after the holidays)."
+  });
+  const { send } = setup({ store: { run: async () => { throw error; } } });
+  const lines = [];
+  const saved = { error: console.error, log: console.log, warn: console.warn, info: console.info };
+  for (const name of Object.keys(saved)) console[name] = (...args) => lines.push(args.map(String).join(" "));
+  let response;
+  try {
+    response = await send("POST", { op: "save-weight", date: "2026-11-22", weight: 80, note: "after the holidays" });
+  } finally {
+    Object.assign(console, saved);
+  }
+  assert.equal(response.status, 500);
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /^\[[0-9a-f]{8}\] POST \/api\/log save-weight failed: NeonDbError 23514$/);
+  assert.doesNotMatch(lines[0], /Failing|weigh_ins|user_1|2001|80|holidays|constraint/);
+  assert.doesNotMatch(await response.text(), /Failing|user_1|holidays|23514/);
+});
+
+test("an error is logged only by its kind and code, whatever they hold", () => {
+  assert.equal(describeError(Object.assign(new Error("x"), { code: "ECONNRESET" })), "Error ECONNRESET");
+  assert.equal(describeError(new TypeError("Cannot read user_1's weight")), "TypeError");
+  assert.equal(describeError(Object.assign(new Error("x"), { name: "Weight 80 kg", code: "note: after the holidays" })), "Error");
+  assert.equal(describeError(Object.assign(new Error("x"), { code: 500 })), "Error 500");
+  assert.equal(describeError(null), "Error");
+  assert.equal(describeError("user_1 80"), "Error");
+  assert.equal(describeError(new SetupError("DATABASE_URL is not set.", "NO_DATABASE_URL")), "SetupError NO_DATABASE_URL");
+  const lines = [];
+  const original = console.error;
+  console.error = line => lines.push(line);
+  try {
+    assert.equal(logError("GET /api/log", new Error("user_1"), "0a1b2c3d"), "[0a1b2c3d] GET /api/log failed: Error");
+  } finally {
+    console.error = original;
+  }
+  assert.deepEqual(lines, ["[0a1b2c3d] GET /api/log failed: Error"]);
+  assert.match(requestId(), /^[0-9a-f]{8}$/);
 });
 
 test("the store turns the guard's error into ConsentRequired, and passes other errors on", async () => {

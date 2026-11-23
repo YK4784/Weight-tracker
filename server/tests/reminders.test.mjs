@@ -90,3 +90,22 @@ test("a run with nobody due claims nothing, and a send that throws counts as fai
   }
   assert.equal(store.calls.removed, null);
 });
+
+test("a failed reminder is logged by its status or kind of error, never by its device or account", async () => {
+  const store = fakeStore([account(8, "UTC", null, "user_secret")], [
+    { userId: "user_secret", endpoint: "https://fcm.googleapis.com/fcm/send/device-secret-1" },
+    { userId: "user_secret", endpoint: "https://fcm.googleapis.com/fcm/send/device-secret-2" }
+  ]);
+  const lines = [];
+  const original = console.error;
+  console.error = (...args) => lines.push(args.map(String).join(" "));
+  try {
+    await sendReminders({ store, now: at("2026-11-22T08:00:00Z"), send: async device => {
+      if (device.endpoint.endsWith("1")) return 500;
+      throw Object.assign(new Error("fetch failed for " + device.endpoint), { code: "UND_ERR_CONNECT_TIMEOUT" });
+    } });
+  } finally {
+    console.error = original;
+  }
+  assert.deepEqual(lines, ["A reminder couldn't be sent: 500", "A reminder couldn't be sent: Error UND_ERR_CONNECT_TIMEOUT"]);
+});

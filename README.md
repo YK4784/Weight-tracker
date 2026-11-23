@@ -45,9 +45,91 @@ Baseline uses [Clerk](https://clerk.com) for accounts, with email and Google sig
 
 The publishable key is meant for browser code and is safe to commit. Never put a secret key (`sk_…`) in this repository.
 
-A development instance (`pk_test_`) works on `localhost` and on Vercel preview URLs, and its Google sign-in runs on Clerk's shared credentials. A production instance (`pk_live_`) needs a domain you own, because Clerk does not issue production instances for `*.vercel.app`. It also needs your own Google OAuth client. Follow Clerk's [production deployment guide](https://clerk.com/docs/guides/development/deployment/production) and its [Google setup](https://clerk.com/docs/guides/configure/auth-strategies/social-connections/google), then replace the key in `config.mjs`.
+A development instance (`pk_test_`) works on `localhost` and on Vercel preview URLs, and its Google sign-in runs on Clerk's shared credentials. Baseline still uses one. A production instance (`pk_live_`) needs a domain you own, because Clerk does not issue production instances for `*.vercel.app`, and its own Google OAuth client. [Move to a Clerk production instance](#move-to-a-clerk-production-instance) has the steps.
 
-So that sign-in loads sooner, `baseline/dist/index.html` opens a connection to the key's Frontend API host in a `preconnect` link before any script asks for it. When you replace the key, change that link to the new host too. `npm test` fails until they match.
+The key names the Frontend API host that Clerk's scripts load from. Two other places name that host, and must change with the key:
+- the `preconnect` link in `baseline/dist/index.html`, which opens a connection to the host before any script asks for it, so sign-in loads sooner;
+- `script-src` and `connect-src` in the Content Security Policy in `vercel.json` (see [Security headers](#security-headers)).
+
+`npm test` fails until all three match. Baseline turns Clerk's telemetry off (`telemetry: false` in `auth.mjs`). A development instance would otherwise report which of Clerk's components the page uses to `clerk-telemetry.com`.
+
+## Move to a Clerk production instance
+
+Do this before Baseline has users who'd mind signing up again. Clerk's own guides are the [production deployment guide](https://clerk.com/docs/guides/development/deployment/production) and the [Google setup](https://clerk.com/docs/guides/configure/auth-strategies/social-connections/google). Below, `baseline.example.com` stands for your domain.
+
+1. **Add the domain to Vercel.** In the project's **Settings → Domains**, add `baseline.example.com` and follow Vercel's DNS instructions. Sign-in will work only on this domain, not on `*.vercel.app`.
+2. **Create the production instance.** In the [Clerk Dashboard](https://dashboard.clerk.com), switch from **Development** to **Production** at the top and create the production instance. Clone the development instance's settings, which copies settings but no users. Give it `baseline.example.com` as the application domain.
+3. **Add Clerk's DNS records.** The production instance's **Domains** page lists CNAME records: `clerk.baseline.example.com` for the Frontend API, `accounts.baseline.example.com` for the account portal, and the email records (`clkmail`, `clk._domainkey` and `clk2._domainkey`). Add each at your DNS provider. If that's Cloudflare, leave the records unproxied (DNS only). Wait until Clerk shows them verified and its certificates are issued.
+4. **Make a Google OAuth client.** In the [Google Cloud Console](https://console.cloud.google.com), create a project for Baseline and open **Google Auth Platform**:
+   - **Branding:** the app name Baseline, a support email (`[contact email address]`), the home page `https://baseline.example.com` and the privacy policy `https://baseline.example.com/health-data-privacy.html`.
+   - **Audience:** External.
+   - **Data access:** only `openid`, `.../auth/userinfo.email` and `.../auth/userinfo.profile`. Baseline needs nothing more. These are Google's non-sensitive scopes, so the app shouldn't need Google's verification review.
+   - **Clients:** create a **Web application** client. Add `https://baseline.example.com` under **Authorized JavaScript origins**. Under **Authorized redirect URIs**, add the redirect URI that Clerk shows in the production instance's **SSO connections → Google**, once you choose **Use custom credentials**. It looks like `https://clerk.baseline.example.com/v1/oauth_callback`.
+   - Paste the client ID and client secret into that Clerk page. Never put the secret in this repository.
+   - Back on **Audience**, publish the app, so that anyone can sign in rather than only test users.
+5. **Check the production instance's settings.** Email and Google should be the sign-in options, as in development. Turn on the setting that lets users delete their own accounts, or **Delete my account** stays hidden (see [Your data](#your-data)).
+6. **Swap the key.** Copy the production **Publishable key** (`pk_live_…`) from **API keys**, then:
+   - replace `CLERK_PUBLISHABLE_KEY` in `baseline/dist/config.mjs`;
+   - change the `preconnect` link in `baseline/dist/index.html` to `https://clerk.baseline.example.com`;
+   - in `vercel.json`, replace `https://enabling-duck-7464.clerk.accounts.dev` in `script-src` and `connect-src` with `https://clerk.baseline.example.com`;
+   - run `npm test`, which fails until all three agree and names the host it expects;
+   - if `CLERK_PUBLISHABLE_KEY` is set in Vercel's environment variables, where it overrides the key on the server, change it to the new key or delete it.
+7. **Make sure nothing is waiting on a device.** On every device that has used Baseline, check that the "Saved on this device" line has gone. After the switch nobody is signed in, and Baseline deletes a device's waiting changes when it finds nobody signed in.
+8. **Push.** Pushing to `main` deploys the switch. Everyone is signed out, and signs up again on the production instance.
+9. **Move each person's data** to their new account, as below.
+
+After the switch, a production key signs in only on `baseline.example.com`. To sign in on `npm start`'s `127.0.0.1`, put the development key in `config.mjs` for the session and don't commit it. The server reads the same file.
+
+### Move the development accounts' data
+
+Each Clerk instance has its own user IDs, and every row in the database is keyed by one. After the switch, people's logs are still there, under their development IDs, and their new accounts start empty. Baseline doesn't move them by itself. The plan is to pair each development ID with the production ID that has the same email address, and then move the rows in one transaction:
+
+1. **Before you push,** open the development instance's **Users** in the Clerk Dashboard and note each user's ID (`user_…`) and email address. This list holds email addresses, so keep it to yourself and out of the repository.
+2. **Ask each person to sign up again** on the production instance with the same email address, or with the same Google account. They see the consent step and an empty log. Ask them not to log anything until their data has moved.
+3. **Pair the IDs.** In the production instance's **Users**, find each person's new ID. Pair a development ID with a production ID only when the two have the same verified email address.
+4. **Move the rows.** In the Neon console, open the **SQL Editor** on the production branch and database. Put the pairs in the `INSERT` and run the whole script as the owner role, the user in `DATABASE_URL`, which row-level security doesn't bind. `SELECT current_user;` shows which role the editor uses.
+
+   ```sql
+   BEGIN;
+
+   CREATE TEMP TABLE moves (old_id text PRIMARY KEY, new_id text NOT NULL UNIQUE) ON COMMIT DROP;
+   INSERT INTO moves (old_id, new_id) VALUES
+     ('user_DEVELOPMENT_ID_1', 'user_PRODUCTION_ID_1'),
+     ('user_DEVELOPMENT_ID_2', 'user_PRODUCTION_ID_2');
+
+   -- Stops, and moves nothing, if a new account has already saved weigh-ins or waists.
+   DO $$
+   BEGIN
+     IF EXISTS (SELECT 1 FROM moves m
+                WHERE EXISTS (SELECT 1 FROM weigh_ins w WHERE w.user_id = m.new_id)
+                   OR EXISTS (SELECT 1 FROM waist_measurements w WHERE w.user_id = m.new_id)) THEN
+       RAISE EXCEPTION 'A new account already has weigh-ins or waists. Nothing was moved.';
+     END IF;
+   END $$;
+
+   -- A new account that has only agreed to the policy, or turned reminders on,
+   -- takes the old account's profile and devices instead.
+   DELETE FROM profiles p USING moves m
+     WHERE p.user_id = m.new_id AND EXISTS (SELECT 1 FROM profiles o WHERE o.user_id = m.old_id);
+   DELETE FROM push_subscriptions s USING moves m WHERE s.user_id = m.new_id;
+
+   UPDATE profiles p SET user_id = m.new_id FROM moves m WHERE p.user_id = m.old_id;
+   UPDATE weigh_ins w SET user_id = m.new_id FROM moves m WHERE w.user_id = m.old_id;
+   UPDATE waist_measurements w SET user_id = m.new_id FROM moves m WHERE w.user_id = m.old_id;
+   UPDATE push_subscriptions s SET user_id = m.new_id FROM moves m WHERE s.user_id = m.old_id;
+
+   -- Should be 0: no row left under a development ID.
+   SELECT count(*) AS left_behind FROM (
+     SELECT user_id FROM profiles UNION ALL SELECT user_id FROM weigh_ins
+     UNION ALL SELECT user_id FROM waist_measurements UNION ALL SELECT user_id FROM push_subscriptions
+   ) AS t WHERE user_id IN (SELECT old_id FROM moves);
+
+   COMMIT;
+   ```
+
+5. **Tell each person to reload.** Their log, settings, agreement and reminder devices are back, under the new account.
+
+If the script stops because a new account already has weigh-ins, decide with that person which entries to keep, delete the others in the app or in the database, and run it again for them. If something looks wrong afterwards, restore the database to a moment before the script in the Neon console, within the 6-hour history window, and delete the backup branch the restore leaves (see `docs/breach-runbook.md`). Then delete the development instance's users in the Clerk Dashboard, once everyone's data has moved, or keep the instance for local work.
 
 ## Set up the database
 
@@ -60,6 +142,72 @@ vercel integration add neon --billing-plan free_v3 --meta region=iad1 --meta aut
 This connects the database to the project and adds `DATABASE_URL` to its environment variables. The API creates its tables on its first request, so there is no migration to run.
 
 The API lives in `api/log.mjs`, with its code in `server/`. It accepts only requests carrying a Clerk session token. It checks that token against the signing keys your Clerk app publishes, so it needs no Clerk secret key.
+
+### Limit the app to each user's rows
+
+Every query in `server/store.mjs` names the signed-in user in its `WHERE` clause. Row-level security is a second lock behind it, in the database itself:
+- `server/schema.mjs` turns on row-level security on all four tables, with one policy each, `own_rows`. It shows and accepts only the rows whose `user_id` equals the setting `app.user_id`, and no rows without it.
+- `run` in `store.mjs` makes `SELECT set_config('app.user_id', …, true)` the first statement of every request's transaction. `true` keeps it to that transaction.
+- So a query that forgot its `WHERE` clause still reads and writes only the signed-in user's rows.
+
+The policies bind every role except the one that owns the tables. So the app's requests need a role of their own, `baseline_app`, which owns nothing and can only read and write rows. The owner, in `DATABASE_URL`, still creates and updates the tables on a cold start and runs the hourly reminder job, which reads every account's reminder. Requests use the role in `DATABASE_URL_APP`. Until that's set, they run as the owner, as before, and only the `WHERE` clauses keep users apart.
+
+Moving a device from one account to another, which turning reminders on does, needs the other account's row. `release_device`, a function in `schema.mjs` that runs as the owner, deletes that one row by its endpoint before the new account adds it.
+
+To turn it on:
+
+1. **Make a password** for the role, and keep it out of the repository:
+
+   ```sh
+   node -e 'console.log(require("node:crypto").randomBytes(24).toString("base64url"))'
+   ```
+
+   Neon wants about 60 bits of entropy. This has 192. If Neon turns it down, for example for a character repeated three times in a row, run it again.
+2. **Create the role with SQL.** In the Neon console, open the **SQL Editor** on the production branch and the `neondb` database. Don't use the console's **Roles** page: roles made there join `neon_superuser`, which bypasses row-level security. First check that the editor runs as the owner, the user in `DATABASE_URL` (normally `neondb_owner`):
+
+   ```sql
+   SELECT current_user;
+   ```
+
+   Then run this, with your password in place of the placeholder:
+
+   ```sql
+   CREATE ROLE baseline_app LOGIN PASSWORD 'paste-the-password-here' NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
+   GRANT CONNECT ON DATABASE neondb TO baseline_app;
+   GRANT USAGE ON SCHEMA public TO baseline_app;
+   GRANT SELECT, INSERT, UPDATE, DELETE ON profiles, weigh_ins, waist_measurements, push_subscriptions TO baseline_app;
+   -- Tables the owner creates later get the same grants.
+   ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO baseline_app;
+   ```
+
+3. **Check the role.** This should return `false` in every column:
+
+   ```sql
+   SELECT rolsuper, rolbypassrls, rolcreaterole, pg_has_role('baseline_app', 'neon_superuser', 'MEMBER') AS neon_superuser
+   FROM pg_roles WHERE rolname = 'baseline_app';
+   ```
+
+4. **Check it on a branch first,** as the next section says, if you'd like to see it work before production does.
+5. **Add `DATABASE_URL_APP` in Vercel.** It's `DATABASE_URL` with the user and password swapped: `postgresql://baseline_app:<password>@<the same host as DATABASE_URL>/neondb?sslmode=require`. In the project's **Settings → Environment Variables**, add it for **Production** only and mark it **Sensitive**. Preview deployments can use a database branch of their own, and the app refuses to start with a `DATABASE_URL_APP` that points at a different database from `DATABASE_URL`. Then redeploy the latest production deployment.
+6. **Check the app.** Log a weigh-in, edit and delete it, and turn reminders on. Then look at the function logs of `/api/log` in Vercel. `SetupError APP_DATABASE_MISMATCH` means the variable points at another database. `NeonDbError 42501` means a grant is missing.
+
+To turn it off, delete `DATABASE_URL_APP` and redeploy. The policies stay, and the owner isn't bound by them. If the role's password may have leaked, set a new one with `ALTER ROLE baseline_app PASSWORD '…'`, update the variable and redeploy.
+
+### Check row-level security on a branch
+
+`server/tests/rls.test.mjs` proves the policies against a real Neon database. It runs as part of `npm test` when `TEST_DATABASE_URL` is set, and is skipped otherwise. It shows that `app.user_id` lasts for every statement of one HTTP transaction and no longer, that a query without a `WHERE` clause returns only the signed-in user's rows, that each kind of change works as a role that owns nothing, that a device moves between accounts, and that the reminder job still finds and claims an account. It makes its own role, `baseline_rls_test`, with the same grants as `baseline_app`, and drops it at the end.
+
+Never point it at the production database: it adds and deletes rows. It refuses the database named in `.env.local` or the environment. Use a schema-only branch, which has the tables and none of the data:
+
+1. In the Neon console, open **Branches → New branch**. Choose `main` as the parent, choose **Schema only**, and keep **Automatically delete branch after** at 1 hour.
+2. Open **Connect** for the new branch, with the `neondb` database and the owner role, and copy the connection string.
+3. Run:
+
+   ```sh
+   TEST_DATABASE_URL='postgresql://…' npm test
+   ```
+
+To test a role you made yourself on the branch, such as `baseline_app`, also set `TEST_DATABASE_URL_APP` to its connection string. The test then uses it and creates no role.
 
 ## Set up reminders
 
@@ -75,6 +223,71 @@ To replace the key pair, run the following command, then put the public key in `
 ```sh
 node -e 'const k = require("node:crypto").generateKeyPairSync("ec", { namedCurve: "prime256v1" }).privateKey.export({ format: "jwk" }); console.log("PUSH_PUBLIC_KEY=" + Buffer.concat([Buffer.from([4]), Buffer.from(k.x, "base64url"), Buffer.from(k.y, "base64url")]).toString("base64url") + "\nVAPID_PRIVATE_KEY=" + k.d)'
 ```
+
+## Security headers
+
+`vercel.json` gives every response, pages and API alike, these headers:
+
+- **`Content-Security-Policy-Report-Only`:** the Content Security Policy, which says where the page may load code and connect to. It's report-only for now: browsers allow everything and report what the policy would block.
+- **`Strict-Transport-Security: max-age=63072000; includeSubDomains`:** browsers use only HTTPS for two years. Vercel already sends `max-age=63072000; includeSubDomains; preload` on `*.vercel.app`, and `max-age=63072000` without subdomains on a custom domain. This adds `includeSubDomains` on your domain, so every subdomain of it must serve HTTPS, as Clerk's do.
+- **`X-Content-Type-Options: nosniff`:** files are used only as the type they're served as.
+- **`Referrer-Policy: strict-origin-when-cross-origin`:** other sites see only Baseline's origin, never a page's path.
+- **`Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()`:** no page can ask for these.
+- **`X-Frame-Options: DENY`:** no other site can show Baseline in a frame, along with the policy's `frame-ancestors 'none'`.
+
+The policy lets in Baseline's own files and Clerk, and nothing else, following [Clerk's CSP guide](https://clerk.com/docs/guides/secure/best-practices/csp-headers):
+
+| Directive | Sources | Why |
+|---|---|---|
+| `default-src` | `'self'` | Anything not listed below: only Baseline's own files. |
+| `script-src` | `'self'`, the Frontend API host, `https://challenges.cloudflare.com`, `https://*.protect.clerk.com` | Baseline's modules, Clerk's scripts, Cloudflare's bot check on sign-up, and Clerk's fraud protection, which loads a script from `cdn.protect.clerk.com`. No inline scripts and no `eval`. |
+| `connect-src` | `'self'`, the Frontend API host, `https://*.protect.clerk.com:*` | `/api/log`, Clerk's API, and the fraud protection's checks, which use ports other than 443. |
+| `img-src` | `'self'`, `https://img.clerk.com`, `data:` | Baseline's icons, and Clerk's logos and avatars. |
+| `style-src` | `'self'`, `'unsafe-inline'` | Clerk's components add their styles as the page runs. |
+| `frame-src` | `https://challenges.cloudflare.com`, `https://*.protect.clerk.com` | The bot check's frame. |
+| `worker-src` | `'self'`, `blob:` | The service worker. |
+| `font-src` | `'self'` | Funnel Sans. |
+| `object-src`, `base-uri`, `frame-ancestors` | `'none'` | No plugins, no `<base>` tag, and no framing. |
+| `form-action` | `'self'` | Forms post only to Baseline. |
+| `report-uri` | `/api/csp-report` | Where browsers send reports. |
+
+The Frontend API host comes from the publishable key, so it changes with the key (see [Set up sign-in](#set-up-sign-in)), and `npm test` checks that it matches.
+
+**Reports.** `api/csp-report.mjs` logs each report as one line, such as `CSP violation: script-src-elem blocked cdn.example.com`: the directive and the host, never the page's address or the rest of the URL. Find them in the Vercel dashboard under **Logs**, filtered to `/api/csp-report`. Browser extensions that inject scripts or styles cause some reports that mean nothing about Baseline.
+
+**Trying it locally.** `npm start` sends the same headers as `vercel.json`. `npm start -- --enforce-csp` sends the policy as `Content-Security-Policy`, so the browser blocks what it would report. Check the browser's console for "Content Security Policy" while you sign in, sign up, sign in with Google, open the avatar menu and **Manage account**, turn reminders on, and sign out.
+
+**When to enforce it.** Switch the policy on once:
+1. Baseline runs on the Clerk production instance, with the policy naming its host. The host changes in the switch, so enforce after it, not before.
+2. A week or so of reports on the production domain shows nothing but extensions.
+3. The local check above passes with `--enforce-csp`.
+
+To switch it on, rename `Content-Security-Policy-Report-Only` to `Content-Security-Policy` in `vercel.json` and push. `npm test` accepts either. To go back, rename it back.
+
+## Rate limit
+
+`/api/log` has no rate limit of its own. A counter in the function wouldn't work, because Vercel runs many copies of a function that share no memory, and each would count only its own requests. Vercel's firewall counts at its edge instead. WAF rate limiting is on every plan: Hobby allows one rate-limit rule per project, and Pro allows 40. To add the rule:
+
+1. In the Vercel dashboard, open the project and choose **Firewall**, then **Configure** at the top right, then **+ New Rule**.
+2. Name it, for example, "API rate limit".
+3. Under **If**, choose **Request Path**, **Equals**, `/api/log`.
+4. Under **Then**, choose **Rate Limit**, and continue past the pricing note. Hobby includes 1,000,000 allowed requests.
+5. Choose **Fixed Window**, a window of 60 seconds, a limit of 120 requests and the **IP Address** key.
+6. Choose **Log** as the action at first, then **Save Rule**, **Review Changes** and **Publish**.
+7. After a week of logs without real users being caught, edit the rule's action to **Too Many Requests (429)** and publish again.
+
+One person uses a few requests a minute, so 120 leaves room for several people behind one address and for a device sending a backlog of changes. Keep the rule on `/api/log` alone. On Hobby it's the only rate-limit rule, and covering `/api/csp-report` too would let a page full of reports hold back the same address's saves. Counters are kept per region.
+
+The app treats a 429 as a failure that may pass, never as a refusal. A change waiting on the device stays there and is sent again a minute later. A change you're waiting on is undone, with **Try again**, as for any other failed save. Clerk limits sign-in attempts on its side.
+
+## Logs
+
+The server's log lines in Vercel never hold a weight, a note, an email address, a user ID or a push endpoint:
+- An error is logged by `logError` in `server/log.mjs` as `[a1b2c3d4] POST /api/log save-weight failed: NeonDbError 23514`: a short request ID, what failed, the error's kind and its code. That's a Postgres SQLSTATE or a Node.js code, never the message, which for a database error can include the row being saved. A problem with the setup, such as a missing environment variable, is a `SetupError` with a code that says which, such as `NO_DATABASE_URL` or `NO_VAPID_PRIVATE_KEY`.
+- The hourly reminder run logs its counts, and a reminder that couldn't be sent logs the push service's status or the error's kind.
+- `/api/csp-report` logs a report's directive and blocked host.
+
+`npm test` checks that a constraint error's detail never reaches the log. Vercel's own request log, which the server doesn't write, records each request's path, status and IP address.
 
 ## Offline use
 
@@ -94,7 +307,7 @@ vercel env pull .env.local
 npm start
 ```
 
-Open [Baseline locally](http://127.0.0.1:4173/). `npm start` serves the page from `baseline/dist/` and runs the API from `api/log.mjs`, using the `DATABASE_URL` in `.env.local`. Reminders can be turned on locally, but only Vercel sends them. Run `npm test` to check the calculations, including body fat against the Army's worked examples, the API's input checks, the reminder schedule, the push encryption, the copy of the log kept on the device, the changes that wait on the device and replay on top of it, the downloads, and the word a deletion needs. It also checks that deleting an account reaches every table in `server/schema.mjs`. And it checks that `index.html` preloads every module and connects early to the Frontend API in `config.mjs`, and that the service worker keeps every file in `baseline/dist/` that the app needs and leaves the API and Clerk alone. It checks the agreement to the health data policy too, as [Privacy](#privacy) describes.
+Open [Baseline locally](http://127.0.0.1:4173/). `npm start` serves the page from `baseline/dist/` and runs the API from `api/log.mjs` and `api/csp-report.mjs`, using the `DATABASE_URL` in `.env.local`, and `DATABASE_URL_APP` if it's there. It sends the headers in `vercel.json`, as [Security headers](#security-headers) describes. Reminders can be turned on locally, but only Vercel sends them. Run `npm test` to check the calculations, including body fat against the Army's worked examples, the API's input checks, the reminder schedule, the push encryption, the copy of the log kept on the device, the changes that wait on the device and replay on top of it, the downloads, and the word a deletion needs. It also checks that deleting an account reaches every table in `server/schema.mjs`. And it checks that `index.html` preloads every module and connects early to the Frontend API in `config.mjs`, and that the service worker keeps every file in `baseline/dist/` that the app needs and leaves the API and Clerk alone. It checks the agreement to the health data policy too, as [Privacy](#privacy) describes. And it checks the security headers in `vercel.json` and that `npm start` sends them, that the Content Security Policy names the Frontend API in `config.mjs`, that every request's transaction sets the user for row-level security first, that every table has a policy, that the server's log lines carry no values, and what a CSP report logs. `server/tests/rls.test.mjs` runs only against a Neon branch, as [Check row-level security on a branch](#check-row-level-security-on-a-branch) describes.
 
 ## Using the tracker
 
@@ -241,7 +454,7 @@ The policy and Your data make these promises. Each line says what makes it true.
 | Promise | What makes it true |
 |---|---|
 | Nothing is saved before you agree | `showState` in `app.mjs` shows the consent step until `hasConsent`, and the server's `require_consent` turns down every change in `needsConsent` (`server/ops.mjs`, `server/store.mjs`). Tests: `server/tests/api.test.mjs`. |
-| No analytics, ads or trackers, and the only outside code is Clerk's sign-in | `index.html` loads only `app.mjs`. `auth.mjs` loads scripts only from the Frontend API host in `config.mjs`. The app fetches only `/api/log`. Tests: `baseline/tests/page.test.mjs`. Clerk's sign-up can add Cloudflare's bot check, which the texts mention. |
+| No analytics, ads or trackers, and the only outside code is Clerk's sign-in | `index.html` loads only `app.mjs`. `auth.mjs` loads scripts only from the Frontend API host in `config.mjs`, with Clerk's telemetry off. The app fetches only `/api/log`. Tests: `baseline/tests/page.test.mjs`. Clerk's sign-up can add Cloudflare's bot check, which the texts mention, and Clerk's fraud protection loads from `*.protect.clerk.com`. The Content Security Policy in `vercel.json` allows no other host (`baseline/tests/headers.test.mjs`), but it only reports until it's switched on (see [Security headers](#security-headers)). |
 | Never sold or used for ads, and shared only with the services named | No code sends data anywhere but `/api/log`, as above. The server sends only the fixed reminder text to push services. The rest is a promise about conduct. |
 | No cookies of its own | No code sets `document.cookie` (`page.test.mjs`). Clerk's cookies are Clerk's. |
 | No location | No code uses `geolocation` (`page.test.mjs`). The time zone comes from `Intl` and is sent only with a reminder (`set-reminder`). IP addresses at Vercel and Clerk are mentioned. |
@@ -250,7 +463,7 @@ The policy and Your data make these promises. Each line says what makes it true.
 | The formula's sex is asked for only when logging a waist | The Formula choice is in the waist dialog. `save-waist` is the only op that sets `profiles.sex`. |
 | None of the log goes to Clerk | `app.mjs` and `auth.mjs` never write to the Clerk user. Comments in both say they never must. See `docs/processors.md`. |
 | Push services can't read a reminder | `encrypt` in `server/push.mjs` (RFC 8291), and the fixed `MESSAGE` in `server/reminders.mjs`. Tests: `server/tests/push.test.mjs`. |
-| Vercel's logs can include a value that failed to save | `console.error(error)` in `server/api.mjs` and `api/remind.mjs`. F4 is due to strip values from logs; update the texts then. |
+| The server logs only the kind of an error, never your data | `logError` in `server/log.mjs`, used by `server/api.mjs` and `api/remind.mjs`; `sendReminders` in `server/reminders.mjs`; `server/csp.mjs`. See [Logs](#logs). Tests: `server/tests/api.test.mjs`, `server/tests/reminders.test.mjs`, `server/tests/csp.test.mjs`. Any new `console` call on the server must keep to it. |
 | Vercel keeps logs for up to a day | The Vercel plan: 1 hour on Hobby, 1 day on Pro. It isn't code; check the plan. |
 | The server is in the United States | `vercel.json` sets no regions, so functions run in Vercel's default, `iad1`. Check the project's settings. |
 | The database is in the United States, encrypted on disk | The setup command's `region=iad1`, and Neon's DPA. Check the Neon console. |
@@ -261,8 +474,8 @@ The policy and Your data make these promises. Each line says what makes it true.
 | Deleting takes effect on the server at once | `delete-data` and `delete-account` in `server/store.mjs` run in one transaction, and the app waits for the answer. |
 | Withdrawing deletes the log, and nothing new is saved until you agree again | **Withdraw** opens the `delete-data` dialog. `deleteRows` removes the profile and its agreement, and `require_consent` refuses changes until a new one. |
 | The device's copy goes when you sign out or delete | `clearLogCache` and `clearDeviceData` in `account.mjs`. Tests: `baseline/tests/account.test.mjs`. |
-| The server reads and writes only your own log | Every query in `server/store.mjs` is limited to the `user_id` from the session token that `server/auth.mjs` verifies. F4 adds row-level security. |
-| Encrypted connections | Vercel serves only HTTPS. It isn't code. |
+| The server reads and writes only your own log | Every query in `server/store.mjs` is limited to the `user_id` from the session token that `server/auth.mjs` verifies. Once `DATABASE_URL_APP` is set, row-level security in `server/schema.mjs` holds each request to that user's rows too (see [Limit the app to each user's rows](#limit-the-app-to-each-users-rows)). Until then it rests on the queries alone. Tests: `server/tests/api.test.mjs`, and `server/tests/rls.test.mjs` on a branch. |
+| Encrypted connections | Vercel serves only HTTPS, and `Strict-Transport-Security` in `vercel.json` keeps browsers on it. |
 | Reminder devices are kept until reminders are turned off | `clear-reminder` and `removeDevices` in `server/store.mjs`. |
 | Unused accounts aren't deleted | No code deletes them. |
 | Changes to the policy ask again | `CONSENT_VERSION` and `hasConsent`. `page.test.mjs` checks that the policy's date matches. |

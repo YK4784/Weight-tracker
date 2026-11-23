@@ -12,6 +12,8 @@ Ways a breach can show up:
 - A report to [contact email address].
 - A vendor's notice. Vercel and Clerk promise to report a breach on their side "without undue delay" (see `docs/processors.md`).
 - Errors or traffic you don't recognize in Vercel's function logs. On the Hobby plan Vercel keeps them for only 1 hour, so download what you need at once.
+- A `CSP violation: … blocked …` line in the logs of `api/csp-report` naming a host you don't recognize, on a page of Baseline's own. Browser extensions cause many of these, but a `script-src` one can mean someone else's code got onto the page.
+- Many 429 answers on `/api/log` from the firewall's rate limit (README, "Rate limit").
 - Activity in the Neon console, or a role you didn't create.
 - A commit, deployment or environment variable change you didn't make. Pushing to `main` deploys, so check the GitHub history and Vercel's deployment list.
 - A GitHub secret-scanning alert.
@@ -29,7 +31,7 @@ Do what applies, in this order. Each step lists what it breaks for users.
    - In the Neon console, reset the password of every role on every branch, starting with the owner role in `DATABASE_URL`. Remove any role you don't recognize, and revoke Neon API keys you don't need.
    - Put the new connection string in Vercel as `DATABASE_URL` for Production, Preview and Development, and redeploy.
    - Run `vercel env pull .env.local` on your own machine. Never paste the value anywhere else.
-   - After F4, do the same for `DATABASE_URL_APP` and the `baseline_app` role.
+   - If `DATABASE_URL_APP` is set, do the same for the `baseline_app` role: run `ALTER ROLE baseline_app PASSWORD '…'` in the SQL Editor with a new password, update the variable, and redeploy (README, "Limit the app to each user's rows").
 3. **Rotate the VAPID keys,** if the private key or the `push_subscriptions` table may be out. Anyone with both could send notifications that look like Baseline's.
    - Generate a new pair with the command in the README's "Set up reminders".
    - Put the public key in `baseline/dist/config.mjs` and the private key in Vercel's `VAPID_PRIVATE_KEY`, then push and redeploy.

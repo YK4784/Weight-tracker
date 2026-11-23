@@ -14,8 +14,9 @@
   <link rel="preload" href="./fonts/funnel-sans-latin.woff2" as="font" type="font/woff2" crossorigin>
   <!-- Clerk's Frontend API, where auth.mjs loads sign-in from. The host is
        decoded from CLERK_PUBLISHABLE_KEY in config.mjs (see frontendApiFor), so
-       it must change whenever the key does, as with a production instance.
-       npm test checks that they match. -->
+       it must change whenever the key does, as with a production instance,
+       along with the Content Security Policy in vercel.json. npm test checks
+       that they match. -->
   <link rel="preconnect" href="https://enabling-duck-7464.clerk.accounts.dev" crossorigin>
   <link rel="stylesheet" href="./styles.css">
   <!-- Every module app.mjs imports, so they load alongside it rather than after it. -->
@@ -404,7 +405,7 @@
       <section class="settings-section" aria-labelledby="handlers-title">
         <div class="section-head"><h2 id="handlers-title">Who handles it</h2></div>
         <dl class="data-list">
-          <div class="data-row"><dt>Vercel</dt><dd>Runs Baseline’s site and server. Its logs record each request’s IP address, and the server’s errors, which can include a value that failed to save. They’re kept for up to a day.</dd></div>
+          <div class="data-row"><dt>Vercel</dt><dd>Runs Baseline’s site and server. Its logs record each request’s IP address, and the kind of any error the server hits, never your data. They’re kept for up to a day.</dd></div>
           <div class="data-row"><dt>Neon</dt><dd>Hosts the database, in the United States. Deleted data stays in its restore history for up to 6 hours.</dd></div>
           <div class="data-row"><dt>Clerk</dt><dd>Runs sign-in and keeps your account.</dd></div>
           <div class="data-row"><dt>Push services</dt><dd>Apple, Google, Microsoft or Mozilla, depending on your browser, deliver reminders if you turn them on. Each reminder is encrypted, so they can’t read it.</dd></div>

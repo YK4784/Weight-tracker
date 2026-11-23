@@ -80,7 +80,7 @@
       <h2 id="who-title">Who handles it</h2>
       <p>These services handle data so that Baseline can work. None of them gets more than the description says.</p>
       <dl class="policy-list">
-        <div><dt>Vercel</dt><dd>Hosts Baseline’s pages and runs its server, which is in the United States. Vercel sees every request, with your IP address and browser. The server writes its errors to Vercel’s logs, and an error from the database can include the value it was saving, such as a weight. Vercel keeps these logs for up to a day.</dd></div>
+        <div><dt>Vercel</dt><dd>Hosts Baseline’s pages and runs its server, which is in the United States. Vercel sees every request, with your IP address and browser. When the server hits an error, it writes only the kind of error to Vercel’s logs, never your data. Vercel keeps these logs for up to a day.</dd></div>
         <div><dt>Neon</dt><dd>Hosts Baseline’s database in the United States. It holds everything under “What Baseline collects” except your account, and encrypts it on disk. Neon is part of Databricks.</dd></div>
         <div><dt>Clerk</dt><dd>Runs sign-in and keeps your account. Its sign-in form and account menu run on Baseline’s pages. Baseline sends none of your health data to Clerk. Clerk is based in the United States.</dd></div>
         <div><dt>Push services</dt><dd>Only if you turn reminders on. Your browser’s push service delivers them: Apple for Safari, Microsoft for Edge, Mozilla for Firefox, and Google for Chrome and most other browsers. Each reminder is encrypted for your device, so the service can’t read it. It does see when one is sent, which can show that you hadn’t weighed in that day.</dd></div>

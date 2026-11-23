@@ -2,18 +2,48 @@ import { neon } from "@neondatabase/serverless";
 import { schema } from "./schema.mjs";
 import { CONSENT_VERSION, normalizeConsent, normalizePreferences } from "../baseline/dist/model.mjs";
 import { CONSENT_ERROR_CODE, ConsentRequired, needsConsent } from "./ops.mjs";
+import { SetupError } from "./log.mjs";
 
 // The most devices an account can get reminders on.
 export const MAX_DEVICES = 10;
 
+// The Neon endpoint and database a connection string points at. The pooled
+// host is the endpoint's host with "-pooler" added, so both count as one.
+function databaseOf(url) {
+  try {
+    const parsed = new URL(url);
+    return parsed.hostname.replace(/-pooler(?=\.)/, "") + parsed.pathname;
+  } catch {
+    return null;
+  }
+}
+
 // Reads and writes logs in Postgres. Each call is one HTTP round trip: the
 // change and a fresh read of the log run together in a single transaction.
 // `connect` makes the query function from the URL; tests pass a fake one.
-export function createStore(url = process.env.DATABASE_URL, { connect = neon } = {}) {
-  if (!url) throw new Error("DATABASE_URL is not set. Connect the Neon database to this project.");
-  const sql = connect(url);
+//
+// It uses two roles. `url`, DATABASE_URL, is the role that owns the tables. It
+// creates and updates them (see schema.mjs) and runs the hourly reminder job,
+// which reads every account's reminder. The owner isn't subject to row-level
+// security, which the job needs. `appUrl`, DATABASE_URL_APP, is a role that
+// owns nothing and may only read and write rows (see README.md, "Limit the
+// app to each user's rows"). Every request from the app runs as that role,
+// and each request's transaction first sets app.user_id to the signed-in
+// user, so the policies in schema.mjs hide every other user's rows even from
+// a query that forgets its WHERE clause. Without DATABASE_URL_APP, requests
+// run as the owner, as they did before, and only the WHERE clauses keep users
+// apart.
+export function createStore(url = process.env.DATABASE_URL, { connect = neon, appUrl = process.env.DATABASE_URL_APP } = {}) {
+  if (!url) throw new SetupError("DATABASE_URL is not set. Connect the Neon database to this project.", "NO_DATABASE_URL");
+  // Both must reach the same database, or the schema and the reminders would
+  // use one and the app another, as with a preview branch.
+  if (appUrl && databaseOf(appUrl) !== databaseOf(url)) {
+    throw new SetupError("DATABASE_URL_APP must point at the same database as DATABASE_URL.", "APP_DATABASE_MISMATCH");
+  }
+  const owner = connect(url);
+  const sql = appUrl && appUrl !== url ? connect(appUrl) : owner;
   let ready;
-  const ensureSchema = () => ready ??= sql.transaction(schema.map(text => sql.query(text))).catch(error => {
+  const ensureSchema = () => ready ??= owner.transaction(schema.map(text => owner.query(text))).catch(error => {
     ready = undefined;
     throw error;
   });
@@ -85,6 +115,10 @@ export function createStore(url = process.env.DATABASE_URL, { connect = neon } =
         const device = change.subscription;
         if (device) {
           queries.push(
+            // Another account's row for this device is hidden from this one,
+            // so it can't be updated here. release_device (see schema.mjs)
+            // deletes it, and the insert below then adds the device afresh.
+            sql`SELECT release_device(${device.endpoint})`,
             sql`INSERT INTO push_subscriptions (endpoint, user_id, p256dh, auth) VALUES (${device.endpoint}, ${userId}, ${device.p256dh}, ${device.auth})
                 ON CONFLICT (endpoint) DO UPDATE SET user_id = excluded.user_id, p256dh = excluded.p256dh, auth = excluded.auth, created_at = now()`,
             // Each run sends to every device, so an account keeps only its most recent few.
@@ -157,11 +191,16 @@ export function createStore(url = process.env.DATABASE_URL, { connect = neon } =
     // ConsentRequired without changing anything if it hasn't.
     async run(userId, change = null) {
       await ensureSchema();
+      // The row-level security policies show and accept only rows with this
+      // user_id. The `true` keeps the setting to this transaction, so it never
+      // carries over to another request on the same connection.
+      const account = [sql`SELECT set_config('app.user_id', ${userId}, true)`];
       const guard = needsConsent(change) ? [sql`SELECT require_consent(${userId}, ${CONSENT_VERSION})`] : [];
       const queries = writes(userId, change);
       let results;
       try {
         results = await sql.transaction([
+          ...account,
           ...guard,
           ...queries,
           sql`SELECT started, height_cm::float8 AS height, goal_kg::float8 AS goal_weight,
@@ -179,8 +218,8 @@ export function createStore(url = process.env.DATABASE_URL, { connect = neon } =
         throw error?.code === CONSENT_ERROR_CODE ? new ConsentRequired() : error;
       }
       const [[profile], entries, waists, devices] = results.slice(-4);
-      // What the change's own query returned, after the guard.
-      const written = results[guard.length];
+      // What the change's own query returned, after the setting and the guard.
+      const written = results[account.length + guard.length];
       const goal = profile?.goal_weight == null ? null : {
         weight: profile.goal_weight, startDate: profile.goal_start_date, startWeight: profile.goal_start_weight,
         rate: profile.goal_rate, milestones: profile.goal_milestones
@@ -199,10 +238,11 @@ export function createStore(url = process.env.DATABASE_URL, { connect = neon } =
     },
 
     // For the hourly reminder run (see server/reminders.mjs): every account
-    // with reminders on and a device to send them to.
+    // with reminders on and a device to send them to. This and the two below
+    // run as the owner, since they work across every account.
     async reminderAccounts() {
       await ensureSchema();
-      const [rows] = await sql.transaction([sql`
+      const [rows] = await owner.transaction([owner`
         SELECT user_id AS "userId", reminder_hour AS hour, time_zone AS "timeZone", to_char(reminded_on, 'YYYY-MM-DD') AS "remindedOn"
         FROM profiles p
         WHERE reminder_hour IS NOT NULL AND EXISTS (SELECT 1 FROM push_subscriptions s WHERE s.user_id = p.user_id)`]);
@@ -215,7 +255,7 @@ export function createStore(url = process.env.DATABASE_URL, { connect = neon } =
     // one statement, so overlapping runs can't both claim an account.
     async claimReminders(due) {
       await ensureSchema();
-      const [rows] = await sql.transaction([sql`
+      const [rows] = await owner.transaction([owner`
         WITH due AS (
           SELECT * FROM unnest(${due.map(item => item.userId)}::text[], ${due.map(item => item.day)}::date[]) AS t(user_id, day)
         ), claimed AS (
@@ -233,9 +273,9 @@ export function createStore(url = process.env.DATABASE_URL, { connect = neon } =
     // for accounts left without a device.
     async removeDevices(endpoints) {
       await ensureSchema();
-      await sql.transaction([
-        sql`DELETE FROM push_subscriptions WHERE endpoint = ANY(${endpoints}::text[])`,
-        sql`UPDATE profiles p SET reminder_hour = NULL, updated_at = now()
+      await owner.transaction([
+        owner`DELETE FROM push_subscriptions WHERE endpoint = ANY(${endpoints}::text[])`,
+        owner`UPDATE profiles p SET reminder_hour = NULL, updated_at = now()
             WHERE reminder_hour IS NOT NULL AND NOT EXISTS (SELECT 1 FROM push_subscriptions s WHERE s.user_id = p.user_id)`
       ]);
     }
