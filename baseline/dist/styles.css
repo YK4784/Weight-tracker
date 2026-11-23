@@ -110,6 +110,8 @@ a { color: inherit; }
 .bone-field { display: block; height: 48px; border: 1px solid var(--rule); border-radius: 8px; }
 .bone-button { height: 44px; margin-top: 22px; border-radius: 8px; }
 .sign-in { display: flex; justify-content: center; }
+/* A one-off message over the sign-in form, such as after deleting an account. */
+.auth-notice { max-width: 25rem; margin: 0 auto 24px; color: var(--ink); font-weight: 600; text-align: center; text-wrap: pretty; }
 .auth-note { max-width: 25rem; margin: 20px auto 0; color: var(--ink-3); font-size: .875rem; text-align: center; text-wrap: pretty; }
 
 /* Page */
@@ -316,6 +318,15 @@ tbody:first-of-type .month-row th { padding-top: 20px; }
 .body-fat .table-wrap { margin-top: 18px; }
 .fat-cell { font-weight: 700; }
 .waist-more { margin-top: 14px; }
+/* Your data: downloads, then deletions, each a row between hairlines. */
+.your-data { margin-top: 48px; padding-top: 36px; border-top: 1px solid var(--rule); }
+.your-data h2 { font-size: 1.375rem; font-weight: 700; letter-spacing: -.015em; }
+.data-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px 40px; padding-block: 18px; border-bottom: 1px solid var(--rule); }
+.your-data h2 + .data-row { margin-top: 14px; border-top: 1px solid var(--ink); }
+.data-row h3 { margin: 0; font-size: 1rem; font-weight: 700; }
+.data-row p { max-width: 60ch; margin-top: 2px; color: var(--ink-2); text-wrap: pretty; }
+.data-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.small-button.danger-text { color: var(--danger); }
 .storage-status { margin-top: 48px; color: var(--ink-3); font-size: .875rem; text-align: center; }
 
 /* Dialogs and toast */
@@ -328,6 +339,11 @@ dialog h2 { font-size: 1.25rem; font-weight: 700; letter-spacing: -.01em; }
 .dialog-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 24px; }
 .edit-actions { justify-content: space-between; }
 .danger-link { color: var(--danger); font-weight: 700; }
+/* What deleting removes, under the dialog's first line. */
+.erase-list { margin: -12px 0 0; padding-left: 1.25em; color: var(--ink-2); }
+.erase-list li + li { margin-top: 2px; }
+.erase-list + .dialog-detail { margin-top: 12px; }
+.erase-copy { margin: -6px 0 20px; }
 .bmi-preview { display: flex; align-items: baseline; justify-content: space-between; margin-top: 16px; padding: 12px 14px; border-radius: 8px; background: var(--paper); }
 .bmi-preview strong { font-size: 1.25rem; }
 .field-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 12px; margin-top: 16px; }
@@ -368,6 +384,8 @@ body[data-weight-unit="st"] .start-row { grid-template-columns: minmax(0, 1fr); 
 
 @media (max-width: 860px) {
   .top { grid-template-columns: minmax(0, 1fr); gap: 32px; }
+  .data-row { grid-template-columns: minmax(0, 1fr); }
+  .data-actions { justify-content: flex-start; }
   .forecast-body { grid-template-columns: minmax(0, 1fr); }
   .month { grid-template-columns: minmax(0, 1fr); }
 }
@@ -399,7 +417,7 @@ body[data-weight-unit="st"] .start-row { grid-template-columns: minmax(0, 1fr); 
   .entry-panel { padding: 20px; }
   .date-step { flex-basis: 48px; }
   .trend, .entries, .forecast { padding-top: 28px; }
-  .body-fat { margin-top: 36px; padding-top: 28px; }
+  .body-fat, .your-data { margin-top: 36px; padding-top: 28px; }
   .chart-wrap { margin-top: 12px; }
   th, td { padding-inline: 6px; }
   th { font-size: .8125rem; }

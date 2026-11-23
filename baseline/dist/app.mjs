@@ -1,6 +1,7 @@
 import { CM_PER_IN, FAST_LOSS_DAYS, FORECAST_MAX_DAYS, GOAL_MILESTONES, GOAL_RATE_CAP, KG_PER_LB, OVERALL_MIN_DAYS, QUEUEABLE_OPS, RATE_DAYS, RATE_MIN_ENTRIES, RATE_MIN_SPAN, SEXES, WINDOW_DAYS, applyOps, averageChanges, bmi, bodyFat, bodyFatChange, bodyFatHistory, calculateRate, changeTarget, calculateTrend, cleanNote, dateOf, dayOf, fastGoalRate, fastLossCaution, forecastGoal, formatAmount, formatWaist, formatWeight, fromTenths, goalProgress, goalRateAllowed, goalRateLimit, groupByMonth, heightParts, localToday, maxGoalRate, monthlyReports, normalizeGoal, normalizeState, oneDecimal, overallRate, positive, prettyDate, recentRange, roundHeight, roundWaist, roundWeight, shiftDate, spokenHeight, spokenWeight, toTenths, validDate, validWaist, waistParts, waistTenths, weightParts } from "./model.mjs";
 import { BodyFatChart, TrendChart } from "./chart.mjs";
-import { claimLegacyLog, clearLogCache, lastUser, readLogCache, readOutbox, storageKeyFor, writeLogCache, writeOutbox } from "./account.mjs";
+import { claimLegacyLog, clearDeviceData, clearLogCache, fastLossHiddenKeyFor, lastUser, readLogCache, readOutbox, storageKeyFor, writeLogCache, writeOutbox } from "./account.mjs";
+import { csvFileName, exportJson, jsonFileName, weighInsCsv } from "./export.mjs";
 import { AuthSetupError, startClerk } from "./auth.mjs";
 import { PUSH_PUBLIC_KEY } from "./config.mjs";
 
@@ -39,6 +40,9 @@ let syncing = null; // The running syncOutbox, or null.
 let syncProblem = null; // Why the outbox stopped: "offline", "server" or "sign-in". Null when it didn't.
 let syncTimer; // Tries the outbox again while the device seems to have a connection.
 const SYNC_RETRY = 60_000;
+// Whether a deletion of the log or the account is on its way to the server.
+// Nothing else is sent or read meanwhile, so nothing lands after it.
+let deleting = false;
 let trend;
 let weeklyRate; // calculateRate for today, or null.
 let progress; // goalProgress for today's average, or null without a goal.
@@ -323,7 +327,7 @@ const turnedDown = error => error instanceof Refused && error.status >= 400 && e
 // tab or SYNC_RETRY. A change the server turns down is dropped. Resolves once
 // it has stopped; while it runs, calling it again returns the same promise.
 function syncOutbox() {
-  if (!syncing && account) {
+  if (!syncing && account && !deleting) {
     const current = session;
     // It starts once `syncing` is set, so the status line says it's syncing.
     const run = syncing = Promise.resolve().then(() => sendOutbox(current)).finally(() => {
@@ -343,7 +347,7 @@ async function sendOutbox(current) {
   for (;;) {
     loadOutbox();
     const item = outbox[0];
-    if (!item) break;
+    if (!item || deleting) break;
     const local = madeHere.get(item.id);
     const fresh = local && !local.announced; // Made in this page and not yet said to be on this device.
     let result = null;
@@ -625,7 +629,7 @@ function showProgress() {
 // Hiding the note about fast loss lasts for that goal, known by its start date,
 // on this device. The page also remembers it, in case the device can't store it.
 const hiddenCautions = new Set();
-const cautionKey = () => "baseline.fast-loss-hidden:" + account.id;
+const cautionKey = () => fastLossHiddenKeyFor(account.id);
 
 function cautionHidden(goal) {
   if (hiddenCautions.has(account.id + " " + goal.startDate)) return true;
@@ -1023,8 +1027,9 @@ function showPage() {
       " · " + total + (total === 1 ? " entry" : " entries");
   if (view === "months") showMonths();
   else showTable(isLog);
-  // Body fat sits under the recent entries, on the overview only.
+  // Body fat sits under the recent entries, on the overview only, and "Your data" at the bottom of the log.
   $("body-fat").hidden = isLog;
+  $("your-data").hidden = !isLog;
   if (!isLog) {
     drawChart();
     showBodyFat();
@@ -1052,15 +1057,22 @@ function render() {
 
 function showStorageStatus() {
   $("storage-status").textContent = (account.email ? "Signed in as " + account.email + ". " : "") + "Your log is saved to your account.";
+  showYourData();
 }
 
 // Until a log is open, the page shows one of these in place of the app.
 const authViews = ["auth-loading", "auth-setup", "auth-error", "sign-in", "log-loading", "log-error"];
+// A message over the sign-in form, such as the confirmation that an account
+// was deleted. It stays until someone signs in. Null when there is none.
+let authNotice = null;
 
 function showAuth(view) {
   for (const id of authViews) $(id).hidden = id !== view;
   $("auth").dataset.view = view;
   $("auth-note").hidden = view !== "sign-in";
+  const notice = view === "sign-in" ? authNotice : null;
+  $("auth-notice").textContent = notice ?? "";
+  $("auth-notice").hidden = !notice;
   $("auth").setAttribute("aria-busy", String(view.endsWith("-loading")));
   $("auth").hidden = false;
   $("main").hidden = true;
@@ -1148,6 +1160,7 @@ function showCachedLog(cached) {
 }
 
 async function openLog(user) {
+  authNotice = null;
   if (account && account.id !== user.id) closeLog();
   const current = beginSession(user.id, emailOf(user), true);
   showAuth("log-loading");
@@ -1194,7 +1207,7 @@ async function confirmLog(user) {
 }
 
 // Whether changes are on their way, so a read could come back without them.
-const changesPending = () => outbox.length > 0 || sending.length > 0 || syncing !== null;
+const changesPending = () => outbox.length > 0 || sending.length > 0 || syncing !== null || deleting;
 
 // Picks up changes made in other tabs or on other devices.
 async function refreshLog() {
@@ -1229,10 +1242,9 @@ function showSignedIn(user) {
   if (account?.id !== user.id) openLog(user);
   else if (!account.confirmed) confirmLog(user);
   else {
-    if (account.email !== emailOf(user)) {
-      account.email = emailOf(user);
-      showStorageStatus();
-    }
+    // The email, or whether the user may delete their account, can change.
+    account.email = emailOf(user);
+    showStorageStatus();
     // A change the server turned away for want of a sign-in can go now.
     if (syncProblem === "sign-in") syncOutbox();
   }
@@ -1587,12 +1599,12 @@ function showReminder() {
 // turned off for the site), "home-screen" (an iPhone or iPad, where push needs
 // Baseline on the Home Screen) or "unsupported".
 function reminderAccess() {
-  if (!worker?.pushManager || !("Notification" in window)) {
-    const apple = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-    return apple && !navigator.standalone ? "home-screen" : "unsupported";
-  }
+  if (!worker?.pushManager || !("Notification" in window)) return appleTouch() && !navigator.standalone ? "home-screen" : "unsupported";
   return Notification.permission === "denied" ? "blocked" : "ready";
 }
+
+// An iPhone or iPad, including an iPad that reports itself as a Mac.
+const appleTouch = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 
 const blockedText = "Notifications are blocked for Baseline in this browser. Allow them in its site settings, then try again.";
 
@@ -1643,6 +1655,14 @@ async function subscribeDevice() {
   return subscription.toJSON();
 }
 
+// Unsubscribes this device from push once the server has forgotten its
+// subscription, so it starts afresh the next time reminders are turned on.
+async function forgetDevice() {
+  try { await (await worker?.pushManager?.getSubscription())?.unsubscribe(); } catch { /* Harmless: the server no longer sends to it. */ }
+  deviceEndpoint = null;
+  if (state) showReminder();
+}
+
 // Registers the service worker that shows reminders, and finds out whether
 // this device already has a push subscription.
 async function startWorker() {
@@ -1656,6 +1676,201 @@ async function startWorker() {
     worker = null;
   }
   if (state) showReminder();
+}
+
+// "Your data": downloading the log, and deleting it or the whole account. The
+// section sits at the bottom of the log; F2's settings page moves it there.
+const DELETE_WORD = "delete"; // What the user types to confirm, and what server/ops.mjs checks.
+let erasing = null; // What the delete dialog deletes: "data" or "account".
+let accountDataGone = false; // The account's rows are deleted, and only the Clerk user is left.
+
+// Deleting the account needs the Clerk Dashboard setting that lets users delete
+// their own accounts, so without it the button doesn't show and the log is
+// never deleted on the way to a deletion Clerk would refuse.
+const canDeleteAccount = () => clerk?.user?.id === account?.id && clerk.user.deleteSelfEnabled === true;
+
+function showYourData() {
+  const whole = canDeleteAccount();
+  $("delete-account").hidden = !whole;
+  $("delete-note").textContent = "Delete my data empties your log on every device and keeps your account." +
+    (whole ? " Delete my account deletes your log, then your account." : "");
+}
+
+// An iPhone or iPad app on the Home Screen, where a download link does nothing useful.
+const homeScreenApple = () => appleTouch() && (navigator.standalone === true || matchMedia("(display-mode: standalone)").matches);
+
+// Saves a file the page made. A Home Screen app on an iPhone or iPad offers
+// the share sheet instead, which can save it to Files.
+function download(name, type, text) {
+  const blob = new Blob([text], { type });
+  if (homeScreenApple() && navigator.canShare) {
+    const file = new File([blob], name, { type });
+    if (navigator.canShare({ files: [file] })) {
+      navigator.share({ files: [file] }).catch(error => {
+        if (error.name === "AbortError") return;
+        console.error(error);
+        saveLink(blob, name);
+      });
+      return;
+    }
+  }
+  saveLink(blob, name);
+}
+
+function saveLink(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = name;
+  link.hidden = true;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  // Some browsers read the file after the click has returned.
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+// The log on screen, with any changes still waiting on this device.
+function downloadCsv() {
+  syncDay();
+  download(csvFileName(today), "text/csv;charset=utf-8", weighInsCsv(state, unit()));
+}
+
+function downloadJson() {
+  syncDay();
+  download(jsonFileName(today), "application/json", exportJson(state, new Date()));
+}
+
+function openErase(kind) {
+  erasing = kind;
+  accountDataGone = false;
+  const whole = kind === "account";
+  $("erase-title").textContent = whole ? "Delete your account?" : "Delete your data?";
+  $("erase-after").textContent = whole ? "Then your account is deleted and you’re signed out. This can’t be undone."
+    : "Your account stays, with an empty log, and you stay signed in. This can’t be undone.";
+  $("erase-word").value = "";
+  eraseBusy(false);
+  showEraseStatus("");
+  $("erase-dialog").showModal();
+  $("erase-cancel").focus();
+}
+
+const eraseConfirmed = () => $("erase-word").value.trim().toLowerCase() === DELETE_WORD;
+
+// While a deletion is on its way, the dialog can't be closed or sent again.
+function eraseBusy(busy) {
+  const dialog = $("erase-dialog");
+  dialog.toggleAttribute("data-busy", busy);
+  $("erase-word").readOnly = busy;
+  for (const id of ["erase-close", "erase-cancel", "erase-download"]) $(id).disabled = busy;
+  const submit = $("erase-submit");
+  submit.setAttribute("aria-disabled", String(busy));
+  submit.disabled = !busy && !eraseConfirmed();
+  submit.textContent = accountDataGone ? "Try again" : erasing === "account" ? "Delete my account" : "Delete my data";
+}
+
+// A line in the delete dialog, or a message at the bottom of the page if the
+// dialog has closed.
+function showEraseStatus(message, error = false) {
+  if (!$("erase-dialog").open) {
+    if (message && error) notify(message, { error: true });
+    return;
+  }
+  $("erase-status").textContent = message;
+  $("erase-status").hidden = !message;
+}
+
+// Sends a deletion once the requests before it have finished. Nothing else is
+// sent or read meanwhile (see `deleting`). Resolves to the server's reply, or
+// to { failure } if it fails.
+async function sendDeletion(op, userId) {
+  deleting = true;
+  clearTimeout(syncTimer);
+  try {
+    return await enqueue(() => sendLog({ op, confirm: DELETE_WORD }, userId));
+  } catch (failure) {
+    return { failure };
+  } finally {
+    deleting = false;
+  }
+}
+
+function eraseFailed(failure, message) {
+  console.error(failure);
+  eraseBusy(false);
+  showEraseStatus(failure instanceof Unreachable ? "Couldn’t reach Baseline. Check your connection and try again." : message, true);
+  // What was waiting on this device can go now.
+  if (outbox.length) syncOutbox();
+}
+
+// The server has deleted the log, so this device forgets it too: the changes
+// waiting here, the copy kept here, any log from before accounts, the hidden
+// note and this device's push subscription. A new session ignores replies to
+// anything sent before the deletion. The empty log replaces it on screen.
+function startAfresh(userId, log) {
+  forgetChanges();
+  session = {};
+  cachedAt = null;
+  cacheUpdating = false;
+  hiddenCautions.clear();
+  try { clearDeviceData(localStorage, userId); } catch { /* Storage is blocked, so nothing was kept. */ }
+  forgetDevice();
+  receive(log);
+  showLog();
+}
+
+// Not applied until the server has done it: the dialog waits for the reply.
+async function deleteData() {
+  const current = session;
+  const userId = account.id;
+  eraseBusy(true);
+  showEraseStatus("Deleting your data…");
+  const result = await sendDeletion("delete-data", userId);
+  if (session !== current) return;
+  if (result.failure) return eraseFailed(result.failure, "Couldn’t delete your data. Try again.");
+  startAfresh(userId, result.log);
+  $("erase-dialog").removeAttribute("data-busy");
+  $("erase-dialog").close();
+  notify("Your data has been deleted.");
+}
+
+// Deletes every row for the account, then the Clerk user. If Clerk fails after
+// the data has gone, "Try again" deletes only the Clerk user.
+async function deleteAccount() {
+  const userId = account.id;
+  if (!accountDataGone && !canDeleteAccount()) {
+    showEraseStatus("Deleting your account isn’t available. Your data is unchanged.");
+    return;
+  }
+  eraseBusy(true);
+  showEraseStatus("Deleting your account…");
+  if (!accountDataGone) {
+    const current = session;
+    const result = await sendDeletion("delete-account", userId);
+    if (session !== current) return;
+    if (result.failure) return eraseFailed(result.failure, "Couldn’t delete your account. Try again.");
+    accountDataGone = true;
+    startAfresh(userId, result.log);
+  }
+  // Set first, since Clerk's listener shows sign-in as soon as the user has gone.
+  authNotice = "Your account and all your data have been deleted.";
+  try {
+    const instance = await connectClerk();
+    if (instance.user?.id !== userId) throw new Error("The account to delete isn't the one signed in.");
+    await instance.user.delete();
+  } catch (error) {
+    authNotice = null;
+    if (account?.id !== userId) return;
+    console.error(error);
+    eraseBusy(false);
+    showEraseStatus("Your data has been deleted, but your account couldn’t be. Check your connection and try again.", true);
+    return;
+  }
+  // Deleting the user ends its session. If Clerk still reports one, sign out too.
+  if (clerk.user) {
+    try { await clerk.signOut(); } catch (error) { console.error(error); }
+  }
+  if (account) showSignedOut();
 }
 
 function previewBmi() {
@@ -1825,12 +2040,10 @@ $("clear-reminder").addEventListener("click", () => {
     return;
   }
   $("reminder-dialog").close();
-  changeState({ op: "clear-reminder" }, async () => {
+  changeState({ op: "clear-reminder" }, () => {
     notify("Reminders turned off.");
     // The server has forgotten every device, so this one starts afresh next time.
-    try { await (await worker?.pushManager?.getSubscription())?.unsubscribe(); } catch { /* Harmless: the server no longer sends to it. */ }
-    deviceEndpoint = null;
-    if (state) showReminder();
+    forgetDevice();
   });
 });
 for (const id of ["profile-height", "profile-height-in"]) $(id).addEventListener("input", previewBmi);
@@ -1942,10 +2155,31 @@ $("confirm-delete").addEventListener("click", () => {
   changeState({ op: "delete-weight", date }, () => notify("Weigh-in deleted."));
 });
 $("edit-dialog").addEventListener("close", () => { editingDate = null; });
+$("download-csv").addEventListener("click", downloadCsv);
+$("download-json").addEventListener("click", downloadJson);
+$("erase-download").addEventListener("click", downloadJson);
+$("delete-data").addEventListener("click", () => openErase("data"));
+$("delete-account").addEventListener("click", () => openErase("account"));
+$("erase-word").addEventListener("input", () => {
+  if (!$("erase-dialog").hasAttribute("data-busy")) $("erase-submit").disabled = !eraseConfirmed();
+});
+// Deleting needs a connection, so it never waits on this device.
+$("erase-form").addEventListener("submit", event => {
+  event.preventDefault();
+  if (!eraseConfirmed() || $("erase-dialog").hasAttribute("data-busy")) return;
+  if (navigator.onLine === false) {
+    showEraseStatus("Deleting needs a connection. Try again when you’re back online.");
+    return;
+  }
+  if (erasing === "account") deleteAccount();
+  else deleteData();
+});
 for (const button of document.querySelectorAll("[data-close]")) button.addEventListener("click", () => button.closest("dialog").close());
 for (const dialog of document.querySelectorAll("dialog")) {
+  // A dialog that's waiting for the server, as the delete dialog does, stays open.
+  dialog.addEventListener("cancel", event => { if (dialog.hasAttribute("data-busy")) event.preventDefault(); });
   dialog.addEventListener("click", event => {
-    if (event.target !== dialog) return;
+    if (event.target !== dialog || dialog.hasAttribute("data-busy")) return;
     const bounds = dialog.getBoundingClientRect();
     if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) dialog.close();
   });

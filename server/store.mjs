@@ -15,6 +15,15 @@ export function createStore(url = process.env.DATABASE_URL) {
     throw error;
   });
 
+  // Every row that belongs to a user, in every table. A new table keyed by
+  // user_id must be added here too (npm test checks).
+  const deleteRows = userId => [
+    sql`DELETE FROM weigh_ins WHERE user_id = ${userId}`,
+    sql`DELETE FROM waist_measurements WHERE user_id = ${userId}`,
+    sql`DELETE FROM push_subscriptions WHERE user_id = ${userId}`,
+    sql`DELETE FROM profiles WHERE user_id = ${userId}`
+  ];
+
   function writes(userId, change) {
     switch (change?.op) {
       case undefined:
@@ -108,6 +117,14 @@ export function createStore(url = process.env.DATABASE_URL) {
             RETURNING 1
           )
           SELECT count(*)::int AS imported FROM profile`];
+      // Empties the log and keeps the account. The profile goes back to a bare
+      // one, which stays started, so the import op never pulls a log saved in
+      // a browser before sign-in back into the emptied account.
+      case "delete-data":
+        return [...deleteRows(userId), sql`INSERT INTO profiles (user_id, started) VALUES (${userId}, true)`];
+      // Before the app deletes the Clerk user.
+      case "delete-account":
+        return deleteRows(userId);
       default:
         throw new Error("Unknown change: " + change.op);
     }

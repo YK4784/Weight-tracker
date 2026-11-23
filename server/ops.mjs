@@ -2,6 +2,8 @@ import { GOAL_MAX_MILESTONES, GOAL_MIN_RATE, GOAL_STORED_MAX_RATE, HEIGHT_UNITS,
 import { parseSubscription } from "./push.mjs";
 
 export const MAX_IMPORT_ENTRIES = 20_000;
+// What a deletion's `confirm` must be. The app sends it once the user has typed it.
+export const DELETE_WORD = "delete";
 
 const inRange = (value, min, max) => typeof value === "number" && Number.isFinite(value) && value >= min && value <= max;
 
@@ -69,6 +71,12 @@ export function parseOp(body, now = new Date()) {
     case "clear-goal":
     case "start":
       return { op: body.op };
+    // Deletes everything in the log and keeps the account, or deletes the
+    // account's every row before the app deletes the Clerk user. Each needs the
+    // word the user typed to confirm it, so a stray request can't delete anything.
+    case "delete-data":
+    case "delete-account":
+      return body.confirm === DELETE_WORD ? { op: body.op } : null;
     case "import": {
       const log = body.log;
       if (typeof log !== "object" || log === null) return null;

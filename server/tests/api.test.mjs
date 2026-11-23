@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createHandler } from "../api.mjs";
-import { MAX_IMPORT_ENTRIES, latestDate, parseOp } from "../ops.mjs";
+import { readFile } from "node:fs/promises";
+import { DELETE_WORD, MAX_IMPORT_ENTRIES, latestDate, parseOp } from "../ops.mjs";
+import { schema } from "../schema.mjs";
 
 const NOW = new Date("2026-11-22T23:30:00Z");
 
@@ -210,4 +212,37 @@ test("a waist is a date, a waist in cm kept to 0.01 cm, and the sex whose formul
   }
   assert.deepEqual(parseOp({ op: "delete-waist", date: "2026-11-01", waist: 86 }, NOW), { op: "delete-waist", date: "2026-11-01" });
   assert.equal(parseOp({ op: "delete-waist", date: "nope" }, NOW), null);
+});
+
+test("deleting data or the account needs the confirm word, and nothing else", () => {
+  assert.equal(DELETE_WORD, "delete");
+  for (const op of ["delete-data", "delete-account"]) {
+    assert.deepEqual(parseOp({ op, confirm: "delete" }, NOW), { op }, op);
+    assert.deepEqual(parseOp({ op, confirm: "delete", userId: "user_2", extra: 1 }, NOW), { op }, "extra fields are dropped");
+    for (const confirm of [undefined, null, "", "Delete", "DELETE", " delete", "delete ", "yes", true, 1, ["delete"], { delete: true }]) {
+      assert.equal(parseOp({ op, confirm }, NOW), null, op + " " + JSON.stringify(confirm));
+    }
+    assert.equal(parseOp({ op }, NOW), null, op + " without confirm");
+  }
+});
+
+test("the API passes a confirmed deletion to the store as the signed-in user, and refuses an unconfirmed one", async () => {
+  const { calls, send } = setup();
+  assert.equal((await send("POST", { op: "delete-data" })).status, 400);
+  assert.equal((await send("POST", { op: "delete-account", confirm: "yes" })).status, 400);
+  assert.equal((await send("POST", { op: "delete-data", confirm: "delete" }, null)).status, 401);
+  assert.equal(calls.length, 0);
+  const reply = await send("POST", { op: "delete-data", confirm: "delete", userId: "user_2" });
+  assert.equal(reply.status, 200);
+  assert.equal(reply.headers.get("cache-control"), "no-store");
+  assert.equal((await send("POST", { op: "delete-account", confirm: "delete" })).status, 200);
+  assert.deepEqual(calls, [["user_1", { op: "delete-data" }], ["user_1", { op: "delete-account" }]]);
+});
+
+test("deleting an account reaches every table", async () => {
+  const store = await readFile(new URL("../store.mjs", import.meta.url), "utf8");
+  const tables = schema.flatMap(text => [.../CREATE TABLE IF NOT EXISTS (\w+)/g.exec(text)?.slice(1) ?? []]);
+  assert.deepEqual(tables.sort(), ["profiles", "push_subscriptions", "waist_measurements", "weigh_ins"]);
+  const deleteRows = /const deleteRows = userId => \[([^\]]*)\]/.exec(store)[1];
+  for (const table of tables) assert.match(deleteRows, new RegExp("DELETE FROM " + table + " WHERE user_id = \\$\\{userId\\}`"), table);
 });

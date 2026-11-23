@@ -22,6 +22,7 @@
   <link rel="modulepreload" href="./model.mjs">
   <link rel="modulepreload" href="./chart.mjs">
   <link rel="modulepreload" href="./account.mjs">
+  <link rel="modulepreload" href="./export.mjs">
   <link rel="modulepreload" href="./auth.mjs">
   <link rel="modulepreload" href="./config.mjs">
   <script type="module" src="./app.mjs"></script>
@@ -43,6 +44,7 @@
 
   <main class="wrap auth" id="auth" tabindex="-1" aria-busy="true">
     <div aria-live="polite">
+      <p class="auth-notice" id="auth-notice" hidden></p>
       <div class="auth-message" id="auth-loading"><p>Loading…</p></div>
       <div class="auth-message" id="auth-setup" hidden>
         <h1>Sign-in isn’t set up yet</h1>
@@ -252,6 +254,31 @@
       <button class="small-button waist-more" type="button" id="waist-more" aria-controls="waist-table" aria-expanded="false" hidden>Show all</button>
       <p class="note">An estimate from the U.S. Army’s one-site tape formula, using your waist at the navel and your 14-day average on the day you measured. A tape estimate can be several points off a lab scan, so it’s most useful for following your own trend.</p>
     </section>
+
+    <!-- Your data, at the bottom of the log until F2's settings page moves it there. -->
+    <section class="your-data" id="your-data" aria-labelledby="data-title" hidden>
+      <h2 id="data-title">Your data</h2>
+      <div class="data-row">
+        <div class="data-text">
+          <h3>Download</h3>
+          <p>Your weigh-ins as a spreadsheet, with each one’s note and 14-day average. Or everything in your log as JSON: weigh-ins and notes, waist measurements, height, the body fat formula, your goal, units and reminder time.</p>
+        </div>
+        <div class="data-actions">
+          <button class="small-button" type="button" id="download-csv">Download weigh-ins (CSV)</button>
+          <button class="small-button" type="button" id="download-json">Download everything (JSON)</button>
+        </div>
+      </div>
+      <div class="data-row">
+        <div class="data-text">
+          <h3>Delete</h3>
+          <p id="delete-note">Delete my data empties your log on every device and keeps your account.</p>
+        </div>
+        <div class="data-actions">
+          <button class="small-button danger-text" type="button" id="delete-data">Delete my data</button>
+          <button class="small-button danger-text" type="button" id="delete-account" hidden>Delete my account</button>
+        </div>
+      </div>
+    </section>
     <p class="storage-status" id="storage-status"></p>
   </main>
 
@@ -366,6 +393,25 @@
       <div class="dialog-actions edit-actions"><button class="danger-link" type="button" id="delete-entry">Delete entry</button><button class="button primary" type="submit">Save changes</button></div>
     </form>
     <div id="delete-confirm" hidden><p class="dialog-detail">Delete this weigh-in and recalculate the trend?</p><div class="dialog-actions"><button class="button secondary" type="button" id="keep-entry">Keep entry</button><button class="button danger" type="button" id="confirm-delete">Delete weigh-in</button></div></div>
+  </dialog>
+  <dialog id="erase-dialog" aria-labelledby="erase-title" aria-describedby="erase-lead erase-list erase-after">
+    <div class="dialog-heading"><h2 id="erase-title">Delete your data?</h2><button class="icon-button" data-close type="button" id="erase-close" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="./icons.svg#close"/></svg></button></div>
+    <p class="dialog-detail erase-lead" id="erase-lead">This permanently deletes everything in your log, on every device:</p>
+    <ul class="erase-list" id="erase-list">
+      <li>Your weigh-ins and their notes</li>
+      <li>Your waist measurements and the body fat formula you chose</li>
+      <li>Your goal and your height</li>
+      <li>Your units, which go back to kg and cm</li>
+      <li>Your reminders, which stop on every device</li>
+    </ul>
+    <p class="dialog-detail" id="erase-after"></p>
+    <p class="erase-copy"><button class="text-button" type="button" id="erase-download">Download a copy first</button></p>
+    <form id="erase-form">
+      <label class="field-label" for="erase-word">Type “delete” to confirm</label>
+      <div class="input-frame"><input id="erase-word" name="confirm" type="text" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="done"></div>
+      <p class="dialog-note" id="erase-status" aria-live="polite" hidden></p>
+      <div class="dialog-actions"><button class="button secondary" type="button" id="erase-cancel" data-close>Cancel</button><button class="button danger" type="submit" id="erase-submit" disabled>Delete my data</button></div>
+    </form>
   </dialog>
   <div class="toast" id="toast">
     <p class="toast-message" id="toast-message" role="status" aria-live="polite"></p>

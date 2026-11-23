@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { LAST_USER_KEY, LEGACY_STORAGE_KEY, LOG_CACHE_PREFIX, OUTBOX_PREFIX, claimLegacyLog, clearLogCache, clearOutbox, frontendApiFor, lastUser, logCacheKeyFor, outboxKeyFor, readLogCache, readOutbox, signOutWarning, storageKeyFor, writeLogCache, writeOutbox } from "../dist/account.mjs";
+import { LAST_USER_KEY, LEGACY_STORAGE_KEY, LOG_CACHE_PREFIX, OUTBOX_PREFIX, claimLegacyLog, clearDeviceData, clearLogCache, clearOutbox, fastLossHiddenKeyFor, frontendApiFor, lastUser, logCacheKeyFor, outboxKeyFor, readLogCache, readOutbox, signOutWarning, storageKeyFor, writeLogCache, writeOutbox } from "../dist/account.mjs";
 import { normalizeState } from "../dist/model.mjs";
 
 const keyFor = (kind, host) => "pk_" + kind + "_" + btoa(host + "$");
@@ -242,4 +242,30 @@ test("signing out with changes waiting asks first, counting them", () => {
   assert.equal(signOutWarning(undefined), null);
   assert.equal(signOutWarning(1), "1 change on this device hasn’t synced yet. Sign out anyway?");
   assert.equal(signOutWarning(2), "2 changes on this device haven’t synced yet. Sign out anyway?");
+});
+
+test("after a deletion, the device keeps nothing of the user's log, and nothing that could be imported again", () => {
+  const storage = new MemoryStorage({
+    [LEGACY_STORAGE_KEY]: "unclaimed browser log",
+    [storageKeyFor("user_a")]: "claimed browser log",
+    [storageKeyFor("user_b")]: "someone else's browser log",
+    [fastLossHiddenKeyFor("user_a")]: "2026-11-01",
+    [fastLossHiddenKeyFor("user_b")]: "2026-10-01",
+    "unrelated": "kept"
+  });
+  writeLogCache(storage, "user_a", log, 1);
+  writeOutbox(storage, "user_a", [weighIn]);
+  clearDeviceData(storage, "user_a");
+  assert.deepEqual([...storage.items.keys()].sort(), [fastLossHiddenKeyFor("user_b"), storageKeyFor("user_b"), "unrelated"].sort());
+  assert.equal(fastLossHiddenKeyFor("user_a"), "baseline.fast-loss-hidden:user_a");
+  // Nothing is left for the first sign-in on this browser to take over.
+  assert.equal(claimLegacyLog(storage, "user_a"), false);
+  clearDeviceData(storage, "user_a");
+  assert.equal(storage.items.size, 3, "clearing again is harmless");
+});
+
+test("clearing device data without a user removes only what belongs to nobody", () => {
+  const storage = new MemoryStorage({ [LEGACY_STORAGE_KEY]: "old", [storageKeyFor("user_a")]: "mine" });
+  clearDeviceData(storage, null);
+  assert.deepEqual([...storage.items.keys()], [storageKeyFor("user_a")]);
 });

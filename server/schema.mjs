@@ -1,5 +1,7 @@
 // The database tables. The API applies these on each cold start, so every
-// statement must be safe to run again against an existing database.
+// statement must be safe to run again against an existing database. Every
+// table holds rows keyed by the Clerk user_id, and deleting an account or its
+// data deletes them from each (see deleteRows in store.mjs).
 export const schema = [
   `CREATE TABLE IF NOT EXISTS profiles (
     user_id text PRIMARY KEY,

@@ -80,7 +80,7 @@ node -e 'const k = require("node:crypto").generateKeyPairSync("ec", { namedCurve
 
 The service worker in `baseline/dist/sw.js` keeps a copy of the app's own files: the page, its modules and styles, the font, the icons and the manifest. They're listed in `SHELL` at the top of the file. Each file comes from the network first, and the answer replaces the copy, so a deploy reaches the next load that has a connection. The copy is used when the network fails, returns an error or takes more than 3 seconds. A page that opened from the copy gets its modules from the copy too, so it never mixes versions. The worker never handles `/api/` requests, other sites such as Clerk, or anything but `GET`.
 
-When you add a file to `baseline/dist/`, add it to `SHELL`, or to the list of files left out on purpose in `baseline/tests/worker.test.mjs`. `npm test` fails until you do. When `SHELL` changes, bump the version in the cache's name, `baseline-shell-v1`, so the new worker starts a fresh cache and deletes the old one. Edits to a listed file need no bump.
+When you add a file to `baseline/dist/`, add it to `SHELL`, or to the list of files left out on purpose in `baseline/tests/worker.test.mjs`. `npm test` fails until you do. When `SHELL` changes, bump the version in the cache's name, now `baseline-shell-v2`, so the new worker starts a fresh cache and deletes the old one. Edits to a listed file need no bump.
 
 Clerk's scripts load from its servers on every start, through a redirect that browsers can't cache, so sign-in can't load offline. Baseline shows the copy of the log kept on the device instead, and loads sign-in when the connection returns.
 
@@ -94,7 +94,7 @@ vercel env pull .env.local
 npm start
 ```
 
-Open [Baseline locally](http://127.0.0.1:4173/). `npm start` serves the page from `baseline/dist/` and runs the API from `api/log.mjs`, using the `DATABASE_URL` in `.env.local`. Reminders can be turned on locally, but only Vercel sends them. Run `npm test` to check the calculations, including body fat against the Army's worked examples, the API's input checks, the reminder schedule, the push encryption, the copy of the log kept on the device, and the changes that wait on the device and replay on top of it. It also checks that `index.html` preloads every module and connects early to the Frontend API in `config.mjs`, and that the service worker keeps every file in `baseline/dist/` that the app needs and leaves the API and Clerk alone.
+Open [Baseline locally](http://127.0.0.1:4173/). `npm start` serves the page from `baseline/dist/` and runs the API from `api/log.mjs`, using the `DATABASE_URL` in `.env.local`. Reminders can be turned on locally, but only Vercel sends them. Run `npm test` to check the calculations, including body fat against the Army's worked examples, the API's input checks, the reminder schedule, the push encryption, the copy of the log kept on the device, the changes that wait on the device and replay on top of it, the downloads, and the word a deletion needs. It also checks that deleting an account reaches every table in `server/schema.mjs`. And it checks that `index.html` preloads every module and connects early to the Frontend API in `config.mjs`, and that the service worker keeps every file in `baseline/dist/` that the app needs and leaves the API and Clerk alone.
 
 ## Using the tracker
 
@@ -104,7 +104,7 @@ Use **Add** or **Update** next to **Body fat**, or **Log waist** in the **Body f
 
 Use **Set** next to **Reminder** to get a notification at a chosen hour on days you haven't logged a weigh-in. Your browser asks to allow notifications the first time. Each device you turn reminders on from gets them, and **Turn off reminders** stops them on all of them. On iPhone and iPad, add Baseline to the Home Screen first: in Safari, tap **Share**, then **Add to Home Screen**. Open Baseline from the Home Screen and turn reminders on there. The reminder uses the time zone of the device you last saved it from. Signing out doesn't stop reminders on a device, so turn them off first on a device you share.
 
-Sign in to open your log. Use the avatar at the top right to manage your account or sign out. A new account starts with an empty log. The **Weight log** shows every entry with its weekly trend and note, 15 to a page and grouped by month, and lets you edit a weigh-in's weight or note or delete it. A month that runs over onto the next page repeats its heading there. Choose **Monthly summary** at the top of the log to see each month's start and end averages, change, weekly trend and lowest weigh-in, along with any goal milestones reached that month.
+Sign in to open your log. Use the avatar at the top right to manage your account or sign out. A new account starts with an empty log. To download your log or delete it, use **Your data** at the bottom of the **Log** page, described in [Your data](#your-data). The **Weight log** shows every entry with its weekly trend and note, 15 to a page and grouped by month, and lets you edit a weigh-in's weight or note or delete it. A month that runs over onto the next page repeats its heading there. Choose **Monthly summary** at the top of the log to see each month's start and end averages, change, weekly trend and lowest weigh-in, along with any goal milestones reached that month.
 
 Entries and their notes, height, waist measurements and the body fat formula you chose, your goal, your units and your reminder time are saved to your account, so the same log opens on any device you sign in on. A change shows right away and is saved in the background. Switching back to the tab picks up changes made on another device.
 
@@ -127,6 +127,57 @@ Baseline stores these in the browser on your device:
 - **A log from before accounts,** on a browser that used an earlier version, until it moves into an account as described below.
 - **Baseline's own files,** in the service worker's cache, so it opens offline. They hold none of your data.
 
-Signing out removes the copy of your log, your user ID and any changes that haven't synced yet, so a shared computer keeps none of your weights. The avatar menu doesn't warn about changes that haven't synced, so before you sign out, check that the "Saved on this device" line has gone. Clerk keeps its own sign-in data, and signing out ends that session.
+Signing out removes the copy of your log, your user ID and any changes that haven't synced yet, so a shared computer keeps none of your weights. Deleting your data or your account also removes your weights and the changes waiting to sync from the device you delete it on, as [Your data](#your-data) describes. The avatar menu doesn't warn about changes that haven't synced, so before you sign out, check that the "Saved on this device" line has gone. Clerk keeps its own sign-in data, and signing out ends that session.
 
-Earlier versions kept logs only in the browser. The first time an account with an empty online log signs in on such a browser, that browser's log moves into the account and is removed from the browser. An account that already has entries keeps them, and the browser's log is left untouched.
+Earlier versions kept logs only in the browser. The first time an account with an empty online log signs in on such a browser, that browser's log moves into the account and is removed from the browser. An account that already has entries keeps them, and the browser's log is left untouched. An account whose data was deleted never takes in a browser's log, as [Your data](#your-data) describes.
+
+## Your data
+
+**Your data**, at the bottom of the **Log** page, downloads your log or deletes it. Both downloads include changes still waiting on the device. On an iPhone or iPad with Baseline on the Home Screen, where a download does nothing useful, the share sheet opens instead, so you can save the file to Files.
+
+**Download weigh-ins (CSV)** saves `baseline-weigh-ins-` and today's date, such as `baseline-weigh-ins-2026-11-23.csv`, for a spreadsheet. It has a row for each weigh-in, oldest first, with these columns:
+
+- `date`: the date, as YYYY-MM-DD.
+- `weight_kg`: the weight in kilograms as stored, to 0.01 kg.
+- `weight`: the weight as Baseline shows it in your unit, such as "187.2 lb" or "13 st 5.2 lb".
+- `note`: the note, if there is one. A spreadsheet runs a cell that starts with `=`, `+`, `-` or `@` as a formula, so a note that starts with one of them gets an apostrophe in front, which shows it as text.
+- `average_14d_kg`: the 14-day average on that date in kilograms, to 0.01 kg.
+
+The file is UTF-8 with a byte order mark and CRLF line ends, and a field with a comma, quote or line break is quoted as RFC 4180 describes, so that Excel reads commas, quotes, accents and emoji in notes as they were typed.
+
+**Download everything (JSON)** saves `baseline-export-` and today's date, such as `baseline-export-2026-11-23.json`. It has everything in your log, in metric units, in a format a later version can import:
+
+```json
+{
+  "format": "baseline-export",
+  "version": 1,
+  "exportedAt": "2026-11-23T09:41:00.000Z",
+  "units": { "weight": "lb", "height": "ft" },
+  "heightCm": 178.5,
+  "sex": "female",
+  "goal": { "weightKg": 75, "startDate": "2026-11-01", "startWeightKg": 84.91, "rateKgPerWeek": 0.5, "milestones": 10 },
+  "reminder": { "hour": 8, "timeZone": "Europe/London" },
+  "entries": [{ "date": "2026-11-01", "weightKg": 85, "note": null }],
+  "waists": [{ "date": "2026-11-02", "waistCm": 86.61 }]
+}
+```
+
+`units` are the units Baseline shows, and `sex` is the body fat formula you chose. `heightCm`, `sex`, `goal` and `reminder` are null when they aren't set, as is `rateKgPerWeek` for a goal without a target rate. The file holds no account ID, email address or push subscription.
+
+**Delete my data** empties your log and keeps your account. **Delete my account** empties your log, then deletes your account and signs you out. Each opens a dialog that lists what goes and offers **Download a copy first**. It goes ahead only once you type "delete". Deleting needs a connection, and the log changes only once the server has deleted it. If that fails, the dialog says so and you can try again.
+
+Either one deletes, from your account:
+
+- every weigh-in and its note
+- every waist measurement, and the body fat formula you chose
+- your goal and your height
+- your units, which go back to kg and cm
+- your reminder time and time zone, and every device that gets reminders, so reminders stop on all of them
+
+**Delete my data** leaves an empty profile in its place. It counts as started, so a log from before accounts, in any browser, never moves back into the account. **Delete my account** leaves no row for your user ID in any table: `profiles`, `weigh_ins`, `waist_measurements` and `push_subscriptions`. Then it deletes your Clerk user, which signs you out, and the sign-in page says "Your account and all your data have been deleted." If your data is deleted but Clerk can't delete the account, the dialog says so, and **Try again** deletes only the account.
+
+On the device you delete on, Baseline also removes the copy of your log, changes waiting to sync, a log from before accounts and the hidden note about fast loss, and it unsubscribes the device from notifications. After **Delete my data**, the copy is replaced by the empty log. After **Delete my account**, your user ID goes too. Other devices show the empty log the next time they load it, and after an account is deleted they're signed out. A change still waiting on another device, because that device was offline, is saved into the emptied log when it syncs.
+
+**Delete my account** needs the Clerk Dashboard setting that lets users delete their own accounts. Baseline reads it from the signed-in user's `deleteSelfEnabled`, and the button shows only when it's on. With it on, Clerk's own account page in the avatar menu can delete the account too, but that removes only the Clerk user and leaves the log in the database. Use **Delete my account** in Baseline instead.
+
+Neon keeps a history of every change so the database can be restored to an earlier moment, and deleted rows stay in that history until its window passes. On Neon's Free plan, which the setup command above chooses, the window is 6 hours, which is both the plan's default and its maximum. The window shows under **Settings → Postgres → History window** in the Neon console. Paid plans default to 1 day and allow up to 7 days on Launch or 30 on Scale. A restore keeps the data it replaced in a backup branch named after the branch, `_old_` and the time. That branch keeps deleted rows until you delete it, so delete it once you've checked the restore.

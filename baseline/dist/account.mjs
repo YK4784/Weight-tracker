@@ -143,6 +143,27 @@ export function clearOutbox(storage) {
   for (const key of keys) storage.removeItem(key);
 }
 
+// The start date of the goal whose note about fast loss the user hid, per user.
+export const FAST_LOSS_HIDDEN_PREFIX = "baseline.fast-loss-hidden:";
+
+export function fastLossHiddenKeyFor(userId) {
+  return FAST_LOSS_HIDDEN_PREFIX + userId;
+}
+
+// Removes everything this device holds of a user's log once they've deleted
+// it on the server: the cached copy, the last user and every outbox (see
+// clearLogCache), a log saved before sign-in that nobody has claimed or that
+// this user claimed, and the hidden note. Without the old browser log, nothing
+// on this device can be imported into the emptied account.
+export function clearDeviceData(storage, userId) {
+  clearLogCache(storage);
+  storage.removeItem(LEGACY_STORAGE_KEY);
+  if (validUserId(userId)) {
+    storage.removeItem(storageKeyFor(userId));
+    storage.removeItem(fastLossHiddenKeyFor(userId));
+  }
+}
+
 // The question to ask before signing out while changes haven't synced, since
 // signing out removes them. Null when nothing is waiting.
 export function signOutWarning(count) {
