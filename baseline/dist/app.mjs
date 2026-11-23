@@ -1332,8 +1332,6 @@ let authNotice = null;
 function showAuth(view) {
   for (const id of authViews) $(id).hidden = id !== view;
   $("auth").dataset.view = view;
-  // The sign-in screen is Baseline's front page, so it links the health data policy.
-  $("auth-note").hidden = view !== "sign-in";
   const notice = view === "sign-in" ? authNotice : null;
   $("auth-notice").textContent = notice ?? "";
   $("auth-notice").hidden = !notice;
