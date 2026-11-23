@@ -17,7 +17,11 @@ export const schema = [
     PRIMARY KEY (user_id, date)
   )`,
   // The goal (see normalizeGoal in model.mjs). The rate is optional. The other
-  // columns are all set or all null.
+  // columns are all set or all null. The rate's CHECK of 5 kg a week is the
+  // storage bound (GOAL_STORED_MAX_RATE). The lower cap on a new goal depends on
+  // its start weight and is checked in parseOp. A CHECK across both columns
+  // would fail every later update to a profile that holds an older, faster
+  // goal, including a change of units and the reminder run's reminded_on.
   `ALTER TABLE profiles
     ADD COLUMN IF NOT EXISTS goal_kg numeric(6, 2) CHECK (goal_kg > 0 AND goal_kg <= 2000),
     ADD COLUMN IF NOT EXISTS goal_start_date date,

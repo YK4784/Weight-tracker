@@ -183,7 +183,11 @@ export function bodyFat(weightKg, waistCm, sex) {
 
 export const GOAL_MILESTONES = 10;
 export const GOAL_MAX_MILESTONES = 20;
-export const GOAL_MAX_RATE = 5;
+// The fastest target rate that can be stored, in kg a week, and the bound in
+// the database's CHECK. It is not the limit on a new goal, which is
+// maxGoalRate: goals saved before that limit existed keep their rate and still
+// load, display and forecast.
+export const GOAL_STORED_MAX_RATE = 5;
 
 // A goal is a target weight, where and when the user started, an optional
 // planned rate in kg a week (a size; the direction comes from start and target)
@@ -192,9 +196,53 @@ export const GOAL_MIN_RATE = .001;
 
 export function normalizeGoal(value) {
   if (!validWeight(value?.weight) || !validWeight(value.startWeight) || !validDate(value.startDate)) return null;
-  const rate = positive(value.rate) && value.rate >= GOAL_MIN_RATE && value.rate <= GOAL_MAX_RATE ? roundRate(value.rate) : null;
+  const rate = positive(value.rate) && value.rate >= GOAL_MIN_RATE && value.rate <= GOAL_STORED_MAX_RATE ? roundRate(value.rate) : null;
   const milestones = Number.isInteger(value.milestones) && value.milestones >= 1 && value.milestones <= GOAL_MAX_MILESTONES ? value.milestones : GOAL_MILESTONES;
   return { weight: roundWeight(value.weight), startDate: value.startDate, startWeight: roundWeight(value.startWeight), rate, milestones };
+}
+
+// Above about 1.5 kg a week, the risk of gallstones climbs steeply (Weinsier
+// 1995, https://pubmed.ncbi.nlm.nih.gov/7847427/). So the fastest target rate
+// a new goal can have is the lower of GOAL_RATE_CAP and GOAL_RATE_CAP_SHARE of
+// its start weight a week. A rate is a size, so this applies to every goal,
+// though only loss carries the gallstone risk.
+export const GOAL_RATE_CAP = 1.5;
+export const GOAL_RATE_CAP_SHARE = .015;
+// A loss of more than this share of the start weight a week is faster than
+// most guidance suggests.
+export const GOAL_FAST_SHARE = .01;
+// How far past the cap a rate may round, in kg a week. A rate is typed to
+// 0.01 lb, which seldom lands on the cap in kilograms, so the nearest 0.01 lb
+// to the cap still counts as the cap.
+export const GOAL_RATE_SLACK = .001;
+
+// The fastest target rate for a goal that starts at `weightKg`, in kg a week,
+// rounded like a stored rate.
+export function maxGoalRate(weightKg) {
+  return roundRate(Math.min(GOAL_RATE_CAP, GOAL_RATE_CAP_SHARE * weightKg));
+}
+
+// Whether a new goal that starts at `startWeight` may have `rate`, both in kg.
+// Compares whole thousandths of a kilogram, as stored. The server checks the same.
+export function goalRateAllowed(rate, startWeight) {
+  return Math.round(rate * 1000) <= Math.round((maxGoalRate(startWeight) + GOAL_RATE_SLACK) * 1000);
+}
+
+// The fastest target rate that can be typed for a goal that starts at
+// `startWeight`, in kg a week, or lb a week for pounds and for stones. Rates are
+// typed to 0.01. Null without a start weight.
+export function goalRateLimit(startWeight, unit = "kg") {
+  if (!positive(startWeight)) return null;
+  const perUnit = unit === "kg" ? 1 : KG_PER_LB;
+  // One step past the cap, then down to the fastest rate allowed.
+  let hundredths = Math.ceil((maxGoalRate(startWeight) + GOAL_RATE_SLACK) / perUnit * 100) + 1;
+  while (hundredths > 0 && !goalRateAllowed(hundredths / 100 * perUnit, startWeight)) hundredths--;
+  return hundredths / 100;
+}
+
+// Whether `rate` is more than GOAL_FAST_SHARE of `startWeight` a week, both in kg.
+export function fastGoalRate(rate, startWeight) {
+  return Math.round(rate * 1000) > Math.round(startWeight * GOAL_FAST_SHARE * 1000);
 }
 
 export const NOTE_MAX_LENGTH = 100;
@@ -458,6 +506,30 @@ export function overallRate(goal, average, throughDate, unit = "kg") {
   const days = dayOf(throughDate) - dayOf(goal.startDate);
   if (days < OVERALL_MIN_DAYS) return null;
   return weeklyTenths((average - goal.startWeight) / days, unit);
+}
+
+export const FAST_LOSS_DAYS = 21;
+export const FAST_LOSS_AFTER_DAYS = 14;
+
+// Whether the weight has come down faster than a loss goal's cap
+// (maxGoalRate) for a while: on each of the last FAST_LOSS_DAYS days through
+// `today`, the weekly trend (calculateRate) was a clear fall faster than the
+// cap. The first of those days must be at least FAST_LOSS_AFTER_DAYS after the
+// goal's start date, so the water lost in a goal's first weeks doesn't count.
+// The trend and the cap are compared as shown, to 0.1 of `unit`.
+export function fastLossCaution(entries, goal, today, unit = "kg") {
+  if (!goal || goalProgress(goal, null, unit).direction !== "lose") return false;
+  const end = dayOf(today);
+  const from = end - FAST_LOSS_DAYS + 1;
+  if (from < dayOf(goal.startDate) + FAST_LOSS_AFTER_DAYS) return false;
+  const cap = toTenths(maxGoalRate(goal.startWeight), unit);
+  // The weigh-ins that reach the trend on any of those days.
+  const recent = entries.filter(entry => dayOf(entry.date) > from - RATE_DAYS);
+  for (let day = from; day <= end; day++) {
+    const rate = calculateRate(recent, dateOf(day), unit);
+    if (!rate?.clear || toTenths(-rate.perWeek, unit) <= cap) return false;
+  }
+  return true;
 }
 
 // The last day of a calendar month ("YYYY-MM"), and the month after it.

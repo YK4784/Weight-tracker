@@ -1,4 +1,4 @@
-import { GOAL_MAX_MILESTONES, GOAL_MAX_RATE, GOAL_MIN_RATE, HEIGHT_UNITS, NOTE_MAX_LENGTH, SEXES, WAIST_MAX, WAIST_MIN, WEIGHT_UNITS, cleanNote, dateOf, dayOf, noteLength, normalizeState, roundHeight, roundRate, roundWaist, roundWeight, validDate, validTimeZone } from "../baseline/dist/model.mjs";
+import { GOAL_MAX_MILESTONES, GOAL_MIN_RATE, GOAL_STORED_MAX_RATE, HEIGHT_UNITS, NOTE_MAX_LENGTH, SEXES, WAIST_MAX, WAIST_MIN, WEIGHT_UNITS, cleanNote, dateOf, dayOf, goalRateAllowed, noteLength, normalizeState, roundHeight, roundRate, roundWaist, roundWeight, validDate, validTimeZone } from "../baseline/dist/model.mjs";
 import { parseSubscription } from "./push.mjs";
 
 export const MAX_IMPORT_ENTRIES = 20_000;
@@ -35,11 +35,14 @@ export function parseOp(body, now = new Date()) {
         ? { op: body.op, date: body.date, waist: roundWaist(body.waist), sex: body.sex } : null;
     case "delete-waist":
       return validDate(body.date) ? { op: body.op, date: body.date } : null;
+    // A new or edited goal's target rate can be no faster than the cap for its
+    // start weight (see maxGoalRate in model.mjs). Goals stored before the cap
+    // keep their rate until they are saved again.
     case "set-goal": {
       const goal = body.goal;
       const valid = inRange(goal?.weight, 0.1, 2000) && inRange(goal.startWeight, 0.1, 2000)
         && validDate(goal.startDate) && goal.startDate <= latest
-        && (goal.rate == null || inRange(goal.rate, GOAL_MIN_RATE, GOAL_MAX_RATE))
+        && (goal.rate == null || inRange(goal.rate, GOAL_MIN_RATE, GOAL_STORED_MAX_RATE) && goalRateAllowed(goal.rate, roundWeight(goal.startWeight)))
         && Number.isInteger(goal.milestones) && goal.milestones >= 1 && goal.milestones <= GOAL_MAX_MILESTONES;
       return valid ? { op: body.op, goal: {
         weight: roundWeight(goal.weight), startDate: goal.startDate, startWeight: roundWeight(goal.startWeight),

@@ -1,4 +1,4 @@
-import { CM_PER_IN, FORECAST_MAX_DAYS, GOAL_MILESTONES, KG_PER_LB, OVERALL_MIN_DAYS, RATE_DAYS, RATE_MIN_ENTRIES, RATE_MIN_SPAN, SEXES, WINDOW_DAYS, averageChanges, bmi, bodyFat, bodyFatChange, bodyFatHistory, calculateRate, calculateTrend, cleanNote, dateOf, dayOf, forecastGoal, formatAmount, formatWaist, formatWeight, fromTenths, goalProgress, groupByMonth, heightParts, localToday, monthlyReports, normalizeGoal, normalizeState, oneDecimal, overallRate, positive, prettyDate, recentRange, roundHeight, roundWaist, roundWeight, saveWaist, saveWeight, shiftDate, spokenHeight, spokenWeight, toTenths, validDate, validWaist, waistParts, waistTenths, weightParts } from "./model.mjs";
+import { CM_PER_IN, FAST_LOSS_DAYS, FORECAST_MAX_DAYS, GOAL_MILESTONES, GOAL_RATE_CAP, KG_PER_LB, OVERALL_MIN_DAYS, RATE_DAYS, RATE_MIN_ENTRIES, RATE_MIN_SPAN, SEXES, WINDOW_DAYS, averageChanges, bmi, bodyFat, bodyFatChange, bodyFatHistory, calculateRate, calculateTrend, cleanNote, dateOf, dayOf, fastGoalRate, fastLossCaution, forecastGoal, formatAmount, formatWaist, formatWeight, fromTenths, goalProgress, goalRateAllowed, goalRateLimit, groupByMonth, heightParts, localToday, maxGoalRate, monthlyReports, normalizeGoal, normalizeState, oneDecimal, overallRate, positive, prettyDate, recentRange, roundHeight, roundWaist, roundWeight, saveWaist, saveWeight, shiftDate, spokenHeight, spokenWeight, toTenths, validDate, validWaist, waistParts, waistTenths, weightParts } from "./model.mjs";
 import { BodyFatChart, TrendChart } from "./chart.mjs";
 import { claimLegacyLog, storageKeyFor } from "./account.mjs";
 import { AuthSetupError, startClerk } from "./auth.mjs";
@@ -183,6 +183,7 @@ function showGoal() {
   $("goal-label").textContent = goal ? "Edit" : "Set";
   $("goal-label").setAttribute("aria-label", goal ? "Edit your goal of " + spokenWeight(goal.weight, unit()) : "Set a goal weight");
   showProgress();
+  showCaution();
   showForecast();
 }
 
@@ -231,6 +232,28 @@ function showProgress() {
     details.push(Math.floor(progress.overall * 100) + "% of the way");
   }
   writeLine(note, amount(progress.toGo) + " to go", details.map(text => " · " + text).join(""));
+}
+
+// Hiding the note about fast loss lasts for that goal, known by its start date,
+// on this device. The page also remembers it, in case the device can't store it.
+const hiddenCautions = new Set();
+const cautionKey = () => "baseline.fast-loss-hidden:" + account.id;
+
+function cautionHidden(goal) {
+  if (hiddenCautions.has(account.id + " " + goal.startDate)) return true;
+  try { return localStorage.getItem(cautionKey()) === goal.startDate; } catch { return false; }
+}
+
+// A quiet line under the progress when a loss goal's weight has come down
+// faster than its cap for three weeks (see fastLossCaution). It informs and
+// never changes the goal.
+function showCaution() {
+  const goal = state.goal;
+  const show = Boolean(goal) && !cautionHidden(goal) && fastLossCaution(state.entries, goal, today, unit());
+  $("fast-loss").hidden = !show;
+  if (!show) return;
+  $("fast-loss-text").textContent = "Your weight has come down faster than " + amount(maxGoalRate(goal.startWeight)) + " a week for " + FAST_LOSS_DAYS / 7 +
+    " weeks. Loss this fast raises the risk of gallstones, so it’s worth mentioning to your doctor if you haven’t already.";
 }
 
 function signedRate(perWeek) {
@@ -839,17 +862,17 @@ function writeWaist(cm) {
 }
 
 // The target rate is typed to 0.01 kg or lb a week.
+const typedRate = kg => Math.round((fieldUnits.weight === "kg" ? kg : kg / KG_PER_LB) * 100) / 100;
+
 function readRate(stored) {
-  const weightUnit = fieldUnits.weight;
   const value = $("goal-rate").valueAsNumber;
   if (!Number.isFinite(value)) return null;
-  const toUnit = kg => weightUnit === "kg" ? kg : kg / KG_PER_LB;
-  if (stored && Math.round(toUnit(stored) * 100) === Math.round(value * 100)) return stored;
-  return weightUnit === "kg" ? value : value * KG_PER_LB;
+  if (stored && typedRate(stored) === Math.round(value * 100) / 100) return stored;
+  return fieldUnits.weight === "kg" ? value : value * KG_PER_LB;
 }
 
 function writeRate(kg) {
-  $("goal-rate").value = kg ? String(Math.round((fieldUnits.weight === "kg" ? kg : kg / KG_PER_LB) * 100) / 100) : "";
+  $("goal-rate").value = kg ? String(typedRate(kg)) : "";
 }
 
 function setInput(id, attributes) {
@@ -877,8 +900,9 @@ function applyUnits() {
     }
     WEIGHT_FIELDS.forEach((id, index) => writeWeight(id, weights[index]));
     $("goal-rate-unit").textContent = rateUnit() + "/wk";
-    setInput("goal-rate", weightUnit === "kg" ? { max: 5, placeholder: "e.g. 0.5" } : { max: 11, placeholder: "e.g. 1" });
+    $("goal-rate").placeholder = weightUnit === "kg" ? "e.g. 0.5" : "e.g. 1";
     writeRate(rate);
+    checkRate();
   }
   if (previous?.height !== heightUnit) {
     const height = previous ? readHeight() : NaN;
@@ -930,7 +954,7 @@ function openGoal(focusId = "goal-weight") {
   else fillStartWeight();
   $("clear-goal").hidden = !goal;
   showStartHint();
-  previewGoal();
+  updateGoalForm();
   $("goal-dialog").showModal();
   $(focusId).focus();
 }
@@ -959,6 +983,34 @@ function readGoal() {
     rate: readRate(saved?.rate),
     milestones: $("goal-milestones").valueAsNumber
   });
+}
+
+// The target rate can be no faster than the cap for the start weight (see
+// maxGoalRate), so the field's limit and message follow the start weight. On a
+// loss goal, a rate above 1% of the start weight a week brings a note.
+function checkRate() {
+  const input = $("goal-rate");
+  const saved = state.goal;
+  const start = roundWeight(readWeight("goal-start-weight", saved?.startWeight));
+  const target = roundWeight(readWeight("goal-weight", saved?.weight));
+  const rate = readRate(saved?.rate);
+  const limit = goalRateLimit(start, fieldUnits.weight);
+  const losing = positive(target) && toTenths(target, unit()) < toTenths(start, unit());
+  // A saved rate within the cap can round, as typed, to just past the limit.
+  const kept = saved?.rate && goalRateAllowed(saved.rate, start) ? typedRate(saved.rate) : 0;
+  if (limit === null) input.removeAttribute("max");
+  else input.max = String(Math.max(limit, kept));
+  const over = rate !== null && limit !== null && !goalRateAllowed(rate, start);
+  input.setCustomValidity(!over ? "" : "The fastest target rate Baseline saves is " + rateFormat.format(limit) + " " + rateUnit() + " a week for a start weight of " +
+    weight(start) + "." + (losing ? " Faster loss raises health risks." : ""));
+  $("goal-rate-note").textContent = losing && rate !== null && fastGoalRate(rate, start)
+    ? "That’s faster than most guidance suggests. Losing more than about " + amount(GOAL_RATE_CAP) + " a week raises the risk of gallstones." : "";
+}
+
+// Everything in the goal dialog that follows what's typed.
+function updateGoalForm() {
+  checkRate();
+  previewGoal();
 }
 
 function previewGoal() {
@@ -1201,6 +1253,12 @@ for (const button of document.querySelectorAll("[data-goal]")) button.addEventLi
 $("forecast-lead").addEventListener("click", event => {
   if (event.target.closest("[data-goal-rate]")) openGoal("goal-rate");
 });
+$("hide-fast-loss").addEventListener("click", () => {
+  hiddenCautions.add(account.id + " " + state.goal.startDate);
+  try { localStorage.setItem(cautionKey(), state.goal.startDate); } catch { /* The page still remembers it until it reloads. */ }
+  $("fast-loss").hidden = true;
+  notify("Note hidden for this goal.");
+});
 $("rate-choice").addEventListener("change", event => {
   rateSource = event.target.value;
   showForecast();
@@ -1212,13 +1270,13 @@ $("goal-start-date").addEventListener("change", () => {
     fillStartWeight();
   }
   showStartHint();
-  previewGoal();
+  updateGoalForm();
 });
 for (const id of ["goal-start-weight", "goal-start-weight-lb"]) $(id).addEventListener("input", () => {
   startWeightFrom = "typed";
   showStartHint();
 });
-$("goal-form").addEventListener("input", previewGoal);
+$("goal-form").addEventListener("input", updateGoalForm);
 $("goal-form").addEventListener("submit", async event => {
   event.preventDefault();
   syncDay();

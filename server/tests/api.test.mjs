@@ -129,7 +129,7 @@ test("goals are checked and rounded like weights, with the rate to 0.001 kg a we
   assert.equal(parseOp({ op: "set-goal", goal: { ...GOAL, rate: 0.001 } }, NOW).goal.rate, 0.001);
   assert.deepEqual(parseOp({ op: "set-goal", goal: { ...GOAL, rate: null } }, NOW).goal.rate, null);
   assert.deepEqual(parseOp({ op: "set-goal", goal: { ...GOAL, rate: undefined } }, NOW).goal.rate, null);
-  assert.deepEqual(parseOp({ op: "set-goal", goal: { ...GOAL, milestones: 1, rate: 5 } }, NOW).goal, { ...GOAL, milestones: 1, rate: 5 });
+  assert.deepEqual(parseOp({ op: "set-goal", goal: { ...GOAL, milestones: 1, rate: 0.99 } }, NOW).goal, { ...GOAL, milestones: 1, rate: 0.99 });
   assert.deepEqual(parseOp({ op: "clear-goal", goal: GOAL }, NOW), { op: "clear-goal" });
 });
 
@@ -137,12 +137,45 @@ test("goals with a bad field are rejected", () => {
   const bad = [
     { weight: 0 }, { weight: "60" }, { startWeight: 2000.1 }, { startWeight: null },
     { startDate: "2026-11-24" }, { startDate: "2026-02-30" }, { startDate: undefined },
-    { rate: 0 }, { rate: 0.0009 }, { rate: 5.01 }, { rate: "0.5" }, { rate: -0.5 },
+    { rate: 0 }, { rate: 0.0009 }, { rate: 5 }, { rate: 5.01 }, { rate: "0.5" }, { rate: -0.5 },
     { milestones: 0 }, { milestones: 21 }, { milestones: 2.5 }, { milestones: "10" }, { milestones: undefined }
   ];
   for (const change of bad) assert.equal(parseOp({ op: "set-goal", goal: { ...GOAL, ...change } }, NOW), null, JSON.stringify(change));
   assert.equal(parseOp({ op: "set-goal" }, NOW), null);
   assert.equal(parseOp({ op: "set-goal", goal: "60" }, NOW), null);
+});
+
+test("a goal's target rate is no faster than 1.5 kg a week or 1.5% of the start weight", () => {
+  const rateFor = (startWeight, rate) => parseOp({ op: "set-goal", goal: { ...GOAL, weight: startWeight - 10, startWeight, rate } }, NOW)?.goal.rate ?? null;
+  assert.equal(rateFor(60, 0.9), 0.9, "the cap for 60 kg");
+  assert.equal(rateFor(60, 0.901), 0.901, "0.001 kg of slack");
+  assert.equal(rateFor(60, 0.902), null);
+  assert.equal(rateFor(60, 1), null);
+  assert.equal(rateFor(100, 1.5), 1.5);
+  assert.equal(rateFor(100, 1.502), null);
+  assert.equal(rateFor(150, 1.5), 1.5, "never more than 1.5 kg");
+  assert.equal(rateFor(150, 1.51), null);
+  assert.equal(rateFor(150, 3), null, "a rate saved before the cap can't be saved again");
+});
+
+test("a target rate typed in pounds next to the cap counts as the cap", () => {
+  const rateFor = (startWeight, pounds) => parseOp({ op: "set-goal", goal: { ...GOAL, weight: startWeight - 10, startWeight, rate: pounds * 0.45359237 } }, NOW)?.goal.rate ?? null;
+  assert.equal(rateFor(100, 3.31), 1.501, "3.31 lb is the nearest 0.01 lb to 1.5 kg");
+  assert.equal(rateFor(100, 3.32), null);
+  assert.equal(rateFor(80, 2.64), 1.197);
+  assert.equal(rateFor(80, 2.65), null, "2.65 lb is 1.202 kg, past the cap of 1.2 kg");
+  // The cap uses the start weight as stored. 66.0349 kg would allow 0.991 kg a
+  // week, but it is stored as 66.03 kg, which allows 0.990 kg.
+  assert.equal(parseOp({ op: "set-goal", goal: { ...GOAL, startWeight: 66.0349, rate: 0.991 } }, NOW).goal.rate, 0.991, "0.990 kg and its slack");
+  assert.equal(parseOp({ op: "set-goal", goal: { ...GOAL, startWeight: 66.0349, rate: 0.992 } }, NOW), null);
+});
+
+test("the API answers a goal past the cap with a 400 and saves one at the cap", async () => {
+  const { calls, send } = setup();
+  assert.equal((await send("POST", { op: "set-goal", goal: { ...GOAL, rate: 1.2 } })).status, 400);
+  assert.equal(calls.length, 0);
+  assert.equal((await send("POST", { op: "set-goal", goal: { ...GOAL, rate: 0.99 } })).status, 200);
+  assert.deepEqual(calls, [["user_1", { op: "set-goal", goal: { ...GOAL, rate: 0.99 } }]]);
 });
 
 const SUBSCRIPTION = {

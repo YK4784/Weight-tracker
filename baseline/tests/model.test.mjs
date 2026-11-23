@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { CM_PER_IN, FORECAST_MAX_DAYS, KG_PER_LB, NOTE_MAX_LENGTH, averageChanges, bodyFat, bodyFatChange, bodyFatHistory, formatWaist, roundWaist, saveWaist, spokenWaist, validWaist, waistParts, formatAmount, formatWeight, fromTenths, heightParts, normalizeUnits, toTenths, weightParts, bmi, calculateRate, calculateTrend, cleanNote, dateOf, dayOf, forecastGoal, goalProgress, groupByMonth, monthlyReports, normalizeGoal, normalizeReminder, validTimeZone, normalizeState, noteLength, overallRate, recentRange, saveWeight, shiftDate, validDate } from "../dist/model.mjs";
+import { CM_PER_IN, FORECAST_MAX_DAYS, KG_PER_LB, NOTE_MAX_LENGTH, averageChanges, bodyFat, bodyFatChange, bodyFatHistory, formatWaist, roundWaist, saveWaist, spokenWaist, validWaist, waistParts, formatAmount, formatWeight, fromTenths, heightParts, normalizeUnits, toTenths, weightParts, bmi, calculateRate, calculateTrend, cleanNote, dateOf, dayOf, fastGoalRate, fastLossCaution, forecastGoal, goalProgress, goalRateAllowed, goalRateLimit, groupByMonth, maxGoalRate, monthlyReports, normalizeGoal, normalizeReminder, validTimeZone, normalizeState, noteLength, overallRate, recentRange, saveWeight, shiftDate, validDate } from "../dist/model.mjs";
 
 const first = dayOf("2026-03-01");
 const entry = (index, weight) => ({ date: dateOf(first + index), weight });
@@ -149,6 +149,98 @@ test("an invalid goal is dropped, while a bad rate or milestone count falls back
   }
   for (const rate of [0, -0.5, 5.01, "0.5", NaN]) assert.equal(normalizeGoal(goalOf(66, 60, 10, rate)).rate, null, String(rate));
   for (const milestones of [0, 21, 2.5, "4", undefined]) assert.equal(normalizeGoal(goalOf(66, 60, milestones)).milestones, 10, String(milestones));
+});
+
+test("the fastest target rate is 1.5 kg a week or 1.5% of the start weight, whichever is lower", () => {
+  assert.equal(maxGoalRate(60), 0.9);
+  assert.equal(maxGoalRate(66), 0.99);
+  assert.equal(maxGoalRate(73.27), 1.099, "rounded like a stored rate");
+  assert.equal(maxGoalRate(100), 1.5);
+  assert.equal(maxGoalRate(150), 1.5);
+});
+
+test("a goal saved above the cap keeps its rate when it is read back", () => {
+  assert.equal(normalizeGoal(goalOf(66, 60, 10, 3)).rate, 3);
+  assert.equal(normalizeState({ goal: goalOf(80, 70, 10, 3) }).goal.rate, 3);
+  assert.equal(normalizeGoal(goalOf(66, 60, 10, 5)).rate, 5, "the storage bound");
+});
+
+test("a new goal's rate may round to 0.001 kg past the cap, and no further", () => {
+  assert.equal(goalRateAllowed(0.9, 60), true);
+  assert.equal(goalRateAllowed(0.901, 60), true);
+  assert.equal(goalRateAllowed(0.9014, 60), true, "rounds to 0.901");
+  assert.equal(goalRateAllowed(0.902, 60), false);
+  assert.equal(goalRateAllowed(1.5, 150), true);
+  assert.equal(goalRateAllowed(3.31 * KG_PER_LB, 100), true, "3.31 lb is 1.5014 kg");
+  assert.equal(goalRateAllowed(3.32 * KG_PER_LB, 100), false);
+  assert.equal(goalRateAllowed(3, 80), false);
+});
+
+test("the rate field's limit is the fastest rate allowed, to 0.01 kg or lb", () => {
+  assert.equal(goalRateLimit(80), 1.2);
+  assert.equal(goalRateLimit(73.27), 1.1, "1.100 kg is 0.001 kg past the cap of 1.099 kg");
+  assert.equal(goalRateLimit(80, "lb"), 2.64, "2.65 lb is 1.202 kg");
+  assert.equal(goalRateLimit(100, "lb"), 3.31);
+  assert.equal(goalRateLimit(100, "st"), 3.31, "stones take the rate in pounds");
+  assert.equal(goalRateLimit(NaN), null);
+  assert.equal(goalRateLimit(undefined, "lb"), null);
+  for (let hundredths = 1000; hundredths <= 20000; hundredths += 7) {
+    const start = hundredths / 100;
+    for (const [unit, perUnit] of [["kg", 1], ["lb", KG_PER_LB]]) {
+      const limit = Math.round(goalRateLimit(start, unit) * 100);
+      assert.equal(goalRateAllowed(limit / 100 * perUnit, start), true, start + " " + unit);
+      assert.equal(goalRateAllowed((limit + 1) / 100 * perUnit, start), false, start + " " + unit);
+    }
+  }
+});
+
+test("a rate is fast when it is more than 1% of the start weight a week", () => {
+  assert.equal(fastGoalRate(0.8, 80), false);
+  assert.equal(fastGoalRate(0.81, 80), true);
+  assert.equal(fastGoalRate(1.76 * KG_PER_LB, 80), false, "1.76 lb is 0.798 kg");
+  assert.equal(fastGoalRate(1.77 * KG_PER_LB, 80), true);
+});
+
+// A loss goal from 2026-03-01 and a log that falls by `perWeek` kg a week from
+// that day, kept to 0.01 kg as stored.
+const fastGoal = (startWeight, weight = startWeight - 20, startDate = dateOf(first)) => ({ weight, startDate, startWeight, rate: null, milestones: 10 });
+const falling = (days, start, perWeek) => daily(days, i => Math.round((start - i * perWeek / 7) * 100) / 100);
+
+test("the fast loss caution needs three weeks of clearly faster loss than the cap", () => {
+  const log = falling(35, 100, 2.1);
+  assert.equal(fastLossCaution(log, fastGoal(100), dateOf(first + 34)), true);
+  assert.equal(fastLossCaution(falling(35, 100, 1.6), fastGoal(100), dateOf(first + 34)), true);
+  assert.equal(fastLossCaution(falling(35, 100, 1.5), fastGoal(100), dateOf(first + 34)), false, "at the cap is not faster");
+  assert.equal(fastLossCaution(falling(35, 100, 1.4), fastGoal(100), dateOf(first + 34)), false);
+  assert.equal(fastLossCaution(falling(35, 60, 1.0), fastGoal(60), dateOf(first + 34)), true, "the cap for 60 kg is 0.9 kg");
+  assert.equal(fastLossCaution(falling(35, 60, 0.9), fastGoal(60), dateOf(first + 34)), false);
+  assert.equal(fastLossCaution(log, null, dateOf(first + 34)), false);
+});
+
+test("the fast loss caution ignores the goal's first two weeks", () => {
+  const log = falling(40, 100, 2.1);
+  assert.equal(fastLossCaution(log, fastGoal(100), dateOf(first + 33)), false, "the 21 days start on day 13");
+  assert.equal(fastLossCaution(log, fastGoal(100), dateOf(first + 34)), true, "the 21 days start on day 14");
+  assert.equal(fastLossCaution(log, fastGoal(100, 80, dateOf(first + 1)), dateOf(first + 34)), false);
+  assert.equal(fastLossCaution(log, fastGoal(100, 80, dateOf(first + 1)), dateOf(first + 35)), true);
+});
+
+test("the fast loss caution needs every one of the 21 days, and a loss goal", () => {
+  const paused = falling(35, 100, 2.1).map((item, i) => i >= 24 && i <= 30 ? { ...item, weight: 95 } : item);
+  assert.equal(fastLossCaution(paused, fastGoal(100), dateOf(first + 34)), false, "a week without loss slows the trend");
+  const sparse = falling(35, 100, 2.1).filter((_, i) => i < 14 || i > 22);
+  assert.equal(fastLossCaution(sparse, fastGoal(100), dateOf(first + 34)), false, "a day without a weekly trend");
+  assert.equal(fastLossCaution(falling(35, 100, 2.1), fastGoal(100, 120), dateOf(first + 34)), false, "a gain goal");
+  assert.equal(fastLossCaution(falling(35, 100, -2.1), fastGoal(100, 120), dateOf(first + 34)), false, "fast gain");
+  assert.equal(fastLossCaution(falling(35, 100, 2.1), fastGoal(100, 100), dateOf(first + 34)), false, "staying at a weight");
+});
+
+test("the fast loss caution compares the trend and the cap as shown", () => {
+  // 1.54 kg a week shows as 1.5 kg, which is the cap, and as 3.4 lb, which is past 3.3 lb.
+  const log = falling(35, 100, 1.54);
+  assert.equal(fastLossCaution(log, fastGoal(100), dateOf(first + 34)), false);
+  assert.equal(fastLossCaution(log, fastGoal(100), dateOf(first + 34), "lb"), true);
+  assert.equal(fastLossCaution(log, fastGoal(100), dateOf(first + 34), "st"), true);
 });
 
 test("milestones split the distance evenly and end at the goal", () => {
