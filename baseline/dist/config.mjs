@@ -1,6 +1,7 @@
 // Paste the publishable key from Clerk Dashboard → API keys (it starts with
 // pk_test_ or pk_live_). Publishable keys are meant for browser code, so it is
-// safe to commit. Never put a secret key (sk_…) in this file.
+// safe to commit. Never put a secret key (sk_…) in this file. When it changes,
+// change the preconnect link in index.html to its Frontend API host too.
 export const CLERK_PUBLISHABLE_KEY = "pk_test_ZW5hYmxpbmctZHVjay03NDY0LmNsZXJrLmFjY291bnRzLmRldiQ";
 
 // The public half of the VAPID key pair that signs weigh-in reminders (see

@@ -12,7 +12,18 @@
   <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="preload" href="./fonts/funnel-sans-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <!-- Clerk's Frontend API, where auth.mjs loads sign-in from. The host is
+       decoded from CLERK_PUBLISHABLE_KEY in config.mjs (see frontendApiFor), so
+       it must change whenever the key does, as with a production instance.
+       npm test checks that they match. -->
+  <link rel="preconnect" href="https://enabling-duck-7464.clerk.accounts.dev" crossorigin>
   <link rel="stylesheet" href="./styles.css">
+  <!-- Every module app.mjs imports, so they load alongside it rather than after it. -->
+  <link rel="modulepreload" href="./model.mjs">
+  <link rel="modulepreload" href="./chart.mjs">
+  <link rel="modulepreload" href="./account.mjs">
+  <link rel="modulepreload" href="./auth.mjs">
+  <link rel="modulepreload" href="./config.mjs">
   <script type="module" src="./app.mjs"></script>
 </head>
 <body>
@@ -42,7 +53,35 @@
         <p>Check your connection, then try again.</p>
         <button class="button secondary" type="button" id="auth-retry">Try again</button>
       </div>
-      <div class="auth-message" id="log-loading" hidden><p>Loading your log…</p></div>
+      <!-- The overview's layout in placeholder form, while the log loads. -->
+      <div class="skeleton" id="log-loading" hidden>
+        <p class="sr-only">Loading your log</p>
+        <div aria-hidden="true">
+          <span class="bone bone-title"></span>
+          <div class="top">
+            <div>
+              <span class="bone bone-eyebrow"></span>
+              <span class="bone bone-hero"></span>
+              <span class="bone bone-line"></span>
+              <div class="facts">
+                <div class="fact"><span class="bone bone-label"></span><span class="bone bone-value"></span></div>
+                <div class="fact"><span class="bone bone-label"></span><span class="bone bone-value"></span></div>
+                <div class="fact"><span class="bone bone-label"></span><span class="bone bone-value"></span></div>
+                <div class="fact"><span class="bone bone-label"></span><span class="bone bone-value"></span></div>
+                <div class="fact"><span class="bone bone-label"></span><span class="bone bone-value"></span></div>
+                <div class="fact"><span class="bone bone-label"></span><span class="bone bone-value"></span></div>
+              </div>
+            </div>
+            <div class="entry-panel">
+              <span class="bone bone-heading"></span>
+              <span class="bone bone-label"></span><span class="bone-field"></span>
+              <span class="bone bone-label"></span><span class="bone-field"></span>
+              <span class="bone bone-label"></span><span class="bone-field"></span>
+              <span class="bone bone-button"></span>
+            </div>
+          </div>
+        </div>
+      </div>
       <div class="auth-message" id="log-error" hidden>
         <h1>Couldn’t load your log</h1>
         <p>Check your connection, then try again.</p>
@@ -58,6 +97,7 @@
       <div>
         <h1 id="page-title">Overview</h1>
         <p class="page-detail" id="heading-detail"></p>
+        <p class="log-status" id="log-status" role="status" hidden></p>
       </div>
       <button class="button secondary quick-log" id="quick-log" type="button">Log a weigh-in</button>
     </div>
@@ -327,7 +367,10 @@
     </form>
     <div id="delete-confirm" hidden><p class="dialog-detail">Delete this weigh-in and recalculate the trend?</p><div class="dialog-actions"><button class="button secondary" type="button" id="keep-entry">Keep entry</button><button class="button danger" type="button" id="confirm-delete">Delete weigh-in</button></div></div>
   </dialog>
-  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <div class="toast" id="toast">
+    <p class="toast-message" id="toast-message" role="status" aria-live="polite"></p>
+    <div class="toast-actions" id="toast-actions"></div>
+  </div>
   <noscript><p class="noscript">Enable JavaScript to calculate your moving average and save weigh-ins.</p></noscript>
 </body>
 </html>

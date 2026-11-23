@@ -93,8 +93,22 @@ a { color: inherit; }
 .auth-message .button { margin-top: 20px; }
 .auth-message code { padding: 1px 5px; border-radius: 4px; background: var(--accent-wash); color: var(--ink); font: .9375em ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: nowrap; }
 /* Only shows when loading takes long enough to notice. */
-#auth-loading p, #log-loading p { color: var(--ink-3); animation: fade-in .2s .5s both; }
+#auth-loading p { color: var(--ink-3); animation: fade-in .2s .5s both; }
 @keyframes fade-in { from { opacity: 0; } }
+/* While a log loads, the overview's layout stands in for it in hairline
+   blocks: the heading, the average, the facts and the form. */
+.auth[data-view="log-loading"] { padding-block: 32px 48px; }
+.bone { display: block; border-radius: 4px; background: var(--rule); }
+.bone-title { width: 12rem; height: 14px; margin: 6px 0 31px; }
+.bone-eyebrow { width: 8rem; height: 12px; margin-top: 6px; }
+.bone-hero { width: min(100%, 21rem); height: clamp(4.25rem, 10.5vw + .75rem, 6.75rem); margin-top: 16px; }
+.bone-line { width: min(100%, 17rem); height: 12px; margin-top: 22px; }
+.bone-label { width: 5.5rem; height: 10px; margin-block: 6px; }
+.bone-value { width: 4rem; height: 16px; margin-top: 10px; }
+.skeleton .entry-panel .bone-label { margin-top: 22px; }
+.bone-heading { width: 9rem; height: 16px; margin-bottom: 4px; }
+.bone-field { display: block; height: 48px; border: 1px solid var(--rule); border-radius: 8px; }
+.bone-button { height: 44px; margin-top: 22px; border-radius: 8px; }
 .sign-in { display: flex; justify-content: center; }
 .auth-note { max-width: 25rem; margin: 20px auto 0; color: var(--ink-3); font-size: .875rem; text-align: center; text-wrap: pretty; }
 
@@ -106,6 +120,8 @@ h1 { font-size: 1.125rem; font-weight: 600; color: var(--ink-2); }
 body[data-view="log"] h1 { font-size: 2.25rem; font-weight: 700; line-height: 1.1; letter-spacing: -.025em; color: var(--ink); }
 .page-detail { margin-top: 8px; color: var(--ink-3); }
 .page-detail:empty { display: none; }
+/* Says the log on screen is the copy kept on this device. */
+.log-status { margin-top: 6px; color: var(--ink-3); font-size: .875rem; }
 .button.quick-log { display: none; }
 body[data-view="log"] .button.quick-log { display: inline-flex; }
 /* The log's views, under its heading. */
@@ -331,8 +347,21 @@ body[data-weight-unit="st"] .start-row { grid-template-columns: minmax(0, 1fr); 
 #goal-form .edit-actions .button, #reminder-form .edit-actions .button { margin-left: auto; }
 .formula { margin-top: 10px; color: var(--ink-3); font-size: .875rem; }
 .formula a { color: var(--accent); font-weight: 600; text-underline-offset: 2px; white-space: nowrap; }
-.toast { position: fixed; z-index: 5; left: 50%; bottom: 24px; width: max-content; max-width: calc(100% - 32px); padding: 10px 16px; border-radius: 10px; background: var(--ink); color: var(--paper); box-shadow: var(--shadow); font-weight: 600; text-align: center; transform: translateX(-50%); }
-.toast:empty { display: none; }
+.toast { position: fixed; z-index: 5; left: 50%; bottom: 24px; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px 16px; width: max-content; max-width: min(40rem, calc(100% - 32px)); padding: 10px 16px; border-radius: 10px; background: var(--ink); color: var(--paper); box-shadow: var(--shadow); font-weight: 600; transform: translateX(-50%); }
+/* A closed toast keeps its status region on the page, out of sight, so screen readers hear the next message. */
+.toast:not(.is-open) { overflow: hidden; width: 1px; height: 1px; padding: 0; box-shadow: none; clip-path: inset(50%); }
+.toast-message { flex: 1 1 auto; text-align: center; text-wrap: pretty; }
+.toast.has-actions .toast-message { flex-basis: 18rem; text-align: left; }
+.toast-actions { display: flex; gap: 4px; margin-right: -8px; }
+.toast-actions:empty { display: none; }
+.toast-button { min-height: 32px; margin-block: -4px; padding: 4px 8px; border-radius: 6px; color: var(--paper); font-weight: 700; text-decoration: underline 1px; text-underline-offset: 3px; }
+.toast-button:hover { background: color-mix(in srgb, var(--paper) 16%, transparent); }
+.toast-button[aria-disabled="true"] { cursor: default; opacity: .6; }
+.toast-button:focus-visible { outline-color: var(--paper); }
+/* Full height on touch screens, at least 44px, without making the toast taller. */
+@media (pointer: coarse) {
+  .toast-button { min-height: 44px; margin-block: -10px; }
+}
 .noscript { position: fixed; bottom: 0; width: 100%; padding: 14px; background: var(--accent-wash); text-align: center; }
 
 @media (max-width: 860px) {
@@ -346,6 +375,10 @@ body[data-weight-unit="st"] .start-row { grid-template-columns: minmax(0, 1fr); 
   .masthead-actions { gap: 8px; }
   .nav a { padding-inline: 10px; }
   .auth { padding-top: 32px; }
+  .auth[data-view="log-loading"] { padding-top: 24px; }
+  .bone-title { margin-bottom: 23px; }
+  .skeleton .fact { align-items: center; }
+  .skeleton .fact .bone { margin-block: 5px; }
   .page { padding-top: 24px; }
   .page-heading { margin-bottom: 16px; }
   body[data-view="log"] h1 { font-size: 1.875rem; }

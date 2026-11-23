@@ -314,6 +314,25 @@ export function saveWaist(state, date, waist, sex) {
   return normalizeState({ ...state, started: true, sex, waists: [...state.waists, { date, waist }] });
 }
 
+// What a change sent to the server (see server/ops.mjs) applies to: the
+// weigh-in or waist measurement on its date, or the goal, height, units or
+// reminder. A later change to the same thing replaces an earlier one, so once
+// it's saved, an earlier change to it that failed needn't be sent again.
+// Null for changes that apply to the whole log.
+const CHANGE_TARGETS = {
+  "save-weight": "weigh-in", "update-weight": "weigh-in", "delete-weight": "weigh-in",
+  "save-waist": "waist", "delete-waist": "waist",
+  "set-goal": "goal", "clear-goal": "goal",
+  "set-reminder": "reminder", "clear-reminder": "reminder",
+  "set-height": "height", "set-units": "units"
+};
+
+export function changeTarget(change) {
+  const target = CHANGE_TARGETS[change?.op];
+  if (!target) return null;
+  return target === "weigh-in" || target === "waist" ? (validDate(change.date) ? target + " " + change.date : null) : target;
+}
+
 // Adds or replaces the weigh-in on `date`. Leaving out `note` keeps the note
 // already on that date; null or "" removes it. The server does the same.
 export function saveWeight(state, date, weight, note) {

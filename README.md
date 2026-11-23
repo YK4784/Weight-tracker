@@ -47,6 +47,8 @@ The publishable key is meant for browser code and is safe to commit. Never put a
 
 A development instance (`pk_test_`) works on `localhost` and on Vercel preview URLs, and its Google sign-in runs on Clerk's shared credentials. A production instance (`pk_live_`) needs a domain you own, because Clerk does not issue production instances for `*.vercel.app`. It also needs your own Google OAuth client. Follow Clerk's [production deployment guide](https://clerk.com/docs/guides/development/deployment/production) and its [Google setup](https://clerk.com/docs/guides/configure/auth-strategies/social-connections/google), then replace the key in `config.mjs`.
 
+So that sign-in loads sooner, `baseline/dist/index.html` opens a connection to the key's Frontend API host in a `preconnect` link before any script asks for it. When you replace the key, change that link to the new host too. `npm test` fails until they match.
+
 ## Set up the database
 
 Logs are saved in Postgres from [Neon](https://vercel.com/marketplace/neon), which is the Postgres option in Vercel's **Storage** tab. Create one from the repository root with the [Vercel CLI](https://vercel.com/docs/cli), after `vercel link`:
@@ -84,7 +86,7 @@ vercel env pull .env.local
 npm start
 ```
 
-Open [Baseline locally](http://127.0.0.1:4173/). `npm start` serves the page from `baseline/dist/` and runs the API from `api/log.mjs`, using the `DATABASE_URL` in `.env.local`. Reminders can be turned on locally, but only Vercel sends them. Run `npm test` to check the calculations, including body fat against the Army's worked examples, the API's input checks, the reminder schedule and the push encryption.
+Open [Baseline locally](http://127.0.0.1:4173/). `npm start` serves the page from `baseline/dist/` and runs the API from `api/log.mjs`, using the `DATABASE_URL` in `.env.local`. Reminders can be turned on locally, but only Vercel sends them. Run `npm test` to check the calculations, including body fat against the Army's worked examples, the API's input checks, the reminder schedule, the push encryption and the copy of the log kept on the device. It also checks that `index.html` preloads every module and connects early to the Frontend API in `config.mjs`.
 
 ## Using the tracker
 
@@ -96,6 +98,19 @@ Use **Set** next to **Reminder** to get a notification at a chosen hour on days 
 
 Sign in to open your log. Use the avatar at the top right to manage your account or sign out. A new account starts with an empty log. The **Weight log** shows every entry with its weekly trend and note, 15 to a page and grouped by month, and lets you edit a weigh-in's weight or note or delete it. A month that runs over onto the next page repeats its heading there. Choose **Monthly summary** at the top of the log to see each month's start and end averages, change, weekly trend and lowest weigh-in, along with any goal milestones reached that month.
 
-Entries and their notes, height, waist measurements and the body fat formula you chose, your goal, your units and your reminder time are saved to your account, so the same log opens on any device you sign in on. A change shows right away and is saved in the background. If saving fails, the change is undone and a message says so. Switching back to the tab picks up changes made on another device.
+Entries and their notes, height, waist measurements and the body fat formula you chose, your goal, your units and your reminder time are saved to your account, so the same log opens on any device you sign in on. A change shows right away and is saved in the background. Switching back to the tab picks up changes made on another device.
 
-Earlier versions kept logs only in the browser. The first time an account with an empty online log signs in on such a browser, that browser's log moves into the account and the browser copy is removed. An account that already has entries keeps them, and the browser copy is left untouched.
+If saving fails, the change is undone on screen and a message at the bottom of the page says so. It stays until you choose **Dismiss** or the change is saved. **Try again** sends the same change again, exactly as you entered it, and the message confirms it once it's saved. The date, weight and note you typed in **Log a weigh-in** also stay in the form, so you can save them from there instead. Other messages fade after about 4 seconds, but not while the mouse is over them or focus is in them.
+
+Baseline keeps a copy of your log on each device you use it on, so the next visit opens at once. It shows that copy straight away, with "Updating…" under the heading, while sign-in loads and the latest log is fetched. The latest log then replaces the copy and the line goes. If it can't be fetched, the line reads "Couldn't update. Showing your log as of" and the time the copy was saved. You can make changes in the meantime, and they're saved once sign-in has loaded. If by then nobody is signed in, the copy is removed and the sign-in page shows instead. If a different account is, the copy is removed and that account's log opens. Without a copy, the page shows the outline of the overview while your log loads.
+
+Baseline stores these in the browser on your device:
+
+- **A copy of your log:** your entries and notes, height, waist measurements, the body fat formula you chose, your goal, your units, and your reminder time and which devices get reminders, as the server last returned them, with the time they arrived. It's stored under `baseline.log-cache.v1:` followed by your account's user ID. Only one account's copy is kept on a device.
+- **Your user ID,** under `baseline.last-user.v1`, so Baseline knows whose copy to show before sign-in has loaded. Your email address isn't stored.
+- **A hidden note:** the start date of the goal whose note about fast loss you hid, under `baseline.fast-loss-hidden:` and your user ID.
+- **A log from before accounts,** on a browser that used an earlier version, until it moves into an account as described below.
+
+Signing out removes the copy of your log and your user ID, so a shared computer keeps none of your weights. Clerk keeps its own sign-in data, and signing out ends that session.
+
+Earlier versions kept logs only in the browser. The first time an account with an empty online log signs in on such a browser, that browser's log moves into the account and is removed from the browser. An account that already has entries keeps them, and the browser's log is left untouched.

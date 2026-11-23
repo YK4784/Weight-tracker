@@ -1,6 +1,6 @@
-import { CM_PER_IN, FAST_LOSS_DAYS, FORECAST_MAX_DAYS, GOAL_MILESTONES, GOAL_RATE_CAP, KG_PER_LB, OVERALL_MIN_DAYS, RATE_DAYS, RATE_MIN_ENTRIES, RATE_MIN_SPAN, SEXES, WINDOW_DAYS, averageChanges, bmi, bodyFat, bodyFatChange, bodyFatHistory, calculateRate, calculateTrend, cleanNote, dateOf, dayOf, fastGoalRate, fastLossCaution, forecastGoal, formatAmount, formatWaist, formatWeight, fromTenths, goalProgress, goalRateAllowed, goalRateLimit, groupByMonth, heightParts, localToday, maxGoalRate, monthlyReports, normalizeGoal, normalizeState, oneDecimal, overallRate, positive, prettyDate, recentRange, roundHeight, roundWaist, roundWeight, saveWaist, saveWeight, shiftDate, spokenHeight, spokenWeight, toTenths, validDate, validWaist, waistParts, waistTenths, weightParts } from "./model.mjs";
+import { CM_PER_IN, FAST_LOSS_DAYS, FORECAST_MAX_DAYS, GOAL_MILESTONES, GOAL_RATE_CAP, KG_PER_LB, OVERALL_MIN_DAYS, RATE_DAYS, RATE_MIN_ENTRIES, RATE_MIN_SPAN, SEXES, WINDOW_DAYS, averageChanges, bmi, bodyFat, bodyFatChange, bodyFatHistory, calculateRate, changeTarget, calculateTrend, cleanNote, dateOf, dayOf, fastGoalRate, fastLossCaution, forecastGoal, formatAmount, formatWaist, formatWeight, fromTenths, goalProgress, goalRateAllowed, goalRateLimit, groupByMonth, heightParts, localToday, maxGoalRate, monthlyReports, normalizeGoal, normalizeState, oneDecimal, overallRate, positive, prettyDate, recentRange, roundHeight, roundWaist, roundWeight, saveWaist, saveWeight, shiftDate, spokenHeight, spokenWeight, toTenths, validDate, validWaist, waistParts, waistTenths, weightParts } from "./model.mjs";
 import { BodyFatChart, TrendChart } from "./chart.mjs";
-import { claimLegacyLog, storageKeyFor } from "./account.mjs";
+import { claimLegacyLog, clearLogCache, lastUser, readLogCache, storageKeyFor, writeLogCache } from "./account.mjs";
 import { AuthSetupError, startClerk } from "./auth.mjs";
 import { PUSH_PUBLIC_KEY } from "./config.mjs";
 
@@ -11,11 +11,17 @@ const chart = new TrendChart();
 const fatChart = new BodyFatChart();
 let today = localToday();
 let clerk;
+let clerkReady = null; // Resolves to Clerk once it has loaded. Null before that starts, or after it failed.
 let mounted = null; // Which Clerk component is on the page: "sign-in" or "user".
-let account = null; // { id, email } of the signed-in user.
+// { id, email, confirmed } of the user whose log is open. `confirmed` is false
+// while the log shown is the copy on this device and Clerk hasn't yet said
+// that this user is signed in.
+let account = null;
 let session = null; // The open log. Replies meant for an earlier one are ignored.
 let state = null; // The log on screen. Null while signed out or loading.
-let saved = null; // The log as the server last returned it.
+let saved = null; // The log as the server last returned it, or as it was cached on this device.
+let cachedAt = null; // When the cached copy on screen was saved. Null once the server has answered.
+let cacheUpdating = false; // Whether the server's copy is on its way to replace the cached one.
 let queue = Promise.resolve(); // Changes reach the server one at a time, in order.
 let unsaved = 0; // Changes sent and not yet answered.
 let trend;
@@ -31,21 +37,112 @@ let range = "30";
 let page = 0;
 let editingDate = null;
 let autoFill = true; // The log form shows the weigh-in on its date until the user types in it.
+let entryEdits = 0; // Counts what's typed into the log form, so a save that's answered later doesn't refill it.
 let fieldUnits = null; // The units the inputs are set up for, which follow state.units.
-let toastTimer;
 let worker = null; // The service worker's registration, which receives reminders. Null until it's ready or where there is none.
 let deviceEndpoint = null; // This device's push subscription, if it has one.
 
-function notify(message) {
-  clearTimeout(toastTimer);
-  $("toast").textContent = message;
-  toastTimer = setTimeout(() => { $("toast").textContent = ""; }, 3600);
+// The toast at the bottom of the page. Its message goes through a status
+// region, so screen readers announce it. It can carry an action button, such
+// as "Try again". An error stays until it's dismissed or its action succeeds.
+// Anything else fades after `duration` ms, but not while the mouse is over it
+// or focus is in it.
+const TOAST_DURATION = 4000;
+let toast = null; // What the toast shows: { error, duration, acting, target }. Null while it's closed.
+let toastTimer;
+let toastHover = false;
+let toastReturn = null; // Where focus was before it moved into the toast.
+
+// `action` is { label, run }. While `run` is working its button does nothing,
+// and once it's done the toast closes, unless `run` showed a message of its own.
+// Returns what the toast shows, or null if the message was left out.
+function notify(message, { action = null, error = false, duration = TOAST_DURATION } = {}) {
+  // A confirmation doesn't push an error out of view, unless it comes from that error's own action.
+  if (toast?.error && !error && !toast.acting) return null;
+  const element = $("toast");
+  const hadFocus = element.contains(document.activeElement);
+  const shown = toast = { error, duration, acting: false };
+  $("toast-message").textContent = message;
+  const buttons = [];
+  if (action) {
+    buttons.push(toastButton(action.label, async button => {
+      if (shown.acting) return;
+      shown.acting = true;
+      button.setAttribute("aria-disabled", "true");
+      try { await action.run(); } catch (failure) { console.error(failure); }
+      shown.acting = false;
+      button.removeAttribute("aria-disabled");
+      if (toast === shown) closeToast();
+    }));
+  }
+  if (error) buttons.push(toastButton("Dismiss", closeToast));
+  $("toast-actions").replaceChildren(...buttons);
+  element.classList.toggle("has-actions", buttons.length > 0);
+  element.classList.add("is-open");
+  // Replacing the buttons would drop focus, so it moves to the new ones, or back where it came from.
+  if (hadFocus) buttons[0] ? buttons[0].focus() : returnFocus();
+  startToastTimer();
+  return shown;
 }
 
-// Reads the log, or applies one change to it on the server (see server/ops.mjs).
+function toastButton(label, onClick) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "toast-button";
+  button.textContent = label;
+  button.addEventListener("click", () => onClick(button));
+  return button;
+}
+
+function closeToast() {
+  clearTimeout(toastTimer);
+  const hadFocus = $("toast").contains(document.activeElement);
+  toast = null;
+  toastHover = false;
+  $("toast").classList.remove("is-open", "has-actions");
+  $("toast-message").textContent = "";
+  $("toast-actions").replaceChildren();
+  if (hadFocus) returnFocus();
+}
+
+function returnFocus() {
+  const target = toastReturn?.isConnected && toastReturn.checkVisibility?.() !== false ? toastReturn : $("main").hidden ? $("auth") : $("main");
+  target.focus({ preventScroll: true });
+}
+
+function startToastTimer() {
+  clearTimeout(toastTimer);
+  if (toast && !toast.error && !toastHover && !$("toast").contains(document.activeElement)) toastTimer = setTimeout(closeToast, toast.duration);
+}
+
+// Loads Clerk and starts following who is signed in. Resolves to Clerk once
+// it has loaded and said who that is. After a failure, the next call tries again.
+function connectClerk() {
+  clerkReady ??= startClerk().then(instance => {
+    clerk = instance;
+    // Fires now with the current user, then on every sign-in, sign-out and profile change,
+    // including ones made in other tabs.
+    clerk.addListener(({ user }) => {
+      if (user) showSignedIn(user);
+      else if (user === null) showSignedOut();
+    });
+    return clerk;
+  }, error => {
+    clerkReady = null;
+    throw error;
+  });
+  return clerkReady;
+}
+
+// Reads the log, or applies one change to it on the server (see server/ops.mjs),
+// for the account `userId`. It waits for Clerk and a session token first, so a
+// change made to the cached log before Clerk has loaded is sent once it has.
 // Resolves to { log, ... } as the server returns it.
-async function sendLog(change = null) {
-  const token = await clerk.session?.getToken();
+async function sendLog(change, userId) {
+  const instance = await connectClerk();
+  // A change made to one account's log is never sent as another account.
+  if (!userId || instance.user?.id !== userId) throw new Error("The log's account isn't the one signed in.");
+  const token = await instance.session?.getToken();
   if (!token) throw new Error("Not signed in.");
   const response = await fetch("/api/log", {
     method: change ? "POST" : "GET",
@@ -58,26 +155,64 @@ async function sendLog(change = null) {
 }
 
 // Shows a change at once, then saves it. Once nothing else is on its way, the
-// server's copy replaces the screen. A failed save falls back to the server's copy.
+// server's copy replaces the screen. A failed save falls back to the saved
+// copy, and the toast offers "Try again", which sends the same change again.
+// `done(reply)` runs once the change is saved, whether at first or on a retry.
 // Resolves to the server's reply, or null if the change wasn't saved.
-async function changeState(change, request) {
+async function changeState(change, request, done = null) {
   const current = session;
+  const userId = account.id;
   state = normalizeState(change(state));
   render();
   unsaved++;
-  const reply = queue.then(() => sendLog(request));
+  const reply = queue.then(() => sendLog(request, userId));
   queue = reply.catch(() => {});
   let result = null;
   try { result = await reply; } catch (error) { console.error(error); }
   if (session !== current) return null;
   unsaved--;
-  if (result) saved = normalizeState(result.log);
+  if (result) receive(result.log);
   if (!result || !unsaved) {
     state = saved;
     render();
   }
-  if (!result) notify("Couldn’t save that change. Check your connection and try again.");
+  const target = changeTarget(request);
+  if (!result) {
+    notify("Couldn’t save that change. Check your connection and try again.", {
+      error: true,
+      action: { label: "Try again", run: () => changeState(change, request, done) }
+    }).target = target;
+    return null;
+  }
+  // Saving the same thing again, by "Try again" or from the form, settles the
+  // error about it, which would otherwise offer to send an older change.
+  if (target && toast?.target === target) closeToast();
+  done?.(result);
   return result;
+}
+
+// Takes the log as the server returned it. It becomes the saved copy and the
+// copy kept on this device, and the screen no longer shows an older copy.
+function receive(log) {
+  saved = normalizeState(log);
+  cachedAt = null;
+  try { writeLogCache(localStorage, account.id, saved); } catch { /* Nothing is cached, so the next start shows the skeleton. */ }
+  showLogStatus();
+  return saved;
+}
+
+// When a cached copy was saved: "9:41 AM" today, or "Nov 21, 9:41 AM" before.
+function cacheTime(ms) {
+  const date = new Date(ms);
+  const day = localToday(date);
+  return (day === today ? "" : shortDate(day) + ", ") + hourFormat.format(date);
+}
+
+// A quiet line under the heading while the log on screen is the copy kept on this device.
+function showLogStatus() {
+  const line = $("log-status");
+  line.hidden = cachedAt === null;
+  line.textContent = cachedAt === null ? "" : cacheUpdating ? "Updating…" : "Couldn’t update. Showing your log as of " + cacheTime(cachedAt) + ".";
 }
 
 function icon(name) {
@@ -659,6 +794,7 @@ function render() {
   syncEntryForm();
   showPage();
   showStorageStatus();
+  showLogStatus();
 }
 
 function showStorageStatus() {
@@ -670,6 +806,7 @@ const authViews = ["auth-loading", "auth-setup", "auth-error", "sign-in", "log-l
 
 function showAuth(view) {
   for (const id of authViews) $(id).hidden = id !== view;
+  $("auth").dataset.view = view;
   $("auth-note").hidden = view !== "sign-in";
   $("auth").setAttribute("aria-busy", String(view.endsWith("-loading")));
   $("auth").hidden = false;
@@ -696,31 +833,27 @@ async function importBrowserLog(result, userId) {
     return result;
   }
   if (!local.started) return result;
-  const imported = await sendLog({ op: "import", log: local });
+  const imported = await sendLog({ op: "import", log: local }, userId);
   if (imported.imported) {
     try { localStorage.removeItem(key); } catch { /* Harmless: the account is no longer empty, so it won't import again. */ }
   }
   return imported;
 }
 
-async function openLog(user) {
-  const current = session = {};
-  account = { id: user.id, email: emailOf(user) };
+// Starts a new open log for an account, leaving the one before behind.
+function beginSession(id, email, confirmed) {
+  session = {};
+  account = { id, email, confirmed };
   state = saved = null;
+  cachedAt = null;
+  cacheUpdating = false;
   queue = Promise.resolve();
   unsaved = 0;
-  showAuth("log-loading");
-  let result;
-  try {
-    result = await importBrowserLog(await sendLog(), user.id);
-  } catch (error) {
-    if (session !== current) return;
-    console.error(error);
-    showAuth("log-error");
-    return;
-  }
-  if (session !== current) return;
-  saved = state = normalizeState(result.log);
+  return session;
+}
+
+// Puts the open log on the page, starting from the overview for today.
+function showLog() {
   today = localToday();
   page = 0;
   editingDate = null;
@@ -731,33 +864,95 @@ async function openLog(user) {
   $("auth").hidden = true;
   $("main").hidden = false;
   $("main-nav").hidden = false;
+  $("account-bar").hidden = false;
+  render();
+}
+
+// Shows the log cached on this device at once, before Clerk has loaded. It's
+// marked "Updating…" until Clerk confirms the user and the server's copy arrives.
+function showCachedLog(cached) {
+  beginSession(cached.userId, "", false);
+  saved = state = cached.log;
+  cachedAt = cached.savedAt;
+  cacheUpdating = true;
+  showLog();
+}
+
+async function openLog(user) {
+  if (account && account.id !== user.id) closeLog();
+  const current = beginSession(user.id, emailOf(user), true);
+  showAuth("log-loading");
+  let result;
+  try {
+    result = await importBrowserLog(await sendLog(null, user.id), user.id);
+  } catch (error) {
+    if (session !== current) return;
+    console.error(error);
+    showAuth("log-error");
+    return;
+  }
+  if (session !== current) return;
+  state = receive(result.log);
+  showLog();
+}
+
+// Clerk has confirmed the user whose cached log is on screen. Changes made
+// while it loaded go out first, then the server's copy replaces the cached one.
+async function confirmLog(user) {
+  const current = session;
+  account.confirmed = true;
+  account.email = emailOf(user);
+  showStorageStatus();
+  const read = queue.then(() => sendLog(null, user.id)).then(result => importBrowserLog(result, user.id));
+  queue = read.catch(() => {});
+  let result;
+  try {
+    result = await read;
+  } catch (error) {
+    if (session !== current) return;
+    console.error(error);
+    cacheUpdating = false;
+    showLogStatus();
+    return;
+  }
+  if (session !== current) return;
+  cacheUpdating = false;
+  receive(result.log);
+  if (unsaved) return;
+  state = saved;
   render();
 }
 
 // Picks up changes made in other tabs or on other devices.
 async function refreshLog() {
-  if (!state || unsaved) return;
+  if (!state || unsaved || !account.confirmed || cacheUpdating) return;
   const current = session;
   let result;
-  try { result = await sendLog(); } catch { return; }
+  try { result = await sendLog(null, account.id); } catch { return; }
   if (session !== current || unsaved) return;
-  const log = normalizeState(result.log);
-  if (JSON.stringify(log) === JSON.stringify(saved)) return;
-  saved = state = log;
+  const before = JSON.stringify(saved);
+  receive(result.log);
+  if (JSON.stringify(saved) === before) return;
+  state = saved;
   render();
 }
 
+// Closes the open log, on sign-out or when another account signs in. The copy
+// kept on this device goes too, so a shared device keeps no one's weights.
 function closeLog() {
   account = null;
   session = null;
   state = saved = null;
+  cachedAt = null;
+  cacheUpdating = false;
   for (const dialog of document.querySelectorAll("dialog[open]")) dialog.close();
-  clearTimeout(toastTimer);
-  $("toast").textContent = "";
+  closeToast();
+  try { clearLogCache(localStorage); } catch { /* Storage is blocked, so nothing was cached. */ }
 }
 
 function showSignedIn(user) {
   if (account?.id !== user.id) openLog(user);
+  else if (!account.confirmed) confirmLog(user);
   else if (account.email !== emailOf(user)) {
     account.email = emailOf(user);
     showStorageStatus();
@@ -769,7 +964,7 @@ function showSignedIn(user) {
 }
 
 function showSignedOut() {
-  if (account) closeLog();
+  closeLog();
   // Clerk's sign-in steps live in the hash ("#/factor-one"), so drop the app's own views from it.
   if (location.hash && !location.hash.startsWith("#/")) history.replaceState(null, "", location.pathname + location.search);
   showAuth("sign-in");
@@ -780,21 +975,31 @@ function showSignedOut() {
   mounted = "sign-in";
 }
 
+// Shows the last user's cached log straight away, if this device has one,
+// then loads Clerk to find out who is signed in.
 async function startAuth() {
-  showAuth("auth-loading");
+  let userId = null;
+  let cached = null;
   try {
-    clerk = await startClerk();
+    userId = lastUser(localStorage);
+    cached = readLogCache(localStorage, userId);
+  } catch { /* Storage is blocked, so there's no copy to show. */ }
+  if (cached) showCachedLog(cached);
+  // Without a copy, the skeleton shows when someone was signed in here last time.
+  else showAuth(userId ? "log-loading" : "auth-loading");
+  try {
+    await connectClerk();
   } catch (error) {
     console.error(error);
-    showAuth(error instanceof AuthSetupError ? "auth-setup" : "auth-error");
-    return;
+    if (error instanceof AuthSetupError) {
+      closeLog();
+      showAuth("auth-setup");
+    } else if (state) {
+      // The cached log stays, marked as not updated. A save tries Clerk again.
+      cacheUpdating = false;
+      showLogStatus();
+    } else showAuth("auth-error");
   }
-  // Fires now with the current user, then on every sign-in, sign-out and profile change,
-  // including ones made in other tabs.
-  clerk.addListener(({ user }) => {
-    if (user) showSignedIn(user);
-    else if (user === null) showSignedOut();
-  });
 }
 
 function focusEntry() {
@@ -926,9 +1131,9 @@ const unitNames = { kg: "kilograms", lb: "pounds", st: "stones and pounds", cm: 
 // Height and waist share a unit, so either switch changes both.
 const lengthMessage = choice => choice === "ft" ? "Height now shows in feet and inches, and waist in inches." : "Height and waist now show in centimeters.";
 
-async function changeUnits(units, message) {
+function changeUnits(units, message) {
   if (units.weight === state.units.weight && units.height === state.units.height) return;
-  if (await changeState(current => ({ ...current, started: true, units }), { op: "set-units", units })) notify(message);
+  changeState(current => ({ ...current, started: true, units }), { op: "set-units", units }, () => notify(message));
 }
 
 function openProfile() {
@@ -1211,8 +1416,11 @@ $("prev-day").addEventListener("click", () => stepDate(-1));
 $("next-day").addEventListener("click", () => {
   if ($("next-day").getAttribute("aria-disabled") !== "true") stepDate(1);
 });
-for (const id of ["entry-weight", "entry-weight-lb", "entry-note"]) $(id).addEventListener("input", () => { autoFill = false; });
-$("entry-form").addEventListener("submit", async event => {
+for (const id of ["entry-weight", "entry-weight-lb", "entry-note"]) $(id).addEventListener("input", () => {
+  autoFill = false;
+  entryEdits++;
+});
+$("entry-form").addEventListener("submit", event => {
   event.preventDefault();
   syncDay();
   const date = $("entry-date").value;
@@ -1222,11 +1430,18 @@ $("entry-form").addEventListener("submit", async event => {
   const note = cleanNote($("entry-note").value);
   if (!validDate(date) || date > today || !positive(weight)) return;
   const updating = Boolean(existing);
-  autoFill = true;
   const before = progress;
-  if (await changeState(current => saveWeight(current, date, weight, note), { op: "save-weight", date, weight, note })) {
+  // What was typed stays in the form until the weigh-in is saved, so a failed
+  // save loses nothing. Then the form shows the saved weigh-in, unless
+  // something new was typed meanwhile.
+  const edits = entryEdits;
+  changeState(current => saveWeight(current, date, weight, note), { op: "save-weight", date, weight, note }, () => {
+    if (entryEdits === edits) {
+      autoFill = true;
+      syncEntryForm();
+    }
     notify((updating ? "Weigh-in updated" : "Weigh-in saved") + " for " + prettyDate(date) + "." + celebrate(before, progress));
-  }
+  });
 });
 
 // A word when a weigh-in carries the average past a milestone. Needs an average
@@ -1277,17 +1492,18 @@ for (const id of ["goal-start-weight", "goal-start-weight-lb"]) $(id).addEventLi
   showStartHint();
 });
 $("goal-form").addEventListener("input", updateGoalForm);
-$("goal-form").addEventListener("submit", async event => {
+$("goal-form").addEventListener("submit", event => {
   event.preventDefault();
   syncDay();
   const goal = readGoal();
   if (!goal || goal.startDate > today) return;
+  // Dialogs close at once. If the save fails, "Try again" sends exactly what was typed.
   $("goal-dialog").close();
-  if (await changeState(current => ({ ...current, started: true, goal }), { op: "set-goal", goal })) notify("Goal saved.");
+  changeState(current => ({ ...current, started: true, goal }), { op: "set-goal", goal }, () => notify("Goal saved."));
 });
-$("clear-goal").addEventListener("click", async () => {
+$("clear-goal").addEventListener("click", () => {
   $("goal-dialog").close();
-  if (await changeState(current => ({ ...current, goal: null }), { op: "clear-goal" })) notify("Goal removed.");
+  changeState(current => ({ ...current, goal: null }), { op: "clear-goal" }, () => notify("Goal removed."));
 });
 for (const button of document.querySelectorAll("[data-reminder]")) button.addEventListener("click", openReminder);
 $("reminder-form").addEventListener("submit", async event => {
@@ -1312,19 +1528,19 @@ $("reminder-form").addEventListener("submit", async event => {
   } else if (!state.reminder) return;
   $("reminder-dialog").close();
   const added = subscription ? [subscription.endpoint] : [];
-  if (await changeState(current => ({ ...current, reminder: { hour, timeZone, devices: [...(current.reminder?.devices ?? []), ...added] } }),
-    { op: "set-reminder", hour, timeZone, ...(subscription && { subscription }) })) {
-    notify("You’ll get a reminder at " + hourLabel(hour) + " on days you haven’t weighed in.");
-  }
+  changeState(current => ({ ...current, reminder: { hour, timeZone, devices: [...(current.reminder?.devices ?? []), ...added] } }),
+    { op: "set-reminder", hour, timeZone, ...(subscription && { subscription }) },
+    () => notify("You’ll get a reminder at " + hourLabel(hour) + " on days you haven’t weighed in."));
 });
-$("clear-reminder").addEventListener("click", async () => {
+$("clear-reminder").addEventListener("click", () => {
   $("reminder-dialog").close();
-  if (!await changeState(current => ({ ...current, reminder: null }), { op: "clear-reminder" })) return;
-  notify("Reminders turned off.");
-  // The server has forgotten every device, so this one starts afresh next time.
-  try { await (await worker?.pushManager?.getSubscription())?.unsubscribe(); } catch { /* Harmless: the server no longer sends to it. */ }
-  deviceEndpoint = null;
-  if (state) showReminder();
+  changeState(current => ({ ...current, reminder: null }), { op: "clear-reminder" }, async () => {
+    notify("Reminders turned off.");
+    // The server has forgotten every device, so this one starts afresh next time.
+    try { await (await worker?.pushManager?.getSubscription())?.unsubscribe(); } catch { /* Harmless: the server no longer sends to it. */ }
+    deviceEndpoint = null;
+    if (state) showReminder();
+  });
 });
 for (const id of ["profile-height", "profile-height-in"]) $(id).addEventListener("input", previewBmi);
 $("weight-units").addEventListener("click", event => {
@@ -1356,7 +1572,7 @@ $("waist-size").addEventListener("input", () => {
 $("waist-form").addEventListener("change", event => {
   if (event.target.name === "sex") previewFat();
 });
-$("waist-form").addEventListener("submit", async event => {
+$("waist-form").addEventListener("submit", event => {
   event.preventDefault();
   syncDay();
   const date = $("waist-date").value;
@@ -1365,10 +1581,10 @@ $("waist-form").addEventListener("submit", async event => {
   const sex = chosenSex();
   if (!validDate(date) || date > today || !validWaist(size) || !SEXES.includes(sex)) return;
   $("waist-dialog").close();
-  if (await changeState(current => saveWaist(current, date, size, sex), { op: "save-waist", date, waist: size, sex })) {
+  changeState(current => saveWaist(current, date, size, sex), { op: "save-waist", date, waist: size, sex }, () => {
     const estimate = fat.find(point => point.date === date)?.bodyFat;
     notify((existing ? "Waist updated" : "Waist saved") + " for " + prettyDate(date) + "." + (estimate == null ? "" : " Body fat " + percent(estimate) + "."));
-  }
+  });
 });
 $("delete-waist").addEventListener("click", () => {
   deletingWaist = $("waist-date").value;
@@ -1381,20 +1597,19 @@ $("keep-waist").addEventListener("click", () => {
   $("waist-form").hidden = false;
   $("waist-size").focus();
 });
-$("confirm-waist-delete").addEventListener("click", async () => {
+$("confirm-waist-delete").addEventListener("click", () => {
   const date = deletingWaist;
   $("waist-dialog").close();
-  if (await changeState(current => ({ ...current, waists: current.waists.filter(item => item.date !== date) }), { op: "delete-waist", date })) {
-    notify("Waist measurement deleted.");
-  }
+  changeState(current => ({ ...current, waists: current.waists.filter(item => item.date !== date) }), { op: "delete-waist", date },
+    () => notify("Waist measurement deleted."));
 });
 $("waist-dialog").addEventListener("close", () => { deletingWaist = null; });
-$("profile-form").addEventListener("submit", async event => {
+$("profile-form").addEventListener("submit", event => {
   event.preventDefault();
   const height = roundHeight(readHeight(state.height));
   if (!positive(height)) return;
   $("profile-dialog").close();
-  if (await changeState(current => ({ ...current, started: true, height }), { op: "set-height", height })) notify("Height saved.");
+  changeState(current => ({ ...current, started: true, height }), { op: "set-height", height }, () => notify("Height saved."));
 });
 
 $("entry-table").addEventListener("click", event => {
@@ -1411,17 +1626,17 @@ $("entry-table").addEventListener("click", event => {
   $("edit-dialog").showModal();
   $("edit-weight").focus();
 });
-$("edit-form").addEventListener("submit", async event => {
+$("edit-form").addEventListener("submit", event => {
   event.preventDefault();
   const date = editingDate;
   const weight = roundWeight(readWeight("edit-weight", state.entries.find(entry => entry.date === date)?.weight));
   const note = cleanNote($("edit-note").value);
   if (!date || !positive(weight)) return;
   $("edit-dialog").close();
-  const result = await changeState(
+  changeState(
     current => current.entries.some(entry => entry.date === date) ? saveWeight(current, date, weight, note) : current,
-    { op: "update-weight", date, weight, note });
-  if (result) notify(result.found ? "Weigh-in updated." : "This weigh-in has already been removed.");
+    { op: "update-weight", date, weight, note },
+    result => notify(result.found ? "Weigh-in updated." : "This weigh-in has already been removed."));
 });
 $("delete-entry").addEventListener("click", () => {
   $("edit-form").hidden = true;
@@ -1433,12 +1648,11 @@ $("keep-entry").addEventListener("click", () => {
   $("edit-form").hidden = false;
   $("edit-weight").focus();
 });
-$("confirm-delete").addEventListener("click", async () => {
+$("confirm-delete").addEventListener("click", () => {
   const date = editingDate;
   $("edit-dialog").close();
-  if (await changeState(current => ({ ...current, entries: current.entries.filter(item => item.date !== date) }), { op: "delete-weight", date })) {
-    notify("Weigh-in deleted.");
-  }
+  changeState(current => ({ ...current, entries: current.entries.filter(item => item.date !== date) }), { op: "delete-weight", date },
+    () => notify("Weigh-in deleted."));
 });
 $("edit-dialog").addEventListener("close", () => { editingDate = null; });
 for (const button of document.querySelectorAll("[data-close]")) button.addEventListener("click", () => button.closest("dialog").close());
@@ -1462,7 +1676,24 @@ document.querySelector(".skip-link").addEventListener("click", event => {
 // Signed out, the wordmark's "#overview" would land in Clerk's hash routes.
 document.querySelector(".wordmark").addEventListener("click", event => { if (!state) event.preventDefault(); });
 $("auth-retry").addEventListener("click", () => location.reload());
-$("log-retry").addEventListener("click", () => { if (clerk.user) openLog(clerk.user); });
+$("log-retry").addEventListener("click", () => { if (clerk?.user) openLog(clerk.user); });
+// The toast holds still while the mouse is over it or focus is in it.
+$("toast").addEventListener("pointerenter", event => {
+  if (event.pointerType !== "mouse") return;
+  toastHover = true;
+  clearTimeout(toastTimer);
+});
+$("toast").addEventListener("pointerleave", event => {
+  if (event.pointerType !== "mouse") return;
+  toastHover = false;
+  startToastTimer();
+});
+$("toast").addEventListener("focusin", event => {
+  if (!$("toast").contains(event.relatedTarget)) toastReturn = event.relatedTarget;
+  clearTimeout(toastTimer);
+});
+// Once focus has settled somewhere else.
+$("toast").addEventListener("focusout", () => setTimeout(startToastTimer));
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) return;
   syncDay();

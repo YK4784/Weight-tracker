@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { LEGACY_STORAGE_KEY, claimLegacyLog, frontendApiFor, storageKeyFor } from "../dist/account.mjs";
+import { LAST_USER_KEY, LEGACY_STORAGE_KEY, LOG_CACHE_PREFIX, claimLegacyLog, clearLogCache, frontendApiFor, lastUser, logCacheKeyFor, readLogCache, storageKeyFor, writeLogCache } from "../dist/account.mjs";
+import { normalizeState } from "../dist/model.mjs";
 
 const keyFor = (kind, host) => "pk_" + kind + "_" + btoa(host + "$");
 
 class MemoryStorage {
   constructor(items = {}) { this.items = new Map(Object.entries(items)); }
+  get length() { return this.items.size; }
+  key(index) { return [...this.items.keys()][index] ?? null; }
   getItem(key) { return this.items.has(key) ? this.items.get(key) : null; }
   setItem(key, value) { this.items.set(key, String(value)); }
   removeItem(key) { this.items.delete(key); }
@@ -56,4 +59,107 @@ test("nothing happens when there is no old log", () => {
   const storage = new MemoryStorage();
   assert.equal(claimLegacyLog(storage, "user_a"), false);
   assert.equal(storage.items.size, 0);
+});
+
+const log = {
+  started: true,
+  units: { weight: "lb", height: "ft" },
+  entries: [{ date: "2026-11-02", weight: 80.5, note: "after travel" }, { date: "2026-11-01", weight: 81 }]
+};
+
+test("a cached log reads back normalized, with when it was saved and whose it is", () => {
+  const storage = new MemoryStorage();
+  writeLogCache(storage, "user_a", log, 1_790_000_000_000);
+  assert.equal(lastUser(storage), "user_a");
+  const cached = readLogCache(storage, "user_a");
+  assert.equal(cached.userId, "user_a");
+  assert.equal(cached.savedAt, 1_790_000_000_000);
+  assert.deepEqual(cached.log, normalizeState(log));
+  assert.deepEqual(cached.log.entries.map(entry => entry.date), ["2026-11-01", "2026-11-02"]);
+  assert.equal(cached.log.entries[1].note, "after travel");
+});
+
+test("writing the cache defaults to now and replaces the earlier copy", () => {
+  const storage = new MemoryStorage();
+  writeLogCache(storage, "user_a", log, 1);
+  const before = Date.now();
+  writeLogCache(storage, "user_a", { ...log, entries: [] });
+  const cached = readLogCache(storage, "user_a");
+  assert.ok(cached.savedAt >= before && cached.savedAt <= Date.now());
+  assert.deepEqual(cached.log.entries, []);
+});
+
+test("nothing is cached until a log is written", () => {
+  const storage = new MemoryStorage();
+  assert.equal(lastUser(storage), null);
+  assert.equal(readLogCache(storage, "user_a"), null);
+  assert.equal(readLogCache(storage, null), null);
+  assert.equal(readLogCache(storage, ""), null);
+});
+
+test("a corrupt cached value counts as no copy", () => {
+  for (const value of ["{", "null", "42", "[]", '"text"', JSON.stringify({ userId: "user_a", savedAt: 1 }),
+    JSON.stringify({ userId: "user_a", savedAt: 1, log: null }), JSON.stringify({ userId: "user_a", savedAt: 1, log: [] }),
+    JSON.stringify({ userId: "user_a", savedAt: "yesterday", log }), JSON.stringify({ userId: "user_a", savedAt: -5, log }),
+    JSON.stringify({ savedAt: 1, log })]) {
+    const storage = new MemoryStorage({ [LAST_USER_KEY]: "user_a", [logCacheKeyFor("user_a")]: value });
+    assert.equal(readLogCache(storage, "user_a"), null, value);
+  }
+});
+
+test("a cache that belongs to a different user is ignored", () => {
+  const storage = new MemoryStorage();
+  writeLogCache(storage, "user_a", log, 1);
+  assert.equal(readLogCache(storage, "user_b"), null);
+  // A record for user_a stored under user_b's key is not user_b's log.
+  storage.setItem(logCacheKeyFor("user_b"), storage.getItem(logCacheKeyFor("user_a")));
+  assert.equal(readLogCache(storage, "user_b"), null);
+});
+
+test("only one user's log is kept on the device", () => {
+  const storage = new MemoryStorage();
+  writeLogCache(storage, "user_a", log, 1);
+  writeLogCache(storage, "user_b", log, 2);
+  assert.equal(storage.getItem(logCacheKeyFor("user_a")), null);
+  assert.equal(readLogCache(storage, "user_b").savedAt, 2);
+  assert.equal(lastUser(storage), "user_b");
+});
+
+test("clearing the cache removes every cached log and the last user, and nothing else", () => {
+  const storage = new MemoryStorage({ [LEGACY_STORAGE_KEY]: "old", [storageKeyFor("user_a")]: "browser log", "baseline.fast-loss-hidden:user_a": "2026-11-01" });
+  writeLogCache(storage, "user_a", log, 1);
+  storage.setItem(logCacheKeyFor("user_c"), "stray");
+  clearLogCache(storage);
+  assert.equal(lastUser(storage), null);
+  assert.equal(readLogCache(storage, "user_a"), null);
+  assert.deepEqual([...storage.items.keys()].filter(key => key.startsWith(LOG_CACHE_PREFIX)), []);
+  assert.equal(storage.getItem(LEGACY_STORAGE_KEY), "old");
+  assert.equal(storage.getItem(storageKeyFor("user_a")), "browser log");
+  assert.equal(storage.getItem("baseline.fast-loss-hidden:user_a"), "2026-11-01");
+  clearLogCache(storage);
+  assert.equal(storage.items.size, 3);
+});
+
+test("a cache that can't be written leaves no older copy behind", () => {
+  const storage = new MemoryStorage();
+  writeLogCache(storage, "user_a", log, 1);
+  storage.setItem = () => { throw new Error("QuotaExceededError"); };
+  assert.throws(() => writeLogCache(storage, "user_a", log, 2), /Quota/);
+  assert.equal(readLogCache(storage, "user_a"), null);
+  assert.equal(lastUser(storage), null);
+});
+
+test("storage that can't be read counts as no cache", () => {
+  const storage = { getItem() { throw new Error("SecurityError"); } };
+  assert.equal(lastUser(storage), null);
+  assert.equal(readLogCache(storage, "user_a"), null);
+});
+
+test("the cache never looks like a log saved before sign-in", () => {
+  const storage = new MemoryStorage();
+  writeLogCache(storage, "user_a", log, 1);
+  assert.ok(!logCacheKeyFor("user_a").startsWith(LEGACY_STORAGE_KEY));
+  assert.equal(storage.getItem(storageKeyFor("user_a")), null);
+  assert.equal(claimLegacyLog(storage, "user_a"), false);
+  assert.equal(storage.getItem(storageKeyFor("user_a")), null);
 });

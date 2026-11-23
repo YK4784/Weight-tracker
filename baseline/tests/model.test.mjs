@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { CM_PER_IN, FORECAST_MAX_DAYS, KG_PER_LB, NOTE_MAX_LENGTH, averageChanges, bodyFat, bodyFatChange, bodyFatHistory, formatWaist, roundWaist, saveWaist, spokenWaist, validWaist, waistParts, formatAmount, formatWeight, fromTenths, heightParts, normalizeUnits, toTenths, weightParts, bmi, calculateRate, calculateTrend, cleanNote, dateOf, dayOf, fastGoalRate, fastLossCaution, forecastGoal, goalProgress, goalRateAllowed, goalRateLimit, groupByMonth, maxGoalRate, monthlyReports, normalizeGoal, normalizeReminder, validTimeZone, normalizeState, noteLength, overallRate, recentRange, saveWeight, shiftDate, validDate } from "../dist/model.mjs";
+import { CM_PER_IN, FORECAST_MAX_DAYS, KG_PER_LB, NOTE_MAX_LENGTH, averageChanges, bodyFat, bodyFatChange, bodyFatHistory, changeTarget, formatWaist, roundWaist, saveWaist, spokenWaist, validWaist, waistParts, formatAmount, formatWeight, fromTenths, heightParts, normalizeUnits, toTenths, weightParts, bmi, calculateRate, calculateTrend, cleanNote, dateOf, dayOf, fastGoalRate, fastLossCaution, forecastGoal, goalProgress, goalRateAllowed, goalRateLimit, groupByMonth, maxGoalRate, monthlyReports, normalizeGoal, normalizeReminder, validTimeZone, normalizeState, noteLength, overallRate, recentRange, saveWeight, shiftDate, validDate } from "../dist/model.mjs";
 
 const first = dayOf("2026-03-01");
 const entry = (index, weight) => ({ date: dateOf(first + index), weight });
@@ -698,4 +698,24 @@ test("the body fat change compares the first and latest estimates as shown", () 
   assert.equal(change.to.day, first + 20);
   assert.equal(change.change, -2.1, "22.2 − 24.3, not 22.15 − 24.26");
   assert.equal(bodyFatChange([point(0, 22), point(1, 22.04)]).change, 0);
+});
+
+test("a change's target is what it replaces", () => {
+  const weighIn = changeTarget({ op: "save-weight", date: "2026-11-23", weight: 84.9, note: "after travel" });
+  assert.equal(weighIn, "weigh-in 2026-11-23");
+  // A corrected weight, an edit or a deletion on the same date replaces it; another date doesn't.
+  assert.equal(changeTarget({ op: "save-weight", date: "2026-11-23", weight: 84.6, note: null }), weighIn);
+  assert.equal(changeTarget({ op: "update-weight", date: "2026-11-23", weight: 85 }), weighIn);
+  assert.equal(changeTarget({ op: "delete-weight", date: "2026-11-23" }), weighIn);
+  assert.notEqual(changeTarget({ op: "save-weight", date: "2026-11-22", weight: 84.9 }), weighIn);
+  // A waist on the same date is a different thing from the weigh-in.
+  assert.equal(changeTarget({ op: "save-waist", date: "2026-11-23", waist: 86, sex: "male" }), "waist 2026-11-23");
+  assert.equal(changeTarget({ op: "delete-waist", date: "2026-11-23" }), "waist 2026-11-23");
+  assert.equal(changeTarget({ op: "set-goal", goal: {} }), changeTarget({ op: "clear-goal" }));
+  assert.equal(changeTarget({ op: "set-reminder", hour: 8 }), changeTarget({ op: "clear-reminder" }));
+  assert.equal(changeTarget({ op: "set-height", height: 178 }), "height");
+  assert.equal(changeTarget({ op: "set-units", units: {} }), "units");
+  for (const change of [null, {}, { op: "import" }, { op: "start" }, { op: "save-weight" }, { op: "delete-waist", date: "2026-02-30" }]) {
+    assert.equal(changeTarget(change), null, JSON.stringify(change));
+  }
 });
