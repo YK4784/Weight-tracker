@@ -64,6 +64,43 @@ export function separateLabel(y, avoid, gap, min, max) {
   return preferred >= min && preferred <= max ? preferred : avoid - side * gap;
 }
 
+// The index of the point whose `day` is nearest `day`, which can fall between
+// two days, or -1 when there are no points. `points` are in order of day, and
+// a tie goes to the earlier point.
+export function nearestIndex(points, day) {
+  if (!points.length) return -1;
+  let low = 0;
+  let high = points.length - 1;
+  while (low < high) {
+    const middle = (low + high) >> 1;
+    if (points[middle].day < day) low = middle + 1;
+    else high = middle;
+  }
+  // `low` is the first point on or after `day`, or the last point.
+  return low > 0 && day - points[low - 1].day <= points[low].day - day ? low - 1 : low;
+}
+
+// Marks for days, such as days with a note: short ticks in the strip between
+// the plot and the date labels, `MARK_TOP` px below the plot.
+const MARK_TOP = 3;
+const MARK_LENGTH = 6;
+// A tap from `MARK_ABOVE` px above the bottom of the plot to `MARK_REACH` px
+// below it picks the nearest mark first, so a finger finds one.
+const MARK_ABOVE = 4;
+const MARK_REACH = MARK_TOP + MARK_LENGTH + 8;
+
+// A mark for each of `days` (numbers), with `className` for its color.
+function dayMarks(days, x, floor, className) {
+  return days.map(day => {
+    const xx = coord(x(day));
+    return svg("line", { class: className, x1: xx, x2: xx, y1: floor + MARK_TOP, y2: floor + MARK_TOP + MARK_LENGTH });
+  });
+}
+
+// How far from a point, in px, a pointer can be and still pick it, at least:
+// a little for a mouse, a fingertip's error for touch and pens.
+const reachOf = pointerType => pointerType === "mouse" ? 8 : 20;
+
 // Date labels along the bottom, from `start` to `end` (days).
 function dateTicks(fragment, start, end, x, width, height) {
   const compact = width < 480;
@@ -78,22 +115,55 @@ function dateTicks(fragment, start, end, x, width, height) {
 
 // What both charts share: an SVG in a wrapper that redraws when it resizes, and
 // a tooltip for one point at a time, picked with a pointer or the arrow keys.
-// Subclasses draw, set `points`, `axes` and `cursor`, and show a point's tooltip.
+// Subclasses draw, set `points`, `axes` (with `start` and `end` days) and
+// `cursor`, pick the point under a pointer, and show a point's tooltip.
+//
+// A mouse inspects as it hovers, and the tooltip goes when it leaves. A finger
+// or a pen inspects where it goes down and as it drags sideways, and the
+// tooltip stays after it lifts, until a tap elsewhere. The wrapper's
+// `touch-action: pan-y` leaves vertical swipes to scroll the page: the browser
+// then cancels the pointer, and the tooltip stays as it was.
 class Chart {
+  // `cover` is an element fixed over the bottom of the screen, such as the log
+  // bar on a phone, that the tooltip keeps clear of.
   constructor(ids) {
     this.wrap = document.getElementById(ids.wrap);
     this.canvas = document.getElementById(ids.canvas);
     this.tooltip = document.getElementById(ids.tooltip);
     this.empty = document.getElementById(ids.empty);
     this.announce = document.getElementById(ids.announce);
+    this.cover = ids.cover ? document.getElementById(ids.cover) : null;
     this.points = [];
     this.active = null;
-    this.wrap.addEventListener("pointermove", event => {
-      if (event.pointerType !== "touch") this.inspectPointer(event);
+    this.drag = null; // The id of the finger or pen moving through the points, while it's down.
+    this.wrap.addEventListener("pointerdown", event => {
+      if (!event.isPrimary) return;
+      if (event.pointerType !== "mouse") {
+        this.drag = event.pointerId;
+        // The drag stays with the chart when the finger strays off it.
+        this.wrap.setPointerCapture(event.pointerId);
+      }
+      this.inspectPointer(event, false);
     });
-    this.wrap.addEventListener("pointerdown", event => this.inspectPointer(event));
-    this.wrap.addEventListener("pointerleave", () => this.hideTooltip());
+    this.wrap.addEventListener("pointermove", event => {
+      if (!event.isPrimary) return;
+      if (event.pointerId === this.drag) this.inspectPointer(event, true);
+      else if (event.pointerType !== "touch") this.inspectPointer(event, false);
+    });
+    for (const type of ["pointerup", "pointercancel"]) {
+      this.wrap.addEventListener(type, event => {
+        if (event.pointerId === this.drag) this.drag = null;
+      });
+    }
+    // Touch and pen pointers leave as they lift, so only a mouse hides it.
+    this.wrap.addEventListener("pointerleave", event => {
+      if (event.pointerType === "mouse") this.hideTooltip();
+    });
     this.wrap.addEventListener("blur", () => this.hideTooltip());
+    // A tooltip that stays as the page scrolls keeps clear of the cover.
+    addEventListener("scroll", () => {
+      if (this.placed && !this.tooltip.hidden) this.placeTooltip(...this.placed);
+    }, { passive: true });
     this.wrap.addEventListener("keydown", event => this.inspectKey(event));
     document.addEventListener("pointerdown", event => {
       if (!this.wrap.contains(event.target)) this.hideTooltip();
@@ -114,12 +184,39 @@ class Chart {
     this.showTooltip(keys[event.key], true);
   }
 
+  // The day, with a fraction, at `xx` px across the chart.
+  dayAt(xx) {
+    const { left, right, start, end } = this.axes;
+    return start + (xx - left) / (right - left) * (end - start);
+  }
+
+  // Shows the point under a pointer, or hides the tooltip when there's none.
+  // A drag keeps the last point when there's none, so it never flickers off.
+  inspectPointer(event, dragging) {
+    if (!this.points.length) return;
+    const bounds = this.wrap.getBoundingClientRect();
+    const index = this.pointAt(event.clientX - bounds.left, event.clientY - bounds.top, dragging, reachOf(event.pointerType));
+    if (index >= 0) this.showTooltip(index, false);
+    else if (!dragging) this.hideTooltip();
+  }
+
   // Beside the point at `xx`, on whichever side has room, centered on `yy`.
   placeTooltip(xx, yy) {
+    this.placed = [xx, yy];
     this.tooltip.hidden = false;
     const tipWidth = this.tooltip.offsetWidth;
+    const tipHeight = this.tooltip.offsetHeight;
     this.tooltip.style.left = Math.max(0, Math.min(this.wrap.clientWidth - tipWidth, xx + tipWidth + 14 < this.wrap.clientWidth ? xx + 14 : xx - tipWidth - 14)) + "px";
-    this.tooltip.style.top = Math.max(0, Math.min(this.axes.floor - this.tooltip.offsetHeight, yy - this.tooltip.offsetHeight / 2)) + "px";
+    let top = Math.max(0, Math.min(this.axes.floor - tipHeight, yy - tipHeight / 2));
+    // When the chart runs under the cover or off the bottom of the screen, the
+    // tooltip moves up to stay in sight, over the legend if need be, but not
+    // off the top of the screen.
+    const screen = document.documentElement.clientHeight;
+    const cover = this.cover?.getBoundingClientRect();
+    const wrapTop = this.wrap.getBoundingClientRect().top;
+    const bottom = (cover?.height ? Math.min(screen, cover.top) : screen) - 8 - wrapTop;
+    if (top + tipHeight > bottom) top = Math.max(bottom - tipHeight, -wrapTop);
+    this.tooltip.style.top = top + "px";
   }
 
   hideTooltip() {
@@ -130,8 +227,11 @@ class Chart {
 }
 
 export class TrendChart extends Chart {
-  constructor() {
-    super({ wrap: "chart-wrap", canvas: "trend-chart", tooltip: "chart-tooltip", empty: "chart-empty", announce: "chart-announce" });
+  // `cover` is the id of an element the tooltip keeps clear of (see Chart).
+  constructor({ cover } = {}) {
+    super({ wrap: "chart-wrap", canvas: "trend-chart", tooltip: "chart-tooltip", empty: "chart-empty", announce: "chart-announce", cover });
+    this.noteKey = document.getElementById("legend-note");
+    this.noted = []; // The points with a note, which have a mark under the plot.
   }
 
   // `goal` is the goal weight in kg, or null without one. The chart plots in
@@ -156,6 +256,8 @@ export class TrendChart extends Chart {
     const firstDay = this.trend.days[0]?.day ?? end;
     const start = this.range === "all" ? firstDay : Math.max(firstDay, end - Number(this.range) + 1);
     this.points = this.trend.days.filter(point => point.day >= start && point.day <= end);
+    this.noted = this.points.filter(point => point.note);
+    this.noteKey.hidden = !this.noted.length;
     this.empty.hidden = this.points.length > 0;
     this.wrap.tabIndex = this.points.length ? 0 : -1;
     if (!this.points.length) {
@@ -198,6 +300,7 @@ export class TrendChart extends Chart {
       );
     }
     dateTicks(fragment, start, end, x, width, height);
+    fragment.append(...dayMarks(this.noted.map(p => p.day), x, floor, "note-mark"));
 
     // The goal is a dashed hairline under the data, ending with its value.
     if (goal !== null) {
@@ -243,20 +346,25 @@ export class TrendChart extends Chart {
     this.cursor = svg("g", { visibility: "hidden", "pointer-events": "none" });
     fragment.append(this.cursor);
     this.canvas.append(fragment);
-    this.canvas.setAttribute("aria-label", "Daily weights and 14-day moving averages, " + prettyDate(dateOf(start), "full") + " through " + prettyDate(this.today, "full") + ". Last plotted average " + spokenWeight(last.average, unit) + "." + (goal === null ? "" : " Goal " + spokenWeight(goal, unit) + "."));
+    this.canvas.setAttribute("aria-label", "Daily weights and 14-day moving averages, " + prettyDate(dateOf(start), "full") + " through " + prettyDate(this.today, "full") + ". Last plotted average " + spokenWeight(last.average, unit) + "." + (goal === null ? "" : " Goal " + spokenWeight(goal, unit) + ".") +
+      (this.noted.length ? " Days with notes are marked below the chart." : ""));
   }
 
-  inspectPointer(event) {
-    if (!this.points.length) return;
-    const bounds = this.wrap.getBoundingClientRect();
-    const { left, right, start, end, floor, ceiling } = this.axes;
-    const xx = event.clientX - bounds.left;
-    const yy = event.clientY - bounds.top;
-    if (xx < left - 5 || xx > right + 5 || yy < ceiling - 12 || yy > floor + 5) return this.hideTooltip();
-    const day = start + Math.round(Math.max(0, Math.min(1, (xx - left) / (right - left))) * (end - start));
-    const index = this.points.findIndex(p => p.day === day);
-    if (index < 0) return this.hideTooltip();
-    this.showTooltip(index, false);
+  // The index of the point at (`xx`, `yy`) px, or -1 for none: the nearest day
+  // with a point, if it's within `reach` px or half a day. At the bottom of the
+  // plot and in the strip under it, the nearest mark comes first. A drag goes
+  // by `xx` alone, to the nearest point however far, so it moves across gaps
+  // in the line.
+  pointAt(xx, yy, dragging, reach) {
+    const { left, right, start, end, ceiling, floor, x } = this.axes;
+    const day = this.dayAt(xx);
+    if (dragging) return nearestIndex(this.points, day);
+    if (xx < left - 5 || xx > right + 5 || yy < ceiling - 12 || yy > floor + MARK_REACH) return -1;
+    const near = point => Math.abs(x(point.day) - xx) <= Math.max(reach, (right - left) / (end - start) / 2);
+    const mark = yy > floor - MARK_ABOVE ? this.noted[nearestIndex(this.noted, day)] : null;
+    if (mark && near(mark)) return this.points.indexOf(mark);
+    const index = nearestIndex(this.points, day);
+    return near(this.points[index]) ? index : -1;
   }
 
   showTooltip(index, announce) {
@@ -292,8 +400,9 @@ export class TrendChart extends Chart {
 // joined by a line, from the first through today. It is drawn in ink, not the
 // accent, so it stays quieter than the weight trend above it.
 export class BodyFatChart extends Chart {
-  constructor() {
-    super({ wrap: "fat-chart-wrap", canvas: "fat-chart", tooltip: "fat-tooltip", empty: "fat-chart-empty", announce: "fat-announce" });
+  // `cover` is the id of an element the tooltip keeps clear of (see Chart).
+  constructor({ cover } = {}) {
+    super({ wrap: "fat-chart-wrap", canvas: "fat-chart", tooltip: "fat-tooltip", empty: "fat-chart-empty", announce: "fat-announce", cover });
   }
 
   // `estimates` are points from bodyFatHistory with a body fat estimate.
@@ -337,7 +446,7 @@ export class BodyFatChart extends Chart {
     const floor = height - 30;
     const x = day => start === end ? (left + right) / 2 : left + (day - start) / (end - start) * (right - left);
     const y = percent => floor - (percent - bottom) / (top - bottom) * (floor - ceiling);
-    this.axes = { left, right, ceiling, floor, x, y };
+    this.axes = { start, end, left, right, ceiling, floor, x, y };
     const fragment = document.createDocumentFragment();
 
     fragment.append(svg("text", { x: left - 12, y: 12, "text-anchor": "end" }, "%"));
@@ -368,19 +477,11 @@ export class BodyFatChart extends Chart {
       prettyDate(first.date, "full") + " through " + prettyDate(dateOf(end), "full") + ". Latest " + oneDecimal(last.bodyFat) + " percent on " + prettyDate(last.date, "full") + ".");
   }
 
-  // Measurements are far apart, so the pointer picks the nearest one.
-  inspectPointer(event) {
-    if (!this.points.length) return;
-    const bounds = this.wrap.getBoundingClientRect();
-    const { left, right, ceiling, floor, x } = this.axes;
-    const xx = event.clientX - bounds.left;
-    const yy = event.clientY - bounds.top;
-    if (xx < left - 12 || xx > right + 12 || yy < ceiling - 12 || yy > floor + 5) return this.hideTooltip();
-    let index = 0;
-    this.points.forEach((point, i) => {
-      if (Math.abs(x(point.day) - xx) < Math.abs(x(this.points[index].day) - xx)) index = i;
-    });
-    this.showTooltip(index, false);
+  // Measurements are far apart, so a pointer on the plot picks the nearest one.
+  pointAt(xx, yy, dragging) {
+    const { left, right, ceiling, floor } = this.axes;
+    if (!dragging && (xx < left - 12 || xx > right + 12 || yy < ceiling - 12 || yy > floor + 5)) return -1;
+    return nearestIndex(this.points, this.dayAt(xx));
   }
 
   showTooltip(index, announce) {

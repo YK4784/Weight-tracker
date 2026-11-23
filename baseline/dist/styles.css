@@ -264,11 +264,14 @@ body[data-weight-unit="st"] .hero:not(.is-empty) { font-size: clamp(3.5rem, 9vw 
 .trend-figures + .legend { margin-top: 20px; }
 .legend { display: flex; flex-wrap: wrap; gap: 6px 22px; margin-top: 6px; color: var(--ink-2); font-size: .9375rem; }
 .legend span { display: inline-flex; align-items: center; gap: 8px; }
-.key-line, .key-dot, .key-goal { display: inline-block; flex: none; }
+.key-line, .key-dot, .key-goal, .key-note { display: inline-block; flex: none; }
 .key-line { width: 18px; height: 2px; border-radius: 1px; background: var(--accent); }
 .key-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dot); }
 .key-goal { width: 18px; height: 1px; background: repeating-linear-gradient(90deg, var(--ink-2) 0 4px, transparent 4px 7px); }
-.chart-wrap { position: relative; height: clamp(240px, 28vw, 320px); margin-top: 18px; border-radius: 4px; }
+.key-note { width: 2px; height: 8px; background: var(--ink-3); }
+/* A sideways drag moves through the days, and a vertical swipe scrolls the
+   page. Browsers that know pinch-zoom keep zooming the page with two fingers. */
+.chart-wrap { position: relative; height: clamp(240px, 28vw, 320px); margin-top: 18px; border-radius: 4px; touch-action: pan-y; touch-action: pan-y pinch-zoom; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
 :is(#trend-chart, #fat-chart) { position: absolute; inset: 0; display: block; width: 100%; height: 100%; overflow: visible; }
 :is(#trend-chart, #fat-chart) text { font-family: var(--font); font-size: 12.5px; fill: var(--ink-3); font-variant-numeric: tabular-nums; }
 :is(#trend-chart, #fat-chart) .grid { stroke: var(--rule); stroke-width: 1; }
@@ -281,6 +284,7 @@ body[data-weight-unit="st"] .hero:not(.is-empty) { font-size: clamp(3.5rem, 9vw 
 #trend-chart .goal { stroke: var(--ink-2); stroke-width: 1; stroke-dasharray: 4 3; }
 #trend-chart .goal-label { fill: var(--ink-2); font-weight: 600; }
 :is(#trend-chart, #fat-chart) .crosshair { stroke: var(--ink-3); stroke-width: 1; }
+#trend-chart .note-mark { stroke: var(--ink-3); stroke-width: 2; }
 .chart-tooltip { position: absolute; z-index: 2; width: max-content; max-width: 100%; padding: 10px 12px; border: 1px solid var(--rule); border-radius: 10px; background: var(--surface); box-shadow: var(--shadow); font-size: .875rem; pointer-events: none; }
 .chart-tooltip strong { display: block; margin-bottom: 4px; font-weight: 700; }
 .tip-row { display: flex; align-items: center; gap: 8px; color: var(--ink-2); font-variant-numeric: tabular-nums; }

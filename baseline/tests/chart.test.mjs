@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { separateLabel, stoneTick, yDomain } from "../dist/chart.mjs";
+import { nearestIndex, separateLabel, stoneTick, yDomain } from "../dist/chart.mjs";
 
 const points = [{ average: 70, weight: 70.5 }, { average: 69.8, weight: null }, { average: 69.6, weight: 69.2 }];
 
@@ -40,4 +40,32 @@ test("a minimum pad keeps a nearly flat series from filling the chart", () => {
   assert.ok(padded.bottom <= 23.1 && padded.top >= 25.3);
   assert.equal(padded.step, 0.5);
   assert.deepEqual(yDomain(points, null, null, 0.25), yDomain(points), "the default pad is unchanged");
+});
+
+test("a pointer picks the point on its day, or the nearest one across a gap", () => {
+  // Days 10 to 12, then a gap until day 20.
+  const days = [10, 11, 12, 20, 21].map(day => ({ day }));
+  assert.equal(nearestIndex(days, 11), 1, "an exact day");
+  assert.equal(nearestIndex(days, 20), 3);
+  assert.equal(nearestIndex(days, 11.4), 1, "part way through a day");
+  assert.equal(nearestIndex(days, 11.6), 2);
+  assert.equal(nearestIndex(days, 14), 2, "in a gap, the closer side: before it");
+  assert.equal(nearestIndex(days, 18), 3, "in a gap, the closer side: after it");
+  assert.equal(nearestIndex(days, 16), 2, "halfway goes to the earlier point");
+  assert.equal(nearestIndex(days, 3), 0, "before the first point");
+  assert.equal(nearestIndex(days, 10), 0, "the first point");
+  assert.equal(nearestIndex(days, 21), 4, "the last point");
+  assert.equal(nearestIndex(days, 40), 4, "after the last point");
+  assert.equal(nearestIndex([{ day: 5 }], 0), 0, "a single point");
+  assert.equal(nearestIndex([{ day: 5 }], 9), 0);
+  assert.equal(nearestIndex([], 5), -1, "no points");
+});
+
+test("the nearest point matches a search through every point", () => {
+  const days = [1, 2, 3, 7, 8, 30, 31, 32, 33, 60].map(day => ({ day }));
+  for (let day = -5; day <= 65; day += .25) {
+    let best = 0;
+    days.forEach((point, i) => { if (Math.abs(point.day - day) < Math.abs(days[best].day - day)) best = i; });
+    assert.equal(nearestIndex(days, day), best, "day " + day);
+  }
 });

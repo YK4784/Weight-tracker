@@ -8,8 +8,9 @@ import { PUSH_PUBLIC_KEY } from "./config.mjs";
 const $ = id => document.getElementById(id);
 const PAGE_SIZE = 15;
 const WAIST_ROWS = 5; // Waist measurements listed before "Show all".
-const chart = new TrendChart();
-const fatChart = new BodyFatChart();
+// On a phone, the charts' tooltips keep clear of the log bar.
+const chart = new TrendChart({ cover: "log-bar" });
+const fatChart = new BodyFatChart({ cover: "log-bar" });
 let today = localToday();
 let clerk;
 let clerkReady = null; // Resolves to Clerk once it has loaded. Null before that starts, or after it failed.

@@ -102,3 +102,15 @@ test("the log sheet saves from the keyboard, and the page can reach the safe are
   assert.match(page, /<meta name="viewport" content="[^"]*\bviewport-fit=cover\b[^"]*">/);
   assert.match(section(page, "log-bar"), /id="log-bar-button"[^>]*>Log today’s weight</);
 });
+
+test("the charts leave vertical swipes to the page, and note marks have a key in the legend", async () => {
+  const css = await read("styles.css");
+  const wrap = /^\.chart-wrap \{[^}]*\}/m.exec(css)[0];
+  assert.match(wrap, /touch-action: pan-y;/, "a sideways drag scrubs, a vertical swipe scrolls");
+  assert.match(css, /^#trend-chart \.note-mark \{ stroke: var\(--ink-3\);/m);
+  assert.match(page, /<span id="legend-note" hidden><i class="key-note"><\/i>Note<\/span>/);
+  // The tooltips keep clear of the log bar, which must exist under that id.
+  const app = await read("app.mjs");
+  assert.equal([...app.matchAll(/Chart\(\{ cover: "log-bar" \}\)/g)].length, 2);
+  assert.match(page, /id="log-bar"/);
+});
