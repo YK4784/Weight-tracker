@@ -248,13 +248,17 @@
           <p class="figures-pending" id="change-pending" hidden>Your 7-day change shows once your log is a week old.</p>
           <dl class="figures" id="range-figures"></dl>
         </div>
-        <div class="legend"><span><i class="key-line"></i>14-day average</span><span><i class="key-dot"></i>Daily weigh-in</span><span id="legend-goal" hidden><i class="key-goal"></i>Goal</span><span id="legend-note" hidden><i class="key-note"></i>Note</span></div>
+        <div class="legend"><span><i class="key-line"></i>14-day average</span><span><i class="key-dot"></i>Daily weigh-in</span><span id="legend-forecast" hidden><i class="key-forecast"></i>Forecast</span><span id="legend-goal" hidden><i class="key-goal"></i>Goal</span><span id="legend-note" hidden><i class="key-note"></i>Note</span><button class="text-button forecast-toggle" type="button" id="forecast-toggle" aria-controls="chart-wrap trend-forecast">Show forecast</button></div>
         <div class="chart-wrap" id="chart-wrap" tabindex="0" role="group" aria-label="Weight trend chart. Use the left and right arrow keys to inspect days.">
           <svg id="trend-chart" role="img" aria-label="Weight trend"></svg>
           <div class="chart-tooltip" id="chart-tooltip" hidden></div>
           <div class="chart-empty" id="chart-empty" hidden></div>
         </div>
         <span class="sr-only" role="status" id="chart-announce"></span>
+        <div id="trend-forecast" hidden>
+          <p class="forecast-words" id="forecast-words"></p>
+          <p class="note" id="forecast-method">The forecast carries on your weekly trend from today’s 14-day average. The shaded band is the likely range: if the trend holds, the average lands inside it 8 times in 10, given how much your weigh-ins swing from day to day. It can’t foresee a change in what you eat or do, and it looks at most 12 weeks ahead, because weight change usually slows over months.</p>
+        </div>
         <p class="note">Each point on the line averages the weigh-ins from that day and the 13 days before it. Days without a weigh-in are skipped. Each change compares today’s average with the one 7, 30 or 90 days earlier, or with your first weigh-in for all time.</p>
       </section>
     </div>

@@ -3,6 +3,7 @@ import test from "node:test";
 import { CM_PER_IN, FORECAST_MAX_DAYS, KG_PER_LB, NOTE_MAX_LENGTH, averageChanges, bodyFat, bodyFatChange, bodyFatHistory, changeTarget, formatWaist, roundWaist, saveWaist, spokenWaist, validWaist, waistParts, formatAmount, formatWeight, fromTenths, heightParts, normalizeUnits, toTenths, weightParts, bmi, calculateRate, calculateTrend, cleanNote, dateOf, dayOf, fastGoalRate, fastLossCaution, forecastGoal, goalProgress, goalRateAllowed, goalRateLimit, groupByMonth, maxGoalRate, monthlyReports, normalizeGoal, normalizeReminder, validTimeZone, normalizeState, noteLength, overallRate, recentRange, saveWeight, shiftDate, validDate } from "../dist/model.mjs";
 import { PREFERENCE_KEYS, QUEUEABLE_OPS, applyOp, applyOps, normalizePreferences, preferencesChange, validPreference } from "../dist/model.mjs";
 import { CONSENT_VERSION, hasConsent, normalizeConsent, roundWeight } from "../dist/model.mjs";
+import { FORECAST_CHART_MAX_DAYS, FORECAST_NOISE_CORRELATION, forecastReach, forecastTrend, formatRange, spokenRange, tQuantile } from "../dist/model.mjs";
 
 const first = dayOf("2026-03-01");
 const entry = (index, weight) => ({ date: dateOf(first + index), weight });
@@ -347,6 +348,146 @@ test("very near and very far forecasts", () => {
   assert.deepEqual(far[0], { index: 1, weight: 90, days: 700, date: "2028-10-22" });
   assert.ok(far[1].days > FORECAST_MAX_DAYS);
   assert.equal(far[1].date, null);
+});
+
+test("the trend forecast waits for the weekly trend", () => {
+  const sparse = daily(21, i => 80 - i / 10).filter((_, i) => i % 3 === 0);
+  assert.equal(forecastTrend(sparse, dateOf(first + 20), 14), null);
+  assert.equal(forecastTrend([], dateOf(first), 14), null);
+  const short = daily(13, i => 80 - i / 10);
+  assert.equal(forecastTrend(short, short.at(-1).date, 14), null);
+});
+
+test("the trend forecast carries the weekly trend on from today's average", () => {
+  const log = daily(30, i => 80 - i / 10);
+  const today = log.at(-1).date;
+  const forecast = forecastTrend(log, today, 14);
+  const rate = calculateRate(log, today);
+  assert.equal(forecast.perWeek, rate.perWeek);
+  assert.equal(forecast.clear, rate.clear);
+  assert.equal(forecast.average, calculateTrend(log, today).current.average);
+  assert.equal(forecast.points.length, 14);
+  forecast.points.forEach((point, i) => {
+    assert.equal(point.day, dayOf(today) + i + 1);
+    assert.equal(point.date, dateOf(point.day));
+    assert.ok(Math.abs(point.average - (forecast.average - 0.1 * (i + 1))) < 1e-9, "a straight line at 0.7 kg a week");
+    assert.ok(point.low < point.average && point.average < point.high);
+  });
+  // Weigh-ins on an exact line still get a band, from the least noise assumed.
+  assert.ok(forecast.points[0].high - forecast.points[0].low > 0.01);
+});
+
+test("the trend forecast uses the weekly trend as shown in the unit", () => {
+  const log = daily(21, i => 80 - i * .061);
+  const kg = forecastTrend(log, log.at(-1).date, 7, "kg");
+  const lb = forecastTrend(log, log.at(-1).date, 7, "lb");
+  assert.equal(kg.perWeek, -0.4);
+  assert.equal(lb.perWeek, calculateRate(log, log.at(-1).date, "lb").perWeek);
+  assert.ok(Math.abs(lb.perWeek / KG_PER_LB + 0.9) < 1e-9, "0.9 lb a week");
+  assert.ok(Math.abs(kg.points[6].average - (kg.average - 0.4)) < 1e-9);
+  assert.ok(Math.abs(lb.points[6].average - (lb.average + lb.perWeek)) < 1e-9);
+});
+
+test("the trend forecast ignores weigh-ins after today", () => {
+  const log = daily(21, i => 80 - i / 10);
+  const later = [...log, entry(21, 50), entry(22, 50)];
+  assert.deepEqual(forecastTrend(later, log.at(-1).date, 7), forecastTrend(log, log.at(-1).date, 7));
+});
+
+// A seeded random number generator (mulberry32), and normal noise from it.
+function seeded(seed) {
+  return () => {
+    seed = seed + 0x6D2B79F5 | 0;
+    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+const normal = random => Math.sqrt(-2 * Math.log(1 - random())) * Math.cos(2 * Math.PI * random());
+// Weigh-ins on the days `weighs` picks, losing `perWeek` kg a week, with noise
+// of SD `sd` kg that's correlated by `correlation` from one day to the next.
+function noisyLog(random, { days, perWeek = -0.5, sd = 0.45, correlation = FORECAST_NOISE_CORRELATION, weighs = () => true }) {
+  const log = [];
+  let noise = normal(random) * sd;
+  for (let i = 0; i < days; i++) {
+    if (i) noise = correlation * noise + Math.sqrt(1 - correlation ** 2) * sd * normal(random);
+    if (weighs(i)) log.push(entry(i, roundWeight(85 + perWeek / 7 * i + noise)));
+  }
+  return log;
+}
+
+test("the trend forecast's band widens with each day, and with noisier or fewer weigh-ins", () => {
+  const random = seeded(7);
+  const width = (log, ahead = 14) => {
+    const point = forecastTrend(log, dateOf(first + 20), ahead).points[ahead - 1];
+    return point.high - point.low;
+  };
+  const log = noisyLog(random, { days: 21 });
+  const widths = forecastTrend(log, dateOf(first + 20), 42).points.map(point => point.high - point.low);
+  widths.slice(1).forEach((value, i) => assert.ok(value > widths[i], "day " + (i + 2)));
+  const steady = daily(21, i => roundWeight(80 - i / 10 + Math.sin(i * 2.3) * .3));
+  const swinging = daily(21, i => roundWeight(80 - i / 10 + Math.sin(i * 2.3) * .9));
+  assert.ok(width(swinging) > 2.5 * width(steady));
+  // On an exact line every log assumes the same least noise, so only how many
+  // weigh-ins there are, and how far apart, makes a difference.
+  const exact = daily(21, i => 80 - i / 10);
+  const everyOther = exact.filter((_, i) => i % 2 === 0);
+  const everyThird = exact.filter((_, i) => i % 3 === 0 || i === 20);
+  assert.ok(width(everyThird) > width(everyOther) && width(everyOther) > width(exact));
+});
+
+test("the trend forecast's band holds the average 8 times in 10 when the trend holds", () => {
+  // Daily weigh-ins and three a week, with noise as correlated as assumed.
+  // The real 14-day average 14 and 42 days ahead lands inside the band about
+  // 80% of the time.
+  for (const weighs of [() => true, i => i % 7 % 2 === 0 && i % 7 < 5]) {
+    const random = seeded(11);
+    const inside = { 14: 0, 42: 0 };
+    const trials = 300;
+    for (let trial = 0; trial < trials; trial++) {
+      const log = noisyLog(random, { days: 21 + 42, weighs });
+      const forecast = forecastTrend(log.filter(item => item.date <= dateOf(first + 20)), dateOf(first + 20), 42);
+      for (const ahead of [14, 42]) {
+        const { low, high } = forecast.points[ahead - 1];
+        const actual = calculateTrend(log, dateOf(first + 20 + ahead)).current.average;
+        if (actual >= low && actual <= high) inside[ahead]++;
+      }
+    }
+    for (const ahead of [14, 42]) {
+      const share = inside[ahead] / trials;
+      assert.ok(share > .72 && share < .88, ahead + " days ahead: " + share);
+    }
+  }
+});
+
+test("the chart forecasts half as far ahead as it shows, in whole weeks, up to 12", () => {
+  assert.equal(forecastReach(1), 7);
+  assert.equal(forecastReach(14), 7);
+  assert.equal(forecastReach(20), 7);
+  assert.equal(forecastReach(21), 14);
+  assert.equal(forecastReach(30), 14);
+  assert.equal(forecastReach(90), 42);
+  assert.equal(forecastReach(200), FORECAST_CHART_MAX_DAYS);
+  assert.equal(forecastReach(2000), 84);
+});
+
+test("Student's t quantiles for the band", () => {
+  const z = 1.2815515655446004;
+  // Exact 90th percentiles of t.
+  for (const [df, exact] of [[3, 1.638], [4, 1.533], [6, 1.440], [10, 1.372], [19, 1.328], [60, 1.296]]) {
+    assert.ok(Math.abs(tQuantile(z, df) - exact) < 0.012, df + ": " + tQuantile(z, df));
+  }
+  assert.ok(Math.abs(tQuantile(z, 1e9) - z) < 1e-6);
+});
+
+test("weight ranges read as shown", () => {
+  assert.equal(formatRange(78.14, 79.94), "78.1–79.9 kg");
+  assert.equal(formatRange(78.14, 79.94, "lb"), "172.3–176.2 lb");
+  assert.equal(formatRange(79.13, 80.1, "st"), "12 st 6.5 lb – 12 st 8.6 lb");
+  assert.equal(formatRange(80.01, 80.04), "80.0 kg", "a range that shows as one weight");
+  assert.equal(spokenRange(78.14, 79.94), "78.1 to 79.9 kilograms");
+  assert.equal(spokenRange(79.13, 80.1, "st"), "12 stone 6.5 pounds to 12 stone 8.6 pounds");
+  assert.equal(spokenRange(80.01, 80.04), "80.0 kilograms");
 });
 
 const changesOf = (log, through = log.at(-1).date) => averageChanges(calculateTrend(log, through));

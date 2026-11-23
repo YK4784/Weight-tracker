@@ -19,6 +19,8 @@
   --accent: #2443d9;
   --accent-strong: #1a34b5;
   --accent-wash: #e7ebfc;
+  /* The trend forecast's likely range: the accent, thin enough for grid lines to show through. */
+  --band: rgb(36 67 217 / 12%);
   --on-accent: #ffffff;
   --dot: #8a867d;
   --danger: #b3261e;
@@ -42,6 +44,7 @@
     --accent: #7088f5;
     --accent-strong: #8b9ff8;
     --accent-wash: #1f2647;
+    --band: rgb(112 136 245 / 17%);
     --on-accent: #0b0e26;
     --dot: #7d7a73;
     --danger: #f2877e;
@@ -324,11 +327,15 @@ body[data-weight-unit="st"] .hero:not(.is-empty) { font-size: clamp(3.5rem, 9vw 
 .trend-figures + .legend { margin-top: 20px; }
 .legend { display: flex; flex-wrap: wrap; gap: 6px 22px; margin-top: 6px; color: var(--ink-2); font-size: .9375rem; }
 .legend span { display: inline-flex; align-items: center; gap: 8px; }
-.key-line, .key-dot, .key-goal, .key-note { display: inline-block; flex: none; }
+.key-line, .key-dot, .key-goal, .key-note, .key-forecast { display: inline-block; flex: none; }
 .key-line { width: 18px; height: 2px; border-radius: 1px; background: var(--accent); }
 .key-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dot); }
 .key-goal { width: 18px; height: 1px; background: repeating-linear-gradient(90deg, var(--ink-2) 0 4px, transparent 4px 7px); }
 .key-note { width: 2px; height: 8px; background: var(--ink-3); }
+/* The forecast: its dotted line across its band. */
+.key-forecast { width: 18px; height: 10px; border-radius: 2px; background: radial-gradient(circle, var(--accent) 1px, transparent 1.5px) 1px 50% / 5px 10px repeat-x, var(--band); }
+/* Shows and hides the forecast, at the end of the legend's line. */
+.legend .forecast-toggle { margin-left: auto; }
 /* A sideways drag moves through the days, and a vertical swipe scrolls the
    page. Browsers that know pinch-zoom keep zooming the page with two fingers. */
 .chart-wrap { position: relative; height: clamp(240px, 28vw, 320px); margin-top: 18px; border-radius: 4px; touch-action: pan-y; touch-action: pan-y pinch-zoom; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
@@ -345,10 +352,19 @@ body[data-weight-unit="st"] .hero:not(.is-empty) { font-size: clamp(3.5rem, 9vw 
 #trend-chart .goal-label { fill: var(--ink-2); font-weight: 600; }
 :is(#trend-chart, #fat-chart) .crosshair { stroke: var(--ink-3); stroke-width: 1; }
 #trend-chart .note-mark { stroke: var(--ink-3); stroke-width: 2; }
+/* The forecast is dotted and its end dot open, since it hasn't happened. */
+#trend-chart .band { fill: var(--band); }
+#trend-chart .forecast { fill: none; stroke: var(--accent); stroke-width: 2.25; stroke-linecap: round; stroke-dasharray: 0 5; }
+#trend-chart :is(.forecast-dot, .cursor-forecast) { fill: var(--paper); stroke: var(--accent); stroke-width: 2; }
+#trend-chart .forecast-label { fill: var(--accent); font-size: 14px; font-weight: 700; }
+#trend-chart .today-line { stroke: var(--field-border); stroke-width: 1; stroke-dasharray: 2 3; }
+#trend-chart .forecast-title { fill: var(--ink-2); font-weight: 600; }
 .chart-tooltip { position: absolute; z-index: 2; width: max-content; max-width: 100%; padding: 10px 12px; border: 1px solid var(--rule); border-radius: 10px; background: var(--surface); box-shadow: var(--shadow); font-size: .875rem; pointer-events: none; }
 .chart-tooltip strong { display: block; margin-bottom: 4px; font-weight: 700; }
 .tip-row { display: flex; align-items: center; gap: 8px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .tip-row b { color: var(--ink); font-weight: 700; }
+/* Lined up with the words after the key above it. */
+.tip-detail { padding-left: 26px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .tip-note { max-width: 15rem; margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--rule); color: var(--ink-2); overflow-wrap: anywhere; }
 /* Body fat draws in ink rather than the accent, so the weight trend stays the figure. */
 #fat-chart .fat-line { fill: none; stroke: var(--ink-2); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
@@ -356,6 +372,10 @@ body[data-weight-unit="st"] .hero:not(.is-empty) { font-size: clamp(3.5rem, 9vw 
 #fat-chart .end-dot, #fat-chart .cursor-dot { fill: var(--ink); stroke: var(--paper); stroke-width: 4; paint-order: stroke; }
 .chart-empty { position: absolute; inset: 0; display: grid; place-content: center; padding: 20px; color: var(--ink-3); text-align: center; }
 .note { max-width: 68ch; margin-top: 14px; color: var(--ink-3); font-size: .875rem; }
+/* The trend forecast in words, under the chart, with how it's worked out. */
+.forecast-words { max-width: 68ch; margin-top: 14px; color: var(--ink-2); text-wrap: pretty; }
+.forecast-words strong { color: var(--ink); font-weight: 700; }
+.forecast-words + .note { margin-top: 6px; }
 
 /* Entries */
 .entries { padding-top: 36px; }

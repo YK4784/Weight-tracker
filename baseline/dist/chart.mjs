@@ -1,4 +1,4 @@
-import { KG_PER_LB, dateOf, dayOf, formatWaist, formatWeight, oneDecimal, prettyDate, spokenWaist, spokenWeight, weightParts } from "./model.mjs";
+import { KG_PER_LB, dateOf, dayOf, formatRange, formatWaist, formatWeight, oneDecimal, prettyDate, spokenRange, spokenWaist, spokenWeight, weightParts } from "./model.mjs";
 
 const NS = "http://www.w3.org/2000/svg";
 
@@ -62,6 +62,14 @@ export function separateLabel(y, avoid, gap, min, max) {
   const side = y >= avoid ? 1 : -1;
   const preferred = avoid + side * gap;
   return preferred >= min && preferred <= max ? preferred : avoid - side * gap;
+}
+
+// The first day the trend chart shows for `range` ("14", "30", "90" or "all")
+// on `today`: as far back as the range goes, but not before the first average.
+export function rangeStart(trend, range, today) {
+  const end = dayOf(today);
+  const firstDay = trend.days[0]?.day ?? end;
+  return range === "all" ? firstDay : Math.max(firstDay, end - Number(range) + 1);
 }
 
 // The index of the point whose `day` is nearest `day`, which can fall between
@@ -175,8 +183,9 @@ class Chart {
   inspectKey(event) {
     if (!this.points.length) return;
     const lastIndex = this.points.length - 1;
-    // With nothing selected, either arrow starts on the latest point.
-    const step = delta => this.active === null ? lastIndex : Math.max(0, Math.min(lastIndex, this.active + delta));
+    // With nothing selected, either arrow starts on the latest point, or on
+    // today when the points go on past it.
+    const step = delta => this.active === null ? this.home ?? lastIndex : Math.max(0, Math.min(lastIndex, this.active + delta));
     const keys = { ArrowLeft: step(-1), ArrowRight: step(1), Home: 0, End: lastIndex };
     if (event.key === "Escape") return this.hideTooltip();
     if (!Object.hasOwn(keys, event.key)) return;
@@ -235,13 +244,15 @@ export class TrendChart extends Chart {
   }
 
   // `goal` is the goal weight in kg, or null without one. The chart plots in
-  // `unit`, with stones on a scale of pounds.
-  update(trend, range, today, goal = null, unit = "kg") {
+  // `unit`, with stones on a scale of pounds. `forecast` is the trend forecast
+  // from today (forecastTrend in model.mjs), or null to show none.
+  update(trend, range, today, goal = null, unit = "kg", forecast = null) {
     this.trend = trend;
     this.range = range;
     this.today = today;
     this.goal = Number.isFinite(goal) ? goal : null;
     this.unit = unit;
+    this.forecast = forecast;
     this.draw();
   }
 
@@ -252,30 +263,39 @@ export class TrendChart extends Chart {
     this.hideTooltip();
     this.canvas.replaceChildren();
     this.canvas.setAttribute("viewBox", "0 0 " + width + " " + height);
-    const end = dayOf(this.today);
-    const firstDay = this.trend.days[0]?.day ?? end;
-    const start = this.range === "all" ? firstDay : Math.max(firstDay, end - Number(this.range) + 1);
-    this.points = this.trend.days.filter(point => point.day >= start && point.day <= end);
-    this.noted = this.points.filter(point => point.note);
+    const today = dayOf(this.today);
+    const start = rangeStart(this.trend, this.range, this.today);
+    const points = this.trend.days.filter(point => point.day >= start && point.day <= today);
+    this.points = points;
+    this.home = null;
+    this.noted = points.filter(point => point.note);
     this.noteKey.hidden = !this.noted.length;
-    this.empty.hidden = this.points.length > 0;
-    this.wrap.tabIndex = this.points.length ? 0 : -1;
-    if (!this.points.length) {
+    this.empty.hidden = points.length > 0;
+    this.wrap.tabIndex = points.length ? 0 : -1;
+    if (!points.length) {
       this.empty.textContent = this.trend.readings.length ? "No trend data in this range. Choose All to see your history." : "Log your first weight to see your trend.";
       this.canvas.setAttribute("aria-label", this.empty.textContent);
       return;
     }
 
+    const last = points.at(-1);
+    // The forecast goes on from today's average, so it needs one.
+    const ahead = last.day === today ? this.forecast?.points ?? [] : [];
+    const end = today + ahead.length;
     const compact = width < 480;
     const unit = this.unit;
     const stones = unit === "st";
     // The scale is in kg or pounds; `y` takes kg.
     const scale = unit === "kg" ? 1 : 1 / KG_PER_LB;
     const goal = this.goal;
-    const { bottom, top, step } = yDomain(this.points.map(p => ({ average: p.average * scale, weight: p.weight === null ? null : p.weight * scale })),
-      goal === null ? null : goal * scale, stones ? STONE_STEPS : null);
-    const last = this.points.at(-1);
-    const endLabel = lineLabel(last.average, unit);
+    // The band stays on screen too.
+    const { bottom, top, step } = yDomain([
+      ...points.map(p => ({ average: p.average * scale, weight: p.weight === null ? null : p.weight * scale })),
+      ...ahead.map(p => ({ average: p.low * scale, weight: p.high * scale }))
+    ], goal === null ? null : goal * scale, stones ? STONE_STEPS : null);
+    // The line ends at today's average, or with a forecast, at its last day.
+    const labelled = ahead.at(-1) ?? last;
+    const endLabel = lineLabel(labelled.average, unit);
     const goalLabel = goal === null ? "" : lineLabel(goal, unit);
     const ticks = [];
     for (let tick = Math.ceil((bottom - 1e-8) / step) * step; tick <= top + 1e-8; tick += step) {
@@ -302,6 +322,22 @@ export class TrendChart extends Chart {
     dateTicks(fragment, start, end, x, width, height);
     fragment.append(...dayMarks(this.noted.map(p => p.day), x, floor, "note-mark"));
 
+    // The forecast's likely range is a band under everything else, from a
+    // point at today's average to its widest on the last day. A hairline
+    // marks today, where the forecast begins.
+    const todayX = coord(x(today)) + .5;
+    if (ahead.length) {
+      const upper = ahead.map(p => "L" + coord(x(p.day)) + " " + coord(y(p.high)));
+      const lower = ahead.map(p => "L" + coord(x(p.day)) + " " + coord(y(p.low))).reverse();
+      fragment.append(
+        svg("path", { class: "band", d: "M" + coord(x(today)) + " " + coord(y(last.average)) + " " + upper.join(" ") + " " + lower.join(" ") + " Z" }),
+        svg("line", { class: "today-line", x1: todayX, x2: todayX, y1: ceiling - 8, y2: floor }),
+        // Over the forecast, or before today when a long history leaves it too narrow.
+        width - todayX >= 62 ? svg("text", { class: "forecast-title", x: todayX + 6, y: 12 }, "Forecast")
+          : svg("text", { class: "forecast-title", x: todayX - 6, y: 12, "text-anchor": "end" }, "Forecast")
+      );
+    }
+
     // The goal is a dashed hairline under the data, ending with its value.
     if (goal !== null) {
       const goalY = coord(y(goal)) + .5;
@@ -309,15 +345,15 @@ export class TrendChart extends Chart {
     }
 
     // Daily weigh-ins sit underneath; the average line is the figure.
-    const count = this.points.filter(p => p.weight !== null).length;
+    const count = points.filter(p => p.weight !== null).length;
     const radius = count > 160 ? 2.5 : compact ? 3.5 : 4;
-    for (const p of this.points) {
+    for (const p of points) {
       if (p.weight !== null) fragment.append(svg("circle", { class: "dot", cx: coord(x(p.day)), cy: coord(y(p.weight)), r: radius }));
     }
 
     // Break the line where the trailing window contains no measurements.
     const sections = [];
-    for (const point of this.points) {
+    for (const point of points) {
       const section = sections.at(-1);
       if (section && section.at(-1).day === point.day - 1) section.push(point);
       else sections.push([point]);
@@ -331,22 +367,44 @@ export class TrendChart extends Chart {
       fragment.append(svg("path", { class: "avg", d: path }));
     }
 
+    // The forecast is a dotted line on from the average, ending in an open dot
+    // with its value. Today's value then goes unlabelled: it's the figure at
+    // the top of the page.
     const lastX = x(last.day);
     const lastY = y(last.average);
-    fragment.append(
-      svg("circle", { class: "end-dot", cx: coord(lastX), cy: coord(lastY), r: 5 }),
-      svg("text", { class: "end-label", x: coord(lastX + 11), y: coord(lastY + 5) }, endLabel)
-    );
+    const endX = x(labelled.day);
+    const endY = y(labelled.average);
+    if (ahead.length) {
+      fragment.append(
+        svg("path", { class: "forecast", d: "M" + coord(lastX) + " " + coord(lastY) + " L" + coord(endX) + " " + coord(endY) }),
+        svg("circle", { class: "end-dot", cx: coord(lastX), cy: coord(lastY), r: 5 }),
+        svg("circle", { class: "forecast-dot", cx: coord(endX), cy: coord(endY), r: 4 }),
+        svg("text", { class: "forecast-label", x: coord(endX + 11), y: coord(endY + 5) }, endLabel)
+      );
+    } else {
+      fragment.append(
+        svg("circle", { class: "end-dot", cx: coord(lastX), cy: coord(lastY), r: 5 }),
+        svg("text", { class: "end-label", x: coord(lastX + 11), y: coord(lastY + 5) }, endLabel)
+      );
+    }
     if (goal !== null) {
       // Both labels sit at the right edge when the line reaches it, so keep them apart.
-      const shared = lastX > right - endLabel.length * 8.5;
-      const labelY = shared ? separateLabel(y(goal), lastY, 17, ceiling - 12, floor + 6) : y(goal);
+      const shared = endX > right - endLabel.length * 8.5;
+      const labelY = shared ? separateLabel(y(goal), endY, 17, ceiling - 12, floor + 6) : y(goal);
       fragment.append(svg("text", { class: "goal-label", x: coord(right + 11), y: coord(labelY + 4) }, goalLabel));
     }
     this.cursor = svg("g", { visibility: "hidden", "pointer-events": "none" });
     fragment.append(this.cursor);
     this.canvas.append(fragment);
-    this.canvas.setAttribute("aria-label", "Daily weights and 14-day moving averages, " + prettyDate(dateOf(start), "full") + " through " + prettyDate(this.today, "full") + ". Last plotted average " + spokenWeight(last.average, unit) + "." + (goal === null ? "" : " Goal " + spokenWeight(goal, unit) + ".") +
+    // The forecast's days can be read like the others, after today's.
+    if (ahead.length) {
+      this.points = points.concat(ahead.map(p => ({ ...p, forecast: true })));
+      this.home = points.length - 1;
+    }
+    const final = ahead.at(-1);
+    this.canvas.setAttribute("aria-label", "Daily weights and 14-day moving averages, " + prettyDate(dateOf(start), "full") + " through " + prettyDate(this.today, "full") + ". Last plotted average " + spokenWeight(last.average, unit) + "." +
+      (final ? " Forecast through " + prettyDate(final.date, "full") + " if your weekly trend holds: about " + spokenWeight(final.average, unit) + ", likely " + spokenRange(final.low, final.high, unit) + "." : "") +
+      (goal === null ? "" : " Goal " + spokenWeight(goal, unit) + ".") +
       (this.noted.length ? " Days with notes are marked below the chart." : ""));
   }
 
@@ -373,10 +431,22 @@ export class TrendChart extends Chart {
     this.active = index;
     const xx = coord(x(point.day));
     this.cursor.replaceChildren(svg("line", { class: "crosshair", x1: xx + .5, x2: xx + .5, y1: ceiling - 8, y2: floor }));
+    const heading = prettyDate(point.date, "full");
+    if (point.forecast) {
+      this.cursor.append(svg("circle", { class: "cursor-forecast", cx: xx, cy: coord(y(point.average)), r: 4.5 }));
+      this.cursor.setAttribute("visibility", "visible");
+      this.tooltip.innerHTML = "<strong>" + heading + "</strong>" +
+        '<div class="tip-row"><i class="key-forecast"></i><b>' + formatWeight(point.average, this.unit) + "</b>forecast average</div>" +
+        '<div class="tip-detail">Likely ' + formatRange(point.low, point.high, this.unit) + "</div>";
+      this.placeTooltip(xx, y(point.average));
+      if (announce) {
+        this.announce.textContent = heading + ". Forecast 14-day average " + spokenWeight(point.average, this.unit) + ", likely " + spokenRange(point.low, point.high, this.unit) + ".";
+      }
+      return;
+    }
     if (point.weight !== null) this.cursor.append(svg("circle", { class: "cursor-dot", cx: xx, cy: coord(y(point.weight)), r: 4.5 }));
     this.cursor.append(svg("circle", { class: "cursor-avg", cx: xx, cy: coord(y(point.average)), r: 5 }));
     this.cursor.setAttribute("visibility", "visible");
-    const heading = prettyDate(point.date, "full");
     const daily = point.weight === null ? null : formatWeight(point.weight, this.unit);
     const mean = formatWeight(point.average, this.unit);
     this.tooltip.innerHTML = "<strong>" + heading + "</strong>" +

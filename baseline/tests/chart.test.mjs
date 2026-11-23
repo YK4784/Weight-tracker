@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { nearestIndex, separateLabel, stoneTick, yDomain } from "../dist/chart.mjs";
+import { nearestIndex, rangeStart, separateLabel, stoneTick, yDomain } from "../dist/chart.mjs";
+import { dateOf, dayOf } from "../dist/model.mjs";
 
 const points = [{ average: 70, weight: 70.5 }, { average: 69.8, weight: null }, { average: 69.6, weight: 69.2 }];
 
@@ -68,4 +69,16 @@ test("the nearest point matches a search through every point", () => {
     days.forEach((point, i) => { if (Math.abs(point.day - day) < Math.abs(days[best].day - day)) best = i; });
     assert.equal(nearestIndex(days, day), best, "day " + day);
   }
+});
+
+test("a range starts as far back as it goes, but not before the first average", () => {
+  const today = "2026-11-24";
+  const end = dayOf(today);
+  const trend = { days: [{ day: end - 50 }, { day: end }] };
+  assert.equal(rangeStart(trend, "14", today), end - 13);
+  assert.equal(rangeStart(trend, "30", today), end - 29);
+  assert.equal(rangeStart(trend, "90", today), end - 50, "the log is shorter than the range");
+  assert.equal(rangeStart(trend, "all", today), end - 50);
+  assert.equal(rangeStart({ days: [] }, "30", today), end, "an empty log");
+  assert.equal(dateOf(rangeStart(trend, "14", today)), "2026-11-11");
 });

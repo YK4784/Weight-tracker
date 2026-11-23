@@ -109,6 +109,15 @@ export function formatWeight(kg, unit = "kg") {
   return Number.isFinite(kg) ? weightParts(kg, unit).map(part => part.join(" ")).join(" ") : "—";
 }
 
+// A range of weights as it reads on screen: "78.1–79.9 kg", or with stones
+// "12 st 6.2 lb – 12 st 8.1 lb". A range that shows as one weight is that weight.
+export function formatRange(low, high, unit = "kg") {
+  const from = formatWeight(low, unit);
+  const to = formatWeight(high, unit);
+  if (from === to) return to;
+  return unit === "st" ? from + " – " + to : weightParts(low, unit)[0][0] + "–" + to;
+}
+
 // A change in weight, without its sign, in kg or, for stones too, in pounds.
 export function formatAmount(kg, unit = "kg") {
   return decimal.format(Math.abs(toTenths(kg, unit)) / 10) + (unit === "kg" ? " kg" : " lb");
@@ -120,6 +129,14 @@ const spoken = parts => parts.map(([number, unit]) => number + " " + spokenUnits
 // For screen readers, which may read "st" as "street": "9 stone 9.8 pounds".
 export function spokenWeight(kg, unit = "kg") {
   return spoken(weightParts(kg, unit));
+}
+
+// A range of weights for screen readers: "78.1 to 79.9 kilograms".
+export function spokenRange(low, high, unit = "kg") {
+  const from = spokenWeight(low, unit);
+  const to = spokenWeight(high, unit);
+  if (from === to) return to;
+  return unit === "st" ? from + " to " + to : weightParts(low, unit)[0][0] + " to " + to;
 }
 
 export function spokenHeight(cm, unit = "cm") {
@@ -744,14 +761,13 @@ export const RATE_MIN_SPAN = 14;
 // to about one log in six while still catching a 0.5 kg/week loss most of the time.
 const RATE_CLEAR_ERRORS = 2.5;
 
+// The least-squares line through the weigh-ins of the last RATE_DAYS calendar
+// days through `throughDate`. `points` are [x, kg], with x the day counted from
+// `throughDate`: 0 for that day, −1 the day before. `residuals` is the sum of
+// the squared distances of the weigh-ins from the line. Null with fewer than
+// RATE_MIN_ENTRIES weigh-ins, or when they span fewer than RATE_MIN_SPAN days.
 // The input is a normalized log (one entry per date, ascending).
-// Weekly rate of change: the slope of a least-squares line through the weigh-ins
-// of the last RATE_DAYS calendar days. An average trails the weight by half its
-// window; a fitted line does not. Needs RATE_MIN_ENTRIES weigh-ins spread over at
-// least RATE_MIN_SPAN days, otherwise returns null. `perWeek` is in kg, rounded
-// to the 0.1 of `unit` shown. `clear` is false when the slope is too close to
-// flat to tell apart from scale noise.
-export function calculateRate(entries, throughDate, unit = "kg") {
+function rateLine(entries, throughDate) {
   const end = dayOf(throughDate);
   const points = entries
     .map(entry => [dayOf(entry.date) - end, entry.weight])
@@ -768,9 +784,132 @@ export function calculateRate(entries, throughDate, unit = "kg") {
   const slope = sxy / sxx;
   let residuals = 0;
   for (const [x, y] of points) residuals += (y - meanY - slope * (x - meanX)) ** 2;
+  return { points, n, meanX, sxx, slope, residuals };
+}
+
+// The weekly trend from a rateLine (see calculateRate).
+function rateOf({ n, sxx, slope, residuals }, unit) {
   const error = Math.sqrt(residuals / (n - 2) / sxx);
   const perWeek = weeklyTenths(slope, unit);
   return { perWeek, clear: perWeek !== 0 && Math.abs(slope) > RATE_CLEAR_ERRORS * error, count: n };
+}
+
+// The input is a normalized log (one entry per date, ascending).
+// Weekly rate of change: the slope of a least-squares line through the weigh-ins
+// of the last RATE_DAYS calendar days. An average trails the weight by half its
+// window; a fitted line does not. Needs RATE_MIN_ENTRIES weigh-ins spread over at
+// least RATE_MIN_SPAN days, otherwise returns null. `perWeek` is in kg, rounded
+// to the 0.1 of `unit` shown. `clear` is false when the slope is too close to
+// flat to tell apart from scale noise.
+export function calculateRate(entries, throughDate, unit = "kg") {
+  const line = rateLine(entries, throughDate);
+  return line && rateOf(line, unit);
+}
+
+// The trend forecast on the chart: where the 14-day average is heading if the
+// weekly trend holds.
+//
+// The line starts at the 14-day average on the day of the forecast and moves
+// by the weekly trend as shown, the same figure as under the average and in
+// the goal forecast. It's a straight line, because over the few weeks the chart
+// looks ahead a straight line is close to how weight changes. Over months it
+// isn't: loss slows as weight falls (Hall et al., Lancet 2011,
+// https://pubmed.ncbi.nlm.nih.gov/21872751/), so the forecast stops at
+// FORECAST_CHART_MAX_DAYS.
+//
+// The band around it is the likely range, where the average would land 8 times
+// in 10 if the trend holds. It comes from the same weigh-ins as the trend,
+// modelled as a straight line plus scale noise, and allows for two things:
+// - The slope is only an estimate, and an error in it grows with each day ahead.
+// - The days ahead bring new weigh-ins, with noise of their own, into the
+//   average, and today's average has noise that the forecast starts from.
+// So the band has no width today, and widens as the days go on.
+//
+// The noise is how far the weigh-ins sit from the fitted line. It isn't new
+// from one day to the next: water and food carry over, so a heavy day tends to
+// follow a heavy day. The noise on days k apart is taken to be correlated by
+// FORECAST_NOISE_CORRELATION to the power k, so 21 daily weigh-ins tell less
+// than 21 unrelated ones would, while weekly ones are nearly unrelated. That
+// fits the spread of day-to-day changes in a 26-year daily record, 0.53% of
+// body weight a day apart and 0.69% a week apart (Renal Failure, 2023,
+// https://pmc.ncbi.nlm.nih.gov/articles/PMC10653631/). The band leaves out what
+// weigh-ins can't show, such as a change in what someone eats or does.
+export const FORECAST_NOISE_CORRELATION = .4;
+// The furthest the chart forecasts, in days: about 3 months. Further out, a
+// straight line overstates how fast weight keeps changing.
+export const FORECAST_CHART_MAX_DAYS = 84;
+// The least noise the band assumes, in kg: about a scale's own error, so
+// weigh-ins typed on an exact line still get a band.
+export const FORECAST_MIN_NOISE = .1;
+// The standard normal's 90th percentile: 80% of outcomes lie within ±z.
+const LIKELY_Z = 1.2815515655446004;
+
+// Student's t quantile for `z`, a quantile of the standard normal, with `df`
+// degrees of freedom, by the Cornish–Fisher expansion. For z = LIKELY_Z it is
+// within 0.012 of the exact value from 3 degrees of freedom up.
+export function tQuantile(z, df) {
+  return z + (z ** 3 + z) / (4 * df) + (5 * z ** 5 + 16 * z ** 3 + 3 * z) / (96 * df ** 2);
+}
+
+// How far ahead the chart forecasts, in days, when it shows `span` days: half
+// as far as it shows, in whole weeks, from one week up to
+// FORECAST_CHART_MAX_DAYS. 14D looks 1 week ahead, 30D 2 weeks and 90D 6.
+export function forecastReach(span) {
+  return 7 * Math.min(FORECAST_CHART_MAX_DAYS / 7, Math.max(1, Math.round(span / 14)));
+}
+
+// The trend forecast (see above) for each of the `days` days after
+// `throughDate`. Returns { perWeek, clear, average, points }: the weekly trend
+// as calculateRate gives it for `unit`, the 14-day average on `throughDate` the
+// forecast starts from, and a point { day, date, average, low, high } for each
+// day ahead, in kg, with the likely range from `low` to `high`. Null without a
+// weekly trend, which also means there's a 14-day average on `throughDate`.
+// The input is a normalized log (one entry per date, ascending).
+export function forecastTrend(entries, throughDate, days, unit = "kg") {
+  const line = rateLine(entries, throughDate);
+  if (!line) return null;
+  const { perWeek, clear } = rateOf(line, unit);
+  const { points, n, meanX, sxx, residuals } = line;
+  const end = dayOf(throughDate);
+  // The weigh-ins in today's 14-day average, which needs one in the last 7
+  // days for the trend to show. Summed in hundredths, as calculateTrend does.
+  const recent = points.filter(([x]) => x > -WINDOW_DAYS);
+  const average = recent.reduce((sum, [, y]) => sum + Math.round(y * 100), 0) / (recent.length * 100);
+  // How correlated the noise is on days `gap` apart. The furthest apart two
+  // days can be is the start of the fit and the last day ahead.
+  const correlations = Array.from({ length: RATE_DAYS + days }, (_, gap) => FORECAST_NOISE_CORRELATION ** gap);
+  const correlation = (a, b) => correlations[Math.abs(a - b)];
+  // A line fitted through correlated noise follows some of it, so the
+  // residuals understate the noise. Dividing by n − tr(HΩ) rather than n − 2
+  // corrects for that, where H is the fit's hat matrix and Ω the correlations.
+  // It's also the degrees of freedom of the band.
+  let followed = 0;
+  for (const [a] of points) for (const [b] of points) followed += (1 / n + (a - meanX) * (b - meanX) / sxx) * correlation(a, b);
+  const freedom = Math.max(2, n - followed);
+  const noise = Math.max(FORECAST_MIN_NOISE ** 2, residuals / freedom);
+  const spread = tQuantile(LIKELY_Z, freedom);
+  // The slope is a weighted sum of the weigh-ins, with these weights.
+  const slopeWeights = points.map(([x]) => (x - meanX) / sxx);
+  const forecast = [];
+  for (let ahead = 1; ahead <= days; ahead++) {
+    // The forecast misses by the noise in the average `ahead` days from now,
+    // taken to have weigh-ins on the same days of its 14 as today's, less the
+    // noise in today's average, less `ahead` times the error in the slope.
+    // Each is a weighted sum of the noise on single days.
+    const weights = new Map();
+    const add = (day, weight) => weights.set(day, (weights.get(day) ?? 0) + weight);
+    for (const [x] of recent) {
+      add(x + ahead, 1 / recent.length);
+      add(x, -1 / recent.length);
+    }
+    points.forEach(([x], i) => add(x, -ahead * slopeWeights[i]));
+    let variance = 0;
+    for (const [a, wa] of weights) for (const [b, wb] of weights) variance += wa * wb * correlation(a, b);
+    const reach = spread * Math.sqrt(Math.max(0, noise * variance));
+    const center = average + perWeek / 7 * ahead;
+    forecast.push({ day: end + ahead, date: dateOf(end + ahead), average: center, low: Math.max(0, center - reach), high: center + reach });
+  }
+  return { perWeek, clear, average, points: forecast };
 }
 
 // Whether the weekly trend (see calculateRate) has shown on any day through

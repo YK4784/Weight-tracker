@@ -1,5 +1,5 @@
-import { CM_PER_IN, CONSENT_VERSION, FAST_LOSS_DAYS, FORECAST_MAX_DAYS, GOAL_MILESTONES, GOAL_RATE_CAP, KG_PER_LB, OVERALL_MIN_DAYS, QUEUEABLE_OPS, RATE_DAYS, RATE_MIN_ENTRIES, RATE_MIN_SPAN, SEXES, WINDOW_DAYS, applyOps, averageChanges, bmi, bodyFat, bodyFatChange, bodyFatHistory, calculateRate, changeTarget, calculateTrend, checkWeighIn, cleanNote, dateOf, dayOf, defaultUnits, fastGoalRate, fastLossCaution, forecastGoal, formatAmount, formatWaist, formatWeight, fromTenths, goalProgress, goalRateAllowed, goalRateLimit, groupByMonth, hasConsent, heightParts, inverseOf, localToday, logStatus, maxGoalRate, monthlyReports, normalizeGoal, normalizeState, oneDecimal, overallRate, positive, prettyDate, recentRange, roundHeight, roundWaist, roundWeight, shiftDate, spokenHeight, spokenWeight, toTenths, todayHeading, todayLabel, validDate, validWaist, waistParts, waistTenths, weeklyTrendShown, weighInQuestion, weightParts } from "./model.mjs";
-import { BodyFatChart, TrendChart } from "./chart.mjs";
+import { CM_PER_IN, CONSENT_VERSION, FAST_LOSS_DAYS, FORECAST_MAX_DAYS, GOAL_MILESTONES, GOAL_RATE_CAP, KG_PER_LB, OVERALL_MIN_DAYS, QUEUEABLE_OPS, RATE_DAYS, RATE_MIN_ENTRIES, RATE_MIN_SPAN, SEXES, WINDOW_DAYS, applyOps, averageChanges, bmi, bodyFat, bodyFatChange, bodyFatHistory, calculateRate, changeTarget, calculateTrend, checkWeighIn, cleanNote, dateOf, dayOf, defaultUnits, fastGoalRate, fastLossCaution, forecastGoal, forecastReach, forecastTrend, formatAmount, formatRange, formatWaist, formatWeight, fromTenths, goalProgress, goalRateAllowed, goalRateLimit, groupByMonth, hasConsent, heightParts, inverseOf, localToday, logStatus, maxGoalRate, monthlyReports, normalizeGoal, normalizeState, oneDecimal, overallRate, positive, prettyDate, recentRange, roundHeight, roundWaist, roundWeight, shiftDate, spokenHeight, spokenWeight, toTenths, todayHeading, todayLabel, validDate, validWaist, waistParts, waistTenths, weeklyTrendShown, weighInQuestion, weightParts } from "./model.mjs";
+import { BodyFatChart, TrendChart, rangeStart } from "./chart.mjs";
 import { claimLegacyLog, clearDeviceData, clearLogCache, fastLossHiddenKeyFor, hasLegacyLog, lastUser, readLogCache, readOutbox, signOutWarning, storageKeyFor, writeLogCache, writeOutbox } from "./account.mjs";
 import { csvFileName, exportJson, jsonFileName, weighInsCsv } from "./export.mjs";
 import { AuthSetupError, startClerk } from "./auth.mjs";
@@ -56,6 +56,9 @@ let deletingWaist = null; // The date of the waist measurement waiting for the u
 let rateSource = null; // The rate the forecast uses. Null picks one from the goal.
 let startWeightFrom = "average"; // Where the goal dialog's start weight came from: "average", "saved" or "typed".
 let range = "30";
+// Whether the chart shows the trend forecast. It starts hidden on every visit,
+// until Show forecast is pressed.
+let trendForecast = false;
 let page = 0;
 let editingDate = null;
 let autoFill = true; // The log form shows the weigh-in on its date until the user types in it.
@@ -1219,9 +1222,56 @@ function leaveFirstRun() {
   $("main").focus({ preventScroll: true });
 }
 
-function drawChart() {
+// `announce` reads the forecast out, as after a press of Show forecast.
+function drawChart(announce = false) {
   $("legend-goal").hidden = !state.goal;
-  chart.update(trend, range, today, state.goal?.weight ?? null, unit());
+  // The forecast looks half as far ahead as the chart looks back.
+  const span = dayOf(today) - rangeStart(trend, range, today) + 1;
+  const forecast = trendForecast ? forecastTrend(state.entries, today, forecastReach(span), unit()) : null;
+  showTrendForecast(forecast, announce);
+  chart.update(trend, range, today, state.goal?.weight ?? null, unit(), forecast);
+}
+
+// The first weeks of a loss often include water, which makes the pace look
+// faster than it will stay. They count from the first weigh-in, or from the
+// start of a loss goal when that's later.
+const EARLY_LOSS_DAYS = 28;
+
+function earlyLoss() {
+  const goalStart = progress?.direction === "lose" ? dayOf(state.goal.startDate) : -Infinity;
+  return dayOf(today) - Math.max(dayOf(state.entries[0].date), goalStart) < EARLY_LOSS_DAYS;
+}
+
+// What goes with the forecast on the chart (forecastTrend): the button's
+// label, the legend's key, and the forecast in words under the chart. The
+// forecast follows the weekly trend, so it waits for one. With nothing to
+// show, the words say when it will.
+function showTrendForecast(forecast, announce) {
+  $("forecast-toggle").textContent = trendForecast ? "Hide forecast" : "Show forecast";
+  $("legend-forecast").hidden = !forecast;
+  $("trend-forecast").hidden = !trendForecast;
+  $("forecast-method").hidden = !forecast;
+  const words = $("forecast-words");
+  if (!trendForecast) {
+    if (announce) $("chart-announce").textContent = "Forecast hidden.";
+    return;
+  }
+  if (!forecast) {
+    words.textContent = "The forecast follows your weekly trend, which " + (weeklyTrendShown(state.entries, today) ? "returns" : "shows") +
+      " after " + RATE_MIN_ENTRIES + " weigh-ins over " + RATE_MIN_SPAN / 7 + " weeks.";
+  } else {
+    const last = forecast.points.at(-1);
+    const strong = document.createElement("strong");
+    if (forecast.clear) {
+      strong.textContent = weight(last.average) + " on " + shortDate(last.date);
+      words.replaceChildren("If your average keeps going " + (forecast.perWeek < 0 ? "down " : "up ") + amount(forecast.perWeek) + " a week, it would be about ", strong,
+        ", likely " + formatRange(last.low, last.high, unit()) + "." + (forecast.perWeek < 0 && earlyLoss() ? " Early weeks often include water loss, so the pace may slow." : ""));
+    } else {
+      strong.textContent = formatRange(last.low, last.high, unit());
+      words.replaceChildren("Your weight shows no clear change over the last " + RATE_DAYS / 7 + " weeks, so on " + shortDate(last.date) + " your average would likely be ", strong, ".");
+    }
+  }
+  if (announce) $("chart-announce").textContent = words.textContent;
 }
 
 function render() {
@@ -2624,6 +2674,10 @@ $("ranges").addEventListener("click", event => {
   range = button.dataset.range;
   for (const item of $("ranges").querySelectorAll("button")) item.setAttribute("aria-pressed", String(item === button));
   drawChart();
+});
+$("forecast-toggle").addEventListener("click", () => {
+  trendForecast = !trendForecast;
+  drawChart(true);
 });
 $("quick-log").addEventListener("click", () => focusEntry());
 $("prev-page").addEventListener("click", () => { page--; showTable(true); });
