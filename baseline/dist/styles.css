@@ -77,6 +77,10 @@ a { color: inherit; }
 .icon { display: inline-block; flex: none; width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; vertical-align: middle; }
 .wrap { width: min(100% - 48px, 1040px); margin-inline: auto; }
 
+/* Hover styles are for devices with a pointer that hovers. On a touch screen a
+   tap leaves the element "hovered" until the next tap elsewhere, so every
+   :hover rule sits in @media (hover: hover). */
+
 /* Header */
 .masthead { border-bottom: 1px solid var(--rule); }
 .masthead-inner { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 64px; }
@@ -84,7 +88,7 @@ a { color: inherit; }
 .masthead-actions { display: flex; align-items: center; gap: 12px; }
 .nav { display: flex; gap: 4px; }
 .nav a { padding: 8px 12px; border-radius: 8px; color: var(--ink-2); font-weight: 600; text-decoration: none; }
-.nav a:hover { color: var(--ink); }
+@media (hover: hover) { .nav a:hover { color: var(--ink); } }
 .nav a[aria-current="page"] { color: var(--ink); text-decoration: underline 2px var(--accent); text-underline-offset: 8px; }
 /* Holds the avatar's space before Clerk mounts it. */
 .user-button { display: flex; flex: none; align-items: center; justify-content: center; min-width: 32px; min-height: 32px; }
@@ -190,7 +194,7 @@ body[data-weight-unit="st"] .hero:not(.is-empty) { font-size: clamp(3.5rem, 9vw 
    a 44px hit area that takes no room. */
 .hero-goal { margin-top: 4px; }
 .quiet-button { margin-block: -10px; padding-block: 10px; color: var(--ink-2); text-decoration: underline 1px var(--field-border); text-underline-offset: 3px; }
-.quiet-button:hover { color: var(--ink); text-decoration-color: currentColor; }
+@media (hover: hover) { .quiet-button:hover { color: var(--ink); text-decoration-color: currentColor; } }
 /* Progress toward the goal: a rule split at each milestone. */
 .goal-progress { max-width: 34rem; margin-top: 22px; }
 .progress-track { position: relative; height: 6px; margin-bottom: 10px; border-radius: 3px; background: var(--rule); overflow: hidden; }
@@ -228,8 +232,12 @@ body[data-weight-unit="st"] .hero:not(.is-empty) { font-size: clamp(3.5rem, 9vw 
 /* Units, chosen like the chart's ranges. */
 .unit-switch { display: flex; gap: 2px; margin-right: -8px; }
 .unit-switch button { padding: 2px 8px; border-radius: 6px; color: var(--ink-3); font-weight: 700; }
-.unit-switch button:hover { color: var(--ink); }
+@media (hover: hover) { .unit-switch button:hover { color: var(--ink); } }
 .unit-switch button[aria-pressed="true"] { color: var(--ink); text-decoration: underline 2px var(--accent); text-underline-offset: 6px; }
+/* 44px tall, and as wide as each unit, meeting its neighbours in the gap.
+   Over a field, it stops at the field's top edge, 6px below. */
+.unit-switch button::before { inset: min(0px, calc((100% - 44px) / 2)) -1px; }
+.field-head .unit-switch button::before { top: min(0px, calc(100% - 38px)); bottom: -6px; }
 /* A weight in stones and pounds, or a height in feet and inches, takes two inputs. */
 .split-field { display: flex; gap: 8px; }
 .split-field > .input-frame { flex: 1 1 0; }
@@ -248,16 +256,16 @@ body[data-weight-unit="st"] .hero:not(.is-empty) { font-size: clamp(3.5rem, 9vw 
 .date-step { display: grid; flex: 0 0 40px; align-self: stretch; place-items: center; color: var(--ink-2); }
 .date-step:first-child { border-right: 1px solid var(--rule); border-radius: 7px 0 0 7px; }
 .date-step:last-child { border-left: 1px solid var(--rule); border-radius: 0 7px 7px 0; }
-.date-step:not([aria-disabled="true"]):hover { background: var(--accent-wash); color: var(--accent); }
+@media (hover: hover) { .date-step:not([aria-disabled="true"]):hover { background: var(--accent-wash); color: var(--accent); } }
 .date-step[aria-disabled="true"] { cursor: default; }
 .date-step[aria-disabled="true"] .icon { opacity: .3; }
 .date-step:focus-visible { outline-offset: -2px; }
 
 .button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 10px 18px; border-radius: 8px; font-weight: 700; line-height: 1.2; white-space: nowrap; }
 .button.primary { background: var(--accent); color: var(--on-accent); }
-.button.primary:hover { background: var(--accent-strong); }
+@media (hover: hover) { .button.primary:hover { background: var(--accent-strong); } }
 .button.secondary { border: 1px solid var(--field-border); }
-.button.secondary:hover { background: var(--surface); }
+@media (hover: hover) { .button.secondary:hover { background: var(--surface); } }
 .button.danger { background: var(--danger); color: var(--on-danger); }
 .save-button { width: 100%; margin-top: 22px; }
 /* The question under a weight field before saving a weigh-in that looks
@@ -270,7 +278,15 @@ body[data-weight-unit="st"] .hero:not(.is-empty) { font-size: clamp(3.5rem, 9vw 
 .form-hint { margin-top: 10px; font-size: .875rem; color: var(--ink-3); text-align: center; text-wrap: pretty; }
 .form-hint:empty { display: none; }
 .text-button, .text-link { color: var(--accent); font-weight: 700; text-decoration: underline 1px transparent; text-underline-offset: 3px; }
-.text-button:hover, .text-link:hover { text-decoration-color: currentColor; }
+/* Small controls get a hit area of at least 44 × 44px that takes no room and
+   changes nothing in the look: a transparent box over the control, centred on
+   it and reaching as far past its edges as it needs to. Controls that sit side
+   by side split the space between them instead (see the unit switches and the
+   chart's ranges), so no two hit areas overlap.
+   :where() keeps these rules weaker than any that adjust them. */
+:where(.text-button, .section-head .text-link, .danger-link, .icon-button, .small-button, .unit-switch button, .ranges button) { position: relative; }
+:where(.text-button, .section-head .text-link, .danger-link, .icon-button, .small-button, .unit-switch button, .ranges button)::before { content: ""; position: absolute; inset: min(0px, calc((100% - 44px) / 2)); }
+@media (hover: hover) { .text-button:hover, .text-link:hover { text-decoration-color: currentColor; } }
 
 /* Forecast */
 .forecast { padding-block: 36px; border-bottom: 1px solid var(--rule); }
@@ -295,8 +311,12 @@ body[data-weight-unit="st"] .hero:not(.is-empty) { font-size: clamp(3.5rem, 9vw 
 .section-head h2 { font-size: 1.375rem; font-weight: 700; letter-spacing: -.015em; }
 .ranges { display: flex; gap: 2px; margin-right: -10px; }
 .ranges button { padding: 6px 10px; border-radius: 6px; color: var(--ink-3); font-weight: 700; font-variant-numeric: tabular-nums; }
-.ranges button:hover { color: var(--ink); }
+@media (hover: hover) { .ranges button:hover { color: var(--ink); } }
 .ranges button[aria-pressed="true"] { color: var(--ink); text-decoration: underline 2px var(--accent); text-underline-offset: 7px; }
+/* 44px tall, meeting the next range in the gap. "All", the narrowest, is last,
+   so it reaches 44px wide to its right, where nothing else is. */
+.ranges button::before { inset: min(0px, calc((100% - 44px) / 2)) -1px; }
+.ranges button:last-child::before { right: min(-1px, calc(100% - 43px)); }
 /* Changes in the average, then the recent high and low: figures like the facts. */
 .trend-figures { display: flex; flex-wrap: wrap; gap: 16px 64px; margin-top: 14px; padding-bottom: 24px; border-bottom: 1px solid var(--rule); }
 .figures { display: flex; flex-wrap: wrap; gap: 16px 40px; }
@@ -354,6 +374,8 @@ th:last-child, td:last-child { padding-right: 0; }
 .rate-cell { color: var(--ink-2); }
 .dash { color: var(--ink-3); }
 .row-action { width: 48px; text-align: right; }
+/* A tap anywhere on a row edits it, as its pencil does (see rowTarget in app.mjs). */
+tr:is([data-edit], [data-waist-edit]) { cursor: pointer; }
 /* A note runs the width of the table on its own line under its weigh-in. */
 tr.has-note td { height: 44px; padding-bottom: 0; border-bottom: 0; }
 .note-row td { height: auto; padding-block: 0 12px; color: var(--ink-2); font-size: .9375rem; white-space: normal; overflow-wrap: anywhere; text-wrap: pretty; }
@@ -361,13 +383,16 @@ tr.has-note td { height: 44px; padding-bottom: 0; border-bottom: 0; }
 .month-row th { padding: 28px 0 8px; border-bottom: 1px solid var(--rule); color: var(--ink); font-size: 1rem; font-weight: 700; }
 tbody:first-of-type .month-row th { padding-top: 20px; }
 .icon-button { display: inline-grid; place-items: center; width: 36px; height: 36px; border-radius: 8px; color: var(--ink-3); }
-.icon-button:hover { background: var(--accent-wash); color: var(--accent); }
+/* A table's pencil sits at the table's right edge, where the scrolling wrapper
+   would clip its hit area, so the hit area grows to the left. */
+.row-action .icon-button::before { inset: min(0px, calc((100% - 44px) / 2)) 0 min(0px, calc((100% - 44px) / 2)) min(0px, calc(100% - 44px)); }
+@media (hover: hover) { .icon-button:hover { background: var(--accent-wash); color: var(--accent); } }
 .short-label { display: none; }
 .table-empty { padding: 28px 0; color: var(--ink-3); }
 .pagination { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 16px; color: var(--ink-3); }
 .pagination > div { display: flex; gap: 8px; }
 .small-button { padding: 6px 14px; border: 1px solid var(--field-border); border-radius: 8px; font-weight: 700; }
-.small-button:not(:disabled):hover { background: var(--surface); }
+@media (hover: hover) { .small-button:not(:disabled):hover { background: var(--surface); } }
 /* Monthly summary: a month per row, its figures in the same columns every time. */
 .month-list { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--ink); }
 .month { display: grid; grid-template-columns: minmax(160px, 210px) minmax(0, 1fr); gap: 14px 40px; padding-block: 20px; border-bottom: 1px solid var(--rule); }
@@ -486,14 +511,20 @@ body[data-weight-unit="st"] .start-row { grid-template-columns: minmax(0, 1fr); 
 dialog.sheet { inset: auto 0 max(0px, calc(100% - var(--view-bottom, 100%))); width: min(100%, 480px); max-width: none; max-height: calc(var(--view-height, 100dvh) - 12px); margin: 0 auto; padding: 20px max(20px, env(safe-area-inset-right)) calc(20px + env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left)); border-width: 1px 1px 0; border-radius: 14px 14px 0 0; }
 dialog.sheet.over-keyboard { padding-bottom: 12px; }
 /* On a short screen, only the fields scroll, so the heading stays and Save
-   stays above the keyboard. They keep room for the focus ring. */
+   stays above the keyboard. They keep room for the focus ring, and for the hit
+   areas of "Another day" at the top and "Add a note" at the bottom. */
 dialog.sheet[open] { display: flex; flex-direction: column; overflow: hidden; }
 .sheet form { display: flex; flex-direction: column; min-height: 0; }
-.sheet-fields { min-height: 0; margin: -4px; padding: 4px; overflow-y: auto; }
+.sheet-fields { min-height: 0; margin: -14px -4px -10px; padding: 14px 4px 10px; overflow-y: auto; }
 .sheet .dialog-heading { flex: none; margin-bottom: 14px; }
 .sheet .save-button { flex: none; }
-/* Text buttons with a 44px hit area that takes no room. */
+/* Text buttons with a 44px hit area that takes no room. The fields start
+   right under the heading, 14px above the first line, so "Another day" can
+   reach up to the heading without being clipped, and down only to the weight
+   field. The close button's hit area grows up and to the right instead. */
 .sheet .text-button { padding-block: 10px; margin-block: -10px; }
+.sheet .field-head .text-button { padding-block: 14px 6px; margin-block: -14px -6px; }
+.sheet .dialog-heading .icon-button::before { inset: min(0px, calc(100% - 44px)) min(0px, calc(100% - 44px)) 0 0; }
 .sheet .sheet-add-note { display: block; margin: 4px 0 -10px; }
 .sheet-note { margin-top: 16px; }
 .sheet .save-button { margin-top: 20px; }
@@ -512,7 +543,7 @@ dialog.sheet[open] { display: flex; flex-direction: column; overflow: hidden; }
 .toast-actions { display: flex; gap: 4px; margin-right: -8px; }
 .toast-actions:empty { display: none; }
 .toast-button { min-height: 32px; margin-block: -4px; padding: 4px 8px; border-radius: 6px; color: var(--paper); font-weight: 700; text-decoration: underline 1px; text-underline-offset: 3px; }
-.toast-button:hover { background: color-mix(in srgb, var(--paper) 16%, transparent); }
+@media (hover: hover) { .toast-button:hover { background: color-mix(in srgb, var(--paper) 16%, transparent); } }
 .toast-button[aria-disabled="true"] { cursor: default; opacity: .6; }
 .toast-button:focus-visible { outline-color: var(--paper); }
 /* Full height on touch screens, at least 44px, without making the toast taller. */

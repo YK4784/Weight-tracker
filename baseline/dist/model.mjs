@@ -416,14 +416,22 @@ export function saveWeight(state, date, weight, note) {
   return normalizeState({ ...state, started: true, entries: [...state.entries, { date, weight, note: kept }] });
 }
 
+// A button's name for screen readers when its text shows a weight in stones,
+// which they may read as "street": the text as shown, so voice control finds
+// the button by what it says, then the weight in words, as the unit buttons
+// do ("13 st 5.2 lb (13 stone 5.2 pounds)"). Other units read as shown.
+export function spokenLabel(text, kg, unit) {
+  return unit === "st" ? text + " (" + spokenWeight(kg, unit) + ")" : text;
+}
+
 // The label of the bar that logs today's weight on phones: "Log today’s
 // weight", or once today has a weigh-in, "Today 84.9 kg · Edit" in the chosen
-// unit. `spoken` is the same for screen readers, which may read "st" as
-// "street".
+// unit. `spoken` is its name for screen readers (see spokenLabel).
 export function todayLabel(entries, today, unit = "kg") {
   const entry = entries.find(item => item.date === today);
   if (!entry) return { text: "Log today’s weight", spoken: "Log today’s weight" };
-  return { text: "Today " + formatWeight(entry.weight, unit) + " · Edit", spoken: "Today " + spokenWeight(entry.weight, unit) + ", edit" };
+  const text = "Today " + formatWeight(entry.weight, unit) + " · Edit";
+  return { text, spoken: spokenLabel(text, entry.weight, unit) };
 }
 
 // The heading of the sheet that logs today's weight: "Today, Mon Nov 23".
@@ -517,13 +525,14 @@ const dateIn = (date, today) => date.slice(0, 4) === today.slice(0, 4) ? prettyD
 // What Baseline asks under the weight field about a weigh-in checkWeighIn
 // flagged, for a weight of `weight` kg typed in `unit`, which is also the unit
 // Baseline shows weights in. Returns { text, choices }. Each choice is
-// { label, spoken, weight, unit }: the weight in kg it saves, or null for
+// { label, spoken, weight, unit }: `spoken` is its name for screen readers
+// (see spokenLabel); `weight` is the weight in kg it saves, or null for
 // "Change it", which saves nothing; `unit` is set when it saves the weight read
 // in another unit, which Baseline then offers to show weights in.
 export function weighInQuestion(check, weight, unit, today) {
   const { reference, suggestion } = check;
   const shown = (kg, as = unit) => formatWeight(kg, as);
-  const save = (prefix, kg, as = unit) => ({ label: prefix + shown(kg, as), spoken: prefix + spokenWeight(kg, as), weight: kg, unit: as === unit ? null : as });
+  const save = (prefix, kg, as = unit) => ({ label: prefix + shown(kg, as), spoken: spokenLabel(prefix + shown(kg, as), kg, as), weight: kg, unit: as === unit ? null : as });
   const against = reference.kind === "average"
     ? "your 14-day average" + (reference.date === today ? "" : " on " + dateIn(reference.date, today)) + " (" + shown(reference.weight) + ")"
     : (reference.last ? "your last weigh-in" : "your previous weigh-in") + " (" + shown(reference.weight) + " on " + dateIn(reference.date, today) + ")";
@@ -606,6 +615,36 @@ export function applyOps(state, changes) {
   return changes.reduce((current, change) => {
     try { return applyOp(current, change); } catch { return current; }
   }, state);
+}
+
+// The change that undoes a deletion, built from the log as it was just before
+// it (`before`, a normalized log): deleting a weigh-in is undone by saving it
+// again with its weight in kg as stored and its note, deleting a waist
+// measurement by saving it again with the formula's sex, and removing a goal by
+// setting the whole goal again. It's an ordinary change that the server
+// checks like any other, so it's sent rather than held back, and survives a
+// closed tab like any change. Null for any other change, when there was
+// nothing to delete, or when the server would turn the inverse down: a goal
+// saved before the cap on the target rate (see goalRateAllowed) can't be set
+// again as it was.
+export function inverseOf(change, before) {
+  switch (change?.op) {
+    case "delete-weight": {
+      const entry = before?.entries.find(item => item.date === change.date);
+      return entry ? { op: "save-weight", date: entry.date, weight: entry.weight, note: entry.note ?? null } : null;
+    }
+    case "delete-waist": {
+      const measurement = before?.waists.find(item => item.date === change.date);
+      return measurement && SEXES.includes(before.sex) ? { op: "save-waist", date: measurement.date, waist: measurement.waist, sex: before.sex } : null;
+    }
+    case "clear-goal": {
+      const goal = before?.goal;
+      if (!goal || goal.rate !== null && !goalRateAllowed(goal.rate, goal.startWeight)) return null;
+      return { op: "set-goal", goal: { weight: goal.weight, startDate: goal.startDate, startWeight: goal.startWeight, rate: goal.rate, milestones: goal.milestones } };
+    }
+    default:
+      return null;
+  }
 }
 
 // The input is a normalized log (one entry per date, ascending). Emit averages

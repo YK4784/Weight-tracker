@@ -1,4 +1,4 @@
-import { CM_PER_IN, CONSENT_VERSION, FAST_LOSS_DAYS, FORECAST_MAX_DAYS, GOAL_MILESTONES, GOAL_RATE_CAP, KG_PER_LB, OVERALL_MIN_DAYS, QUEUEABLE_OPS, RATE_DAYS, RATE_MIN_ENTRIES, RATE_MIN_SPAN, SEXES, WINDOW_DAYS, applyOps, averageChanges, bmi, bodyFat, bodyFatChange, bodyFatHistory, calculateRate, changeTarget, calculateTrend, checkWeighIn, cleanNote, dateOf, dayOf, defaultUnits, fastGoalRate, fastLossCaution, forecastGoal, formatAmount, formatWaist, formatWeight, fromTenths, goalProgress, goalRateAllowed, goalRateLimit, groupByMonth, hasConsent, heightParts, localToday, logStatus, maxGoalRate, monthlyReports, normalizeGoal, normalizeState, oneDecimal, overallRate, positive, prettyDate, recentRange, roundHeight, roundWaist, roundWeight, shiftDate, spokenHeight, spokenWeight, toTenths, todayHeading, todayLabel, validDate, validWaist, waistParts, waistTenths, weeklyTrendShown, weighInQuestion, weightParts } from "./model.mjs";
+import { CM_PER_IN, CONSENT_VERSION, FAST_LOSS_DAYS, FORECAST_MAX_DAYS, GOAL_MILESTONES, GOAL_RATE_CAP, KG_PER_LB, OVERALL_MIN_DAYS, QUEUEABLE_OPS, RATE_DAYS, RATE_MIN_ENTRIES, RATE_MIN_SPAN, SEXES, WINDOW_DAYS, applyOps, averageChanges, bmi, bodyFat, bodyFatChange, bodyFatHistory, calculateRate, changeTarget, calculateTrend, checkWeighIn, cleanNote, dateOf, dayOf, defaultUnits, fastGoalRate, fastLossCaution, forecastGoal, formatAmount, formatWaist, formatWeight, fromTenths, goalProgress, goalRateAllowed, goalRateLimit, groupByMonth, hasConsent, heightParts, inverseOf, localToday, logStatus, maxGoalRate, monthlyReports, normalizeGoal, normalizeState, oneDecimal, overallRate, positive, prettyDate, recentRange, roundHeight, roundWaist, roundWeight, shiftDate, spokenHeight, spokenWeight, toTenths, todayHeading, todayLabel, validDate, validWaist, waistParts, waistTenths, weeklyTrendShown, weighInQuestion, weightParts } from "./model.mjs";
 import { BodyFatChart, TrendChart } from "./chart.mjs";
 import { claimLegacyLog, clearDeviceData, clearLogCache, fastLossHiddenKeyFor, hasLegacyLog, lastUser, readLogCache, readOutbox, signOutWarning, storageKeyFor, writeLogCache, writeOutbox } from "./account.mjs";
 import { csvFileName, exportJson, jsonFileName, weighInsCsv } from "./export.mjs";
@@ -74,6 +74,8 @@ let deviceEndpoint = null; // This device's push subscription, if it has one.
 const TOAST_DURATION = 4000;
 // A message that offers something, such as showing weights in another unit, stays longer.
 const OFFER_DURATION = 10_000;
+// A message that offers Undo, after a deletion (see deleteWithUndo).
+const UNDO_DURATION = 8000;
 let toast = null; // What the toast shows: { error, duration, acting, target }. Null while it's closed.
 let toastTimer;
 let toastHover = false;
@@ -659,7 +661,8 @@ function showFatFact() {
   setText("fat-value", estimate ? percent(estimate.bodyFat) : null);
   $("fat-detail").textContent = estimate ? shortDate(estimate.date) : latest ? fatNeeds(latest) : "";
   $("fat-label").textContent = latest ? "Update" : "Add";
-  $("fat-label").setAttribute("aria-label", latest ? "Log a new waist measurement for body fat" : "Add a waist measurement to estimate body fat");
+  // The name starts with the word shown, so voice control finds it.
+  $("fat-label").setAttribute("aria-label", latest ? "Update body fat with a new waist measurement" : "Add a waist measurement for body fat");
 }
 
 // Why a waist measurement has no estimate (see bodyFat in model.mjs), short
@@ -943,12 +946,12 @@ function dashCell(meaning) {
 // A weigh-in's row, and its note on a row of its own underneath.
 function entryRows(point) {
   const date = prettyDate(point.date, "full");
-  const row = "<tr" + (point.note ? ' class="has-note"' : "") + ">" + dateCell(point.date) +
+  const row = '<tr data-edit="' + point.date + '"' + (point.note ? ' class="has-note"' : "") + ">" + dateCell(point.date) +
     '<td class="num entry-weight">' + weightCell(point.weight) + "</td>" +
     '<td class="num">' + weightCell(point.average) + "</td>" +
     '<td class="num">' + rateCell(calculateRate(state.entries, point.date, unit())) + "</td>" +
     '<td class="row-action"><button type="button" class="icon-button" data-edit="' + point.date + '" aria-label="Edit weigh-in for ' + date + '">' + icon("pencil") + "</button></td></tr>";
-  return point.note ? row + '<tr class="note-row"><td colspan="5"><span class="sr-only">Note: </span>' + escapeHtml(point.note) + "</td></tr>" : row;
+  return point.note ? row + '<tr class="note-row" data-edit="' + point.date + '"><td colspan="5"><span class="sr-only">Note: </span>' + escapeHtml(point.note) + "</td></tr>" : row;
 }
 
 // The log page groups each page's rows by month. A month that carries over
@@ -1012,7 +1015,7 @@ function showWaistRows() {
   const rows = [...fat].reverse();
   const shown = allWaists ? rows : rows.slice(0, WAIST_ROWS);
   $("waist-table-wrap").hidden = !rows.length;
-  $("waist-rows").innerHTML = shown.map(point => "<tr>" + dateCell(point.date) +
+  $("waist-rows").innerHTML = shown.map(point => '<tr data-waist-edit="' + point.date + '">' + dateCell(point.date) +
     '<td class="num">' + waistParts(point.waist, state.units.height).map(([number, name]) => number + '<span class="table-unit">' + name + "</span>").join("") + "</td>" +
     '<td class="num">' + (point.weight === null ? dashCell("No weigh-ins in the 14 days up to it") : weightCell(point.weight)) + "</td>" +
     '<td class="num fat-cell">' + (point.bodyFat === null ? dashCell("No estimate") : percent(point.bodyFat)) + "</td>" +
@@ -1822,10 +1825,18 @@ function openGoal(focusId = "goal-weight") {
   if (goal) writeWeight("goal-start-weight", goal.startWeight);
   else fillStartWeight();
   $("clear-goal").hidden = !goal;
+  showGoalForm();
   showStartHint();
   updateGoalForm();
   $("goal-dialog").showModal();
   $(focusId).focus();
+}
+
+// The goal dialog shows its form, or asks before removing the goal.
+function showGoalForm(confirming = false) {
+  $("goal-detail").hidden = confirming;
+  $("goal-form").hidden = confirming;
+  $("goal-confirm").hidden = !confirming;
 }
 
 // The start weight defaults to the 14-day average on the start date.
@@ -2408,8 +2419,27 @@ function saveWeighIn({ date, weight, note }, kept = null, offer = null) {
   return true;
 }
 
-// The options for a message that carries an offer.
-const offered = offer => offer ? { action: offer, duration: OFFER_DURATION } : undefined;
+// The options for a message that carries an offer: { label, run }, and how
+// long it stays if not OFFER_DURATION.
+const offered = offer => offer ? { action: offer, duration: offer.duration ?? OFFER_DURATION } : undefined;
+
+// Deletes a weigh-in or a waist measurement, or removes the goal, at once, as
+// any change is made (see changeState). The message that says it's done, or
+// that it's saved on this device, offers Undo for UNDO_DURATION. Undo makes
+// the change that puts back what was there, built from the log on screen just
+// before (see inverseOf in model.mjs). It's sent like any other change, so it
+// works however far the deletion has got, offline included. Deleting the whole
+// log or the account, and turning reminders off, have no Undo.
+function deleteWithUndo(change, message, restored) {
+  const inverse = inverseOf(change, state);
+  const userId = account.id;
+  const offer = inverse && {
+    label: "Undo",
+    duration: UNDO_DURATION,
+    run: () => state && account?.id === userId ? changeState(inverse, () => notify(restored)) : null
+  };
+  changeState(change, () => notify(message, offered(offer)), null, offer);
+}
 
 // The question Baseline asks under a weight field before it saves a weigh-in
 // that looks like a wrong unit, a slipped decimal point or an unlikely jump
@@ -2437,8 +2467,8 @@ function saveChecked(form, { date, weight, unchanged }, save) {
     button.type = "button";
     button.className = "button secondary";
     button.textContent = choice.label;
-    // Screen readers may read "st" as "street".
-    if (unit() === "st" || choice.unit === "st") button.setAttribute("aria-label", choice.spoken);
+    // Screen readers may read "st" as "street" (see spokenLabel).
+    if (choice.spoken !== choice.label) button.setAttribute("aria-label", choice.spoken);
     button.addEventListener("click", () => {
       closeCheck(form);
       if (choice.weight === null) $(CHECKED_FIELDS[form]).focus();
@@ -2645,9 +2675,23 @@ $("goal-form").addEventListener("submit", event => {
   $("goal-dialog").close();
   changeState({ op: "set-goal", goal }, () => notify("Goal saved."));
 });
+// Removing the goal asks first, in the dialog, as deleting a weigh-in does,
+// then offers Undo. A goal saved before the cap on the target rate can't be
+// saved again as it was, so the question says it can't be undone.
 $("clear-goal").addEventListener("click", () => {
+  const permanent = Boolean(state.goal) && !inverseOf({ op: "clear-goal" }, state);
+  $("goal-confirm-text").textContent = "Remove your goal? Your weigh-ins stay." +
+    (permanent ? " Its target rate is faster than Baseline saves now, so removing it can’t be undone." : "");
+  showGoalForm(true);
+  $("keep-goal").focus();
+});
+$("keep-goal").addEventListener("click", () => {
+  showGoalForm();
+  $("goal-weight").focus();
+});
+$("confirm-clear-goal").addEventListener("click", () => {
   $("goal-dialog").close();
-  changeState({ op: "clear-goal" }, () => notify("Goal removed."));
+  deleteWithUndo({ op: "clear-goal" }, "Goal removed.", "Goal restored.");
 });
 for (const button of document.querySelectorAll("[data-reminder]")) button.addEventListener("click", openReminder);
 // Reminders change which devices the server sends to, so they need a
@@ -2704,8 +2748,8 @@ for (const id of ["height-units", "waist-units", "settings-length-units"]) $(id)
 });
 for (const button of document.querySelectorAll("[data-waist]")) button.addEventListener("click", () => openWaist());
 $("waist-table").addEventListener("click", event => {
-  const button = event.target.closest("button[data-waist-edit]");
-  if (button) openWaist(button.dataset.waistEdit);
+  const date = rowTarget(event, "data-waist-edit");
+  if (date) openWaist(date);
 });
 $("waist-more").addEventListener("click", () => {
   allWaists = !allWaists;
@@ -2751,7 +2795,7 @@ $("keep-waist").addEventListener("click", () => {
 $("confirm-waist-delete").addEventListener("click", () => {
   const date = deletingWaist;
   $("waist-dialog").close();
-  changeState({ op: "delete-waist", date }, () => notify("Waist measurement deleted."));
+  deleteWithUndo({ op: "delete-waist", date }, "Waist measurement deleted.", "Waist measurement restored.");
 });
 $("waist-dialog").addEventListener("close", () => { deletingWaist = null; });
 $("profile-form").addEventListener("submit", event => {
@@ -2762,10 +2806,22 @@ $("profile-form").addEventListener("submit", event => {
   changeState({ op: "set-height", height }, () => notify("Height saved."));
 });
 
+// A tap anywhere on a row of a table, a weigh-in's note included, does what its
+// pencil does. The pencil stays as the cue and the way in from the keyboard.
+// Selecting text in a row, as to copy a note, doesn't count as a tap on it.
+function rowTarget(event, attribute) {
+  const target = event.target.closest("[" + attribute + "]");
+  if (!target || target.localName === "tr" && document.getSelection()?.isCollapsed === false) return null;
+  return target.getAttribute(attribute);
+}
+
 $("entry-table").addEventListener("click", event => {
-  const button = event.target.closest("button[data-edit]");
-  if (!button) return;
-  const entry = state.entries.find(item => item.date === button.dataset.edit);
+  const date = rowTarget(event, "data-edit");
+  if (date) openEdit(date);
+});
+
+function openEdit(date) {
+  const entry = state.entries.find(item => item.date === date);
   if (!entry) return;
   editingDate = entry.date;
   $("edit-date-label").textContent = prettyDate(entry.date, "long");
@@ -2775,7 +2831,7 @@ $("entry-table").addEventListener("click", event => {
   $("delete-confirm").hidden = true;
   $("edit-dialog").showModal();
   $("edit-weight").focus();
-});
+}
 $("edit-form").addEventListener("submit", event => {
   event.preventDefault();
   const date = editingDate;
@@ -2802,7 +2858,7 @@ $("keep-entry").addEventListener("click", () => {
 $("confirm-delete").addEventListener("click", () => {
   const date = editingDate;
   $("edit-dialog").close();
-  changeState({ op: "delete-weight", date }, () => notify("Weigh-in deleted."));
+  deleteWithUndo({ op: "delete-weight", date }, "Weigh-in deleted.", "Weigh-in restored.");
 });
 $("edit-dialog").addEventListener("close", () => {
   editingDate = null;
@@ -2848,11 +2904,19 @@ $("erase-form").addEventListener("submit", event => {
   else deleteData();
 });
 for (const button of document.querySelectorAll("[data-close]")) button.addEventListener("click", () => button.closest("dialog").close());
+// The dialogs something has been typed or chosen in since they opened. A tap
+// outside a dialog closes it only while nothing has, so a stray tap never
+// throws away a half-filled form. Escape and the close button still close it,
+// since they're deliberate.
+const typedIn = new WeakSet();
 for (const dialog of document.querySelectorAll("dialog")) {
+  dialog.addEventListener("input", () => typedIn.add(dialog));
+  // Closing forgets it, so the dialog opens again with nothing typed.
+  dialog.addEventListener("close", () => typedIn.delete(dialog));
   // A dialog that's waiting for the server, as the delete dialog does, stays open.
   dialog.addEventListener("cancel", event => { if (dialog.hasAttribute("data-busy")) event.preventDefault(); });
   dialog.addEventListener("click", event => {
-    if (event.target !== dialog || dialog.hasAttribute("data-busy")) return;
+    if (event.target !== dialog || dialog.hasAttribute("data-busy") || typedIn.has(dialog)) return;
     const bounds = dialog.getBoundingClientRect();
     if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) dialog.close();
   });

@@ -149,3 +149,57 @@ test("nothing the app says blames anyone for a break in weighing", async () => {
     assert.doesNotMatch(source, /\bmissed\b|\bstreaks?\b|\bfell off\b|\bback on track\b|\bdon[’']t give up\b/i, name);
   }
 });
+
+// The text a button shows, without its tags and the words only screen readers get.
+const shownText = html => html.replace(/<span class="sr-only">[^<]*<\/span>/g, "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+
+test("every button's name for screen readers starts with the words it shows, so voice control finds it", () => {
+  let checked = 0;
+  for (const [, attributes, content] of page.matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/g)) {
+    const label = /\baria-label="([^"]*)"/.exec(attributes)?.[1];
+    const shown = shownText(content);
+    if (!label || !shown) continue;
+    checked++;
+    assert.ok(label.startsWith(shown), "“" + label + "” should start with “" + shown + "”");
+  }
+  assert.ok(checked >= 2);
+  // The chart's ranges read "14D", with the rest for screen readers, as the unit buttons do.
+  const ranges = [...section(page, "ranges").matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/g)];
+  assert.deepEqual(ranges.map(([, , content]) => shownText(content)), ["14D", "30D", "90D", "All"]);
+  for (const [, attributes] of ranges) assert.doesNotMatch(attributes, /aria-label/);
+  assert.deepEqual(ranges.map(([, , content]) => /<span class="sr-only">([^<]*)<\/span>/.exec(content)[1]), [" (last 14 days)", " (last 30 days)", " (last 90 days)", " dates"]);
+});
+
+test("hover styles apply only where there's a pointer that hovers, so a tap leaves no colour behind", async () => {
+  const css = await read("styles.css");
+  // Where each @media (hover: hover) block starts and ends.
+  const blocks = [];
+  for (const match of css.matchAll(/@media \(hover: hover\) \{/g)) {
+    let depth = 1;
+    let end = match.index + match[0].length;
+    while (depth && end < css.length) {
+      if (css[end] === "{") depth++;
+      else if (css[end] === "}") depth--;
+      end++;
+    }
+    blocks.push([match.index, end]);
+  }
+  const rules = [...css.matchAll(/:hover\b/g)].map(match => match.index).filter(index => !/\/\*[^]*$/.test(css.slice(css.lastIndexOf("*/", index) + 1, index)));
+  assert.ok(rules.length >= 10);
+  for (const index of rules) {
+    const line = css.slice(css.lastIndexOf("\n", index) + 1, css.indexOf("\n", index));
+    assert.ok(blocks.some(([start, end]) => index > start && index < end), line);
+  }
+});
+
+test("small controls get a 44px hit area, and removing the goal asks first", async () => {
+  const css = await read("styles.css");
+  const rule = /^:where\(([^)]*)\)::before \{([^}]*)\}/m.exec(css);
+  assert.ok(rule, "the hit-area rule");
+  for (const name of [".text-button", ".icon-button", ".small-button", ".unit-switch button", ".ranges button"]) assert.ok(rule[1].split(", ").includes(name), name);
+  assert.match(rule[2], /inset: min\(0px, calc\(\(100% - 44px\) \/ 2\)\)/);
+  // Remove goal opens a question in the dialog, as deleting a weigh-in does.
+  const goal = section(page, "goal-dialog");
+  assert.match(goal, /<div id="goal-confirm" hidden><p class="dialog-detail" id="goal-confirm-text">Remove your goal\? Your weigh-ins stay\.<\/p>/);
+  assert.match(goal, /<button class="button secondary" type="button" id="keep-goal">Keep goal<\/button><button class="button danger" type="button" id="confirm-clear-goal">Remove goal<\/button>/);
+});

@@ -531,3 +531,18 @@ test("the agreement's columns and the guard are added to existing databases", ()
   assert.match(guard, new RegExp("ERRCODE = '" + CONSENT_ERROR_CODE + "'"));
   assert.match(guard, /FOR SHARE/);
 });
+
+test("the server takes the change that undoes a deletion as the app sends it", async () => {
+  const { inverseOf, normalizeState } = await import("../../baseline/dist/model.mjs");
+  const before = normalizeState({
+    started: true, sex: "male",
+    goal: { weight: 70.5, startDate: "2026-09-01", startWeight: 84.37, rate: 0.47, milestones: 7 },
+    entries: [{ date: "2026-11-22", weight: 84.91, note: "after travel" }, { date: "2026-11-23", weight: 85.12, note: null }],
+    waists: [{ date: "2026-11-01", waist: 86.61 }]
+  });
+  for (const change of [{ op: "delete-weight", date: "2026-11-22" }, { op: "delete-weight", date: "2026-11-23" }, { op: "delete-waist", date: "2026-11-01" }, { op: "clear-goal" }]) {
+    const inverse = inverseOf(change, before);
+    assert.ok(inverse, change.op);
+    assert.deepEqual(parseOp(JSON.parse(JSON.stringify(inverse)), NOW), inverse, change.op);
+  }
+});

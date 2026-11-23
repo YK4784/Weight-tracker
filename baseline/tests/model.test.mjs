@@ -903,9 +903,11 @@ test("the log bar offers today's weigh-in, then shows it in the chosen unit", as
   // Yesterday's weigh-in doesn't count, nor does one dated after today.
   assert.equal(todayLabel(entries.slice(0, 1), "2026-11-23", "kg").text, "Log today’s weight");
   assert.equal(todayLabel(entries, "2026-11-21", "kg").text, "Log today’s weight");
-  assert.deepEqual(todayLabel(entries, "2026-11-23", "kg"), { text: "Today 84.9 kg · Edit", spoken: "Today 84.9 kilograms, edit" });
-  assert.deepEqual(todayLabel(entries, "2026-11-23", "lb"), { text: "Today 187.3 lb · Edit", spoken: "Today 187.3 pounds, edit" });
-  assert.deepEqual(todayLabel(entries, "2026-11-23", "st"), { text: "Today 13 st 5.3 lb · Edit", spoken: "Today 13 stone 5.3 pounds, edit" });
+  // Screen readers get the label as shown, so voice control finds it by what it
+  // says, with stones read out in full after it.
+  assert.deepEqual(todayLabel(entries, "2026-11-23", "kg"), { text: "Today 84.9 kg · Edit", spoken: "Today 84.9 kg · Edit" });
+  assert.deepEqual(todayLabel(entries, "2026-11-23", "lb"), { text: "Today 187.3 lb · Edit", spoken: "Today 187.3 lb · Edit" });
+  assert.deepEqual(todayLabel(entries, "2026-11-23", "st"), { text: "Today 13 st 5.3 lb · Edit", spoken: "Today 13 st 5.3 lb · Edit (13 stone 5.3 pounds)" });
   // The weight reads as it does everywhere else, rounded to 0.1 of the unit.
   assert.equal(todayLabel([{ date: "2026-11-23", weight: 84.95 }], "2026-11-23", "kg").text, "Today " + formatWeight(84.95, "kg") + " · Edit");
   assert.equal(todayLabel([{ date: "2026-11-23", weight: 1234.5 }], "2026-11-23", "lb").text, "Today 2,721.6 lb · Edit");
@@ -1056,8 +1058,8 @@ test("the question under the weight field names the reference and what each butt
   const unit = ask(190, "kg", yesterday);
   assert.equal(unit.text, "That’s 124% above your last weigh-in (84.9 kg on Nov 22). Did you mean 190.0 lb?");
   assert.deepEqual(unit.choices, [
-    { label: "Save as 190.0 lb", spoken: "Save as 190.0 pounds", weight: 86.18, unit: "lb" },
-    { label: "Save 190.0 kg", spoken: "Save 190.0 kilograms", weight: 190, unit: null }
+    { label: "Save as 190.0 lb", spoken: "Save as 190.0 lb", weight: 86.18, unit: "lb" },
+    { label: "Save 190.0 kg", spoken: "Save 190.0 kg", weight: 190, unit: null }
   ]);
   const decimal = ask(849, "kg", yesterday);
   assert.equal(decimal.text, "Did you mean 84.9 kg?");
@@ -1068,7 +1070,10 @@ test("the question under the weight field names the reference and what each butt
   // In the user's unit, and read out in full for stones.
   const stones = ask(roundWeight(12 * 14 * KG_PER_LB), "st", yesterday);
   assert.equal(stones.text, "That’s 10% below your last weigh-in (13 st 5.2 lb on Nov 22). Save it anyway?");
-  assert.deepEqual([stones.choices[0].label, stones.choices[0].spoken], ["Save 12 st 0.0 lb", "Save 12 stone 0.0 pounds"]);
+  assert.deepEqual([stones.choices[0].label, stones.choices[0].spoken], ["Save 12 st 0.0 lb", "Save 12 st 0.0 lb (12 stone 0.0 pounds)"]);
+  // A stones user asked about pounds hears the pounds as shown.
+  const pounds = ask(roundWeight(190 * 14 * KG_PER_LB), "st", yesterday);
+  assert.deepEqual(pounds.choices.map(choice => [choice.label, choice.spoken]), [["Save as 190.0 lb", "Save as 190.0 lb"], ["Save 190 st 0.0 lb", "Save 190 st 0.0 lb (190 stone 0.0 pounds)"]]);
   const kilos = ask(roundWeight(85 * KG_PER_LB), "lb", yesterday);
   assert.equal(kilos.text, "That’s 55% below your last weigh-in (187.2 lb on Nov 22). Did you mean 85.0 kg?");
   assert.deepEqual(kilos.choices.map(choice => [choice.label, choice.unit]), [["Save as 85.0 kg", "kg"], ["Save 85.0 lb", null]]);
@@ -1131,4 +1136,78 @@ test("the weekly trend has shown once 8 weigh-ins fit in 3 weeks and span 2", as
       assert.equal(weeklyTrendShown(entries, throughDate), shown, "trial " + trial + " through day " + end);
     }
   }
+});
+
+test("undoing a deletion saves again exactly what was deleted", async () => {
+  const { applyOp, inverseOf } = await import("../dist/model.mjs");
+  // 13 st 5.2 lb, stored to the hundredth of a kilogram.
+  const stones = roundWeight((13 * 14 + 5.2) * KG_PER_LB);
+  assert.equal(stones, 84.91);
+  const before = normalizeState({
+    started: true, sex: "female", height: 165,
+    goal: { weight: 70.5, startDate: "2026-09-01", startWeight: 84.37, rate: 0.47, milestones: 7 },
+    entries: [{ date: "2026-11-21", weight: 85.12, note: null }, { date: "2026-11-22", weight: stones, note: "after travel" }, { date: "2026-11-23", weight: 84.6, note: null }],
+    waists: [{ date: "2026-11-01", waist: 86.61 }, { date: "2026-11-15", waist: 85.09 }]
+  });
+  const undo = change => {
+    const inverse = inverseOf(change, before);
+    return { inverse, restored: applyOp(applyOp(before, change), inverse) };
+  };
+
+  // A weigh-in comes back with its weight in kg as stored and its note.
+  const weighIn = undo({ op: "delete-weight", date: "2026-11-22" });
+  assert.deepEqual(weighIn.inverse, { op: "save-weight", date: "2026-11-22", weight: 84.91, note: "after travel" });
+  assert.deepEqual(weighIn.restored, before);
+  // Without a note, the inverse says so, rather than leaving the date's note as it is.
+  assert.deepEqual(inverseOf({ op: "delete-weight", date: "2026-11-21" }, before), { op: "save-weight", date: "2026-11-21", weight: 85.12, note: null });
+
+  // A waist comes back as stored, with the formula's sex.
+  const waist = undo({ op: "delete-waist", date: "2026-11-01" });
+  assert.deepEqual(waist.inverse, { op: "save-waist", date: "2026-11-01", waist: 86.61, sex: "female" });
+  assert.deepEqual(waist.restored, before);
+
+  // A goal comes back whole: weight, start date, start weight, rate and milestones.
+  const goal = undo({ op: "clear-goal" });
+  assert.deepEqual(goal.inverse, { op: "set-goal", goal: { weight: 70.5, startDate: "2026-09-01", startWeight: 84.37, rate: 0.47, milestones: 7 } });
+  assert.deepEqual(goal.restored, before);
+  // A goal without a target rate keeps none.
+  const noRate = normalizeState({ ...before, goal: { ...before.goal, rate: null } });
+  assert.deepEqual(inverseOf({ op: "clear-goal" }, noRate).goal, { ...noRate.goal, rate: null });
+  // The inverse is a copy, so changing it doesn't change the log it came from.
+  goal.inverse.goal.weight = 1;
+  assert.equal(before.goal.weight, 70.5);
+});
+
+test("only deletions of a weigh-in, a waist or the goal can be undone, and only when there was something to delete", async () => {
+  const { inverseOf } = await import("../dist/model.mjs");
+  const before = normalizeState({
+    started: true, sex: "male",
+    goal: { weight: 80, startDate: "2026-09-01", startWeight: 90, rate: 0.5, milestones: 10 },
+    entries: [{ date: "2026-11-22", weight: 85, note: null }], waists: [{ date: "2026-11-01", waist: 90 }]
+  });
+  // Nothing on that date, or no goal.
+  assert.equal(inverseOf({ op: "delete-weight", date: "2026-11-21" }, before), null);
+  assert.equal(inverseOf({ op: "delete-waist", date: "2026-11-02" }, before), null);
+  assert.equal(inverseOf({ op: "clear-goal" }, { ...before, goal: null }), null);
+  // A waist without a formula can't be saved again.
+  assert.equal(inverseOf({ op: "delete-waist", date: "2026-11-01" }, { ...before, sex: null }), null);
+  // Reminders and deleting the whole log or account have no undo, nor do saves and edits.
+  for (const change of [{ op: "clear-reminder" }, { op: "delete-data", confirm: "delete" }, { op: "delete-account", confirm: "delete" },
+    { op: "save-weight", date: "2026-11-22", weight: 84 }, { op: "update-weight", date: "2026-11-22", weight: 84 }, { op: "set-goal", goal: before.goal }, { op: "set-height", height: 180 }]) {
+    assert.equal(inverseOf(change, before), null, change.op);
+  }
+  assert.equal(inverseOf(null, before), null);
+  assert.equal(inverseOf({ op: "delete-weight", date: "2026-11-22" }, null), null);
+});
+
+test("a goal saved before the cap on the target rate can't be set again as it was, so its removal has no undo", async () => {
+  const { inverseOf } = await import("../dist/model.mjs");
+  // 1.5% of 90 kg is 1.35 kg a week.
+  const goal = rate => normalizeState({ started: true, goal: { weight: 80, startDate: "2026-09-01", startWeight: 90, rate, milestones: 10 } });
+  assert.equal(maxGoalRate(90), 1.35);
+  assert.equal(inverseOf({ op: "clear-goal" }, goal(2)), null);
+  assert.equal(inverseOf({ op: "clear-goal" }, goal(1.352)), null);
+  // At the cap, or within the slack a rate typed in pounds can need, it's fine.
+  assert.equal(inverseOf({ op: "clear-goal" }, goal(1.35)).goal.rate, 1.35);
+  assert.equal(inverseOf({ op: "clear-goal" }, goal(1.351)).goal.rate, 1.351);
 });
