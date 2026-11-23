@@ -39,10 +39,11 @@ test("the cache is named with a version", () => {
 const ORIGIN = "https://baseline.test";
 const at = path => new URL(path, ORIGIN + "/").href;
 
-function startWorker({ network = () => Promise.reject(new TypeError("Failed to fetch")) } = {}) {
+function startWorker({ network = () => Promise.reject(new TypeError("Failed to fetch")), windows = [] } = {}) {
   const listeners = {};
   const stores = new Map();
   const claimed = [];
+  const opened = [];
   class FakeCache {
     constructor() { this.entries = new Map(); }
     async add(request) {
@@ -57,6 +58,7 @@ function startWorker({ network = () => Promise.reject(new TypeError("Failed to f
     fetch: (request, ...rest) => network(request, ...rest),
     stores,
     claimed,
+    opened,
     listeners,
     caches: {
       async open(name) {
@@ -71,7 +73,11 @@ function startWorker({ network = () => Promise.reject(new TypeError("Failed to f
     self: {
       location: new URL(ORIGIN + "/sw.js"),
       registration: { scope: ORIGIN + "/", showNotification() {} },
-      clients: { claim: async () => { claimed.push(true); }, matchAll: async () => [], openWindow() {} },
+      clients: {
+        claim: async () => { claimed.push(true); },
+        matchAll: async options => options?.type === "window" ? windows : [],
+        openWindow: async url => { opened.push(url); }
+      },
       skipWaiting() {},
       addEventListener(type, listener) { listeners[type] = listener; }
     },
@@ -224,4 +230,47 @@ test("a page that opened from the copy gets its modules from the copy, so it nev
   assert.equal(await body((await dispatch(worker, "fetch", fetchEvent("app.mjs", { clientId: "page-old" }))).response), "old app.mjs");
   // The network's answer is stored for the next load, and a page from the network gets it.
   assert.equal(await body((await dispatch(worker, "fetch", fetchEvent("app.mjs", { clientId: "page-new" }))).response), "new /app.mjs");
+});
+
+// A window the worker can find, which records what it's asked to do.
+function openWindow(path) {
+  const window = { url: at(path), messages: [], focused: false };
+  // A copy, as the browser delivers it, made outside the worker's realm.
+  window.postMessage = message => window.messages.push(structuredClone(message));
+  window.focus = async () => { window.focused = true; return window; };
+  return window;
+}
+
+const tap = worker => dispatch(worker, "notificationclick", { notification: { close() {} } });
+
+test("a tapped reminder opens a new window at today's weigh-in when Baseline isn't open", async () => {
+  const policy = openWindow("health-data-privacy.html");
+  const worker = startWorker({ windows: [policy] });
+  await tap(worker);
+  assert.deepEqual(worker.opened, [at("./#log")]);
+  // The policy page has no app to open the sheet, so it's left alone.
+  assert.deepEqual(policy.messages, []);
+  assert.equal(policy.focused, false);
+});
+
+test("a tapped reminder asks an open Baseline window for today's weigh-in, and brings it forward", async () => {
+  const page = openWindow("index.html?from=home#settings");
+  const worker = startWorker({ windows: [openWindow("health-data-privacy.html"), page] });
+  await tap(worker);
+  assert.deepEqual(page.messages, [{ type: "open-log" }]);
+  assert.equal(page.focused, true);
+  assert.deepEqual(worker.opened, []);
+  const root = openWindow("#weight-log");
+  const again = startWorker({ windows: [root] });
+  await tap(again);
+  assert.deepEqual(root.messages, [{ type: "open-log" }]);
+});
+
+test("the home-screen shortcut opens today's weigh-in, like a reminder", async () => {
+  const manifest = JSON.parse(await readFile(new URL("manifest.webmanifest", dist), "utf8"));
+  assert.deepEqual(manifest.shortcuts.map(shortcut => shortcut.url), ["./#log"]);
+  for (const shortcut of manifest.shortcuts) {
+    assert.ok(shortcut.name && shortcut.short_name.length <= 12);
+    for (const icon of shortcut.icons) assert.ok(shell.includes(icon.src), icon.src);
+  }
 });

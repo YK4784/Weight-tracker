@@ -1,4 +1,4 @@
-import { CM_PER_IN, CONSENT_VERSION, FAST_LOSS_DAYS, FORECAST_MAX_DAYS, GOAL_MILESTONES, GOAL_RATE_CAP, KG_PER_LB, OVERALL_MIN_DAYS, QUEUEABLE_OPS, RATE_DAYS, RATE_MIN_ENTRIES, RATE_MIN_SPAN, SEXES, WINDOW_DAYS, applyOps, averageChanges, bmi, bodyFat, bodyFatChange, bodyFatHistory, calculateRate, changeTarget, calculateTrend, cleanNote, dateOf, dayOf, fastGoalRate, fastLossCaution, forecastGoal, formatAmount, formatWaist, formatWeight, fromTenths, goalProgress, goalRateAllowed, goalRateLimit, groupByMonth, hasConsent, heightParts, localToday, maxGoalRate, monthlyReports, normalizeGoal, normalizeState, oneDecimal, overallRate, positive, prettyDate, recentRange, roundHeight, roundWaist, roundWeight, shiftDate, spokenHeight, spokenWeight, toTenths, validDate, validWaist, waistParts, waistTenths, weightParts } from "./model.mjs";
+import { CM_PER_IN, CONSENT_VERSION, FAST_LOSS_DAYS, FORECAST_MAX_DAYS, GOAL_MILESTONES, GOAL_RATE_CAP, KG_PER_LB, OVERALL_MIN_DAYS, QUEUEABLE_OPS, RATE_DAYS, RATE_MIN_ENTRIES, RATE_MIN_SPAN, SEXES, WINDOW_DAYS, applyOps, averageChanges, bmi, bodyFat, bodyFatChange, bodyFatHistory, calculateRate, changeTarget, calculateTrend, cleanNote, dateOf, dayOf, fastGoalRate, fastLossCaution, forecastGoal, formatAmount, formatWaist, formatWeight, fromTenths, goalProgress, goalRateAllowed, goalRateLimit, groupByMonth, hasConsent, heightParts, localToday, maxGoalRate, monthlyReports, normalizeGoal, normalizeState, oneDecimal, overallRate, positive, prettyDate, recentRange, roundHeight, roundWaist, roundWeight, shiftDate, spokenHeight, spokenWeight, toTenths, todayHeading, todayLabel, validDate, validWaist, waistParts, waistTenths, weightParts } from "./model.mjs";
 import { BodyFatChart, TrendChart } from "./chart.mjs";
 import { claimLegacyLog, clearDeviceData, clearLogCache, fastLossHiddenKeyFor, lastUser, readLogCache, readOutbox, signOutWarning, storageKeyFor, writeLogCache, writeOutbox } from "./account.mjs";
 import { csvFileName, exportJson, jsonFileName, weighInsCsv } from "./export.mjs";
@@ -57,6 +57,8 @@ let page = 0;
 let editingDate = null;
 let autoFill = true; // The log form shows the weigh-in on its date until the user types in it.
 let entryEdits = 0; // Counts what's typed into the log form, so a save that's answered later doesn't refill it.
+let sheetAutoFill = true; // The log sheet shows today's weigh-in until the user types in it.
+let sheetEdits = 0; // Counts what's typed into the log sheet, as entryEdits does for the form.
 let fieldUnits = null; // The units the inputs are set up for, which follow state.units.
 let worker = null; // The service worker's registration, which receives reminders. Null until it's ready or where there is none.
 let deviceEndpoint = null; // This device's push subscription, if it has one.
@@ -260,6 +262,7 @@ function showState() {
     $("account-bar").hidden = false;
   }
   render();
+  followLogLink();
 }
 
 // Shows a change at once, then saves it. A change that can wait goes into the
@@ -1111,6 +1114,7 @@ function render() {
   showMetrics();
   showSettings();
   syncEntryForm();
+  showLogBar();
   showPage();
   showAccount();
   showLogStatus();
@@ -1278,6 +1282,7 @@ function showLog() {
   page = 0;
   editingDate = null;
   autoFill = true;
+  sheetAutoFill = true;
   rateSource = null;
   allWaists = false;
   $("entry-date").value = today;
@@ -1432,23 +1437,114 @@ async function startAuth() {
   }
 }
 
-function focusEntry() {
+// Brings the log form into view on the overview, with focus in `field`.
+function focusEntry(field = "entry-weight") {
   if (currentView() !== "overview") {
-    window.addEventListener("hashchange", focusEntry, { once: true });
+    window.addEventListener("hashchange", () => focusEntry(field), { once: true });
     location.hash = "overview";
     return;
   }
   requestAnimationFrame(() => {
     $("entry-panel").scrollIntoView({ block: "center", behavior: "auto" });
-    $("entry-weight").focus({ preventScroll: true });
+    $(field).focus({ preventScroll: true });
   });
+}
+
+// Today's weigh-in on phones: the bar at the bottom of the overview and the
+// log opens the log sheet, a dialog with the weight field focused and Save
+// right above the keyboard. The log form stays for other dates, and on wider
+// screens it's the only way in. The width matches the bar's in styles.css.
+const phoneLayout = matchMedia("(max-width: 600px)");
+
+// The bar's label, and the sheet's heading and fields, for today. Once today
+// has a weigh-in, the bar shows it and turns from the accent to an outline.
+function showLogBar() {
+  const label = todayLabel(state.entries, today, unit());
+  const logged = state.entries.some(entry => entry.date === today);
+  const button = $("log-bar-button");
+  button.textContent = label.text;
+  if (label.spoken === label.text) button.removeAttribute("aria-label");
+  else button.setAttribute("aria-label", label.spoken);
+  button.classList.toggle("primary", !logged);
+  button.classList.toggle("secondary", logged);
+  syncSheet();
+}
+
+function syncSheet() {
+  const entry = state.entries.find(item => item.date === today);
+  $("sheet-title").textContent = todayHeading(today);
+  $("sheet-save").textContent = entry ? "Update entry" : "Save entry";
+  if (!sheetAutoFill) return;
+  writeWeight("sheet-weight", entry?.weight);
+  $("sheet-note").value = entry?.note ?? "";
+  // Today's note shows, so it can be changed. Without one, the field waits behind "Add a note".
+  showSheetNote(Boolean(entry?.note));
+}
+
+function showSheetNote(shown) {
+  $("sheet-note-field").hidden = !shown;
+  $("sheet-add-note").hidden = shown;
+}
+
+// Opens the sheet with focus in the weight field. Called from a tap, the focus
+// is part of it, which iOS needs before it raises the keyboard.
+function openSheet() {
+  if (!state || $("main").hidden || document.querySelector("dialog[open]:not(#log-sheet)")) return;
+  syncDay();
+  const sheet = $("log-sheet");
+  if (!sheet.open) {
+    fitSheet();
+    window.visualViewport?.addEventListener("resize", fitSheet);
+    window.visualViewport?.addEventListener("scroll", fitSheet);
+    sheet.showModal();
+  }
+  $("sheet-weight").focus();
+}
+
+// Keeps the sheet's bottom at the bottom of the visible part of the screen,
+// which an on-screen keyboard moves up: the visual viewport ends at
+// --view-bottom, measured from the top of the layout viewport that fixed
+// elements sit in (see dialog.sheet in styles.css). Over a keyboard, which
+// covers the home indicator, the sheet leaves no room for it. On a short
+// screen the fields scroll, and the one being typed in stays in view.
+function fitSheet() {
+  const view = window.visualViewport;
+  if (!view) return;
+  const root = document.documentElement.style;
+  root.setProperty("--view-bottom", view.offsetTop + view.height + "px");
+  root.setProperty("--view-height", view.height + "px");
+  $("log-sheet").classList.toggle("over-keyboard", window.innerHeight - view.height > 100);
+  const fields = $("sheet-fields");
+  const typing = document.activeElement?.closest(".input-frame");
+  if (!typing || !fields.contains(typing)) return;
+  const shown = fields.getBoundingClientRect();
+  const field = typing.getBoundingClientRect();
+  if (field.bottom > shown.bottom) fields.scrollTop += field.bottom - shown.bottom;
+  else if (field.top < shown.top) fields.scrollTop -= shown.top - field.top;
+}
+
+// Today's weigh-in, from a reminder, the home-screen shortcut or a #log link:
+// the sheet on phones, and the log form on wider screens.
+function openLogEntry() {
+  if (phoneLayout.matches) openSheet();
+  else focusEntry();
+}
+
+// Opening Baseline at #log asks for today's weigh-in. #log isn't a view, so the
+// overview shows, and once the log is on the page the address goes back to
+// the overview and the weigh-in opens. While sign-in loads or the consent step
+// shows, the hash waits. Signed out, Clerk's sign-in takes over the hash.
+function followLogLink() {
+  if (location.hash !== "#log" || !state || $("main").hidden) return;
+  history.replaceState(null, "", location.pathname + location.search + "#overview");
+  openLogEntry();
 }
 
 // Weight inputs: a main input in kg, pounds or stones, and a pounds input
 // (id + "-lb") that shows only for stones. Heights work the same way, with an
 // inches input for feet. The inputs use `fieldUnits`, which applyUnits keeps
 // in step with the saved units, converting anything already typed.
-const WEIGHT_FIELDS = ["entry-weight", "edit-weight", "goal-weight", "goal-start-weight"];
+const WEIGHT_FIELDS = ["entry-weight", "sheet-weight", "edit-weight", "goal-weight", "goal-start-weight"];
 
 // The weight typed into a field, in kg, or NaN. A field that still shows
 // `stored` as it was filled in returns it unchanged, so saving again never
@@ -2157,28 +2253,97 @@ for (const id of ["entry-weight", "entry-weight-lb", "entry-note"]) $(id).addEve
   autoFill = false;
   entryEdits++;
 });
+// Saves a weigh-in from the log form or the log sheet. It shows at once, and
+// a message confirms it once the server has it, with a word when it carries
+// the average past a milestone. A failed save offers "Try again" (see
+// changeState). `kept` runs once it's saved, on the server or on this device.
+// Leaving out `note` keeps the date's note as it is. Returns false, saving
+// nothing, for a date or weight that can't be saved.
+function saveWeighIn({ date, weight, note }, kept = null) {
+  if (!validDate(date) || date > today || !positive(weight)) return false;
+  const updating = state.entries.some(entry => entry.date === date);
+  const before = progress;
+  const change = note === undefined ? { op: "save-weight", date, weight } : { op: "save-weight", date, weight, note };
+  changeState(change, () => notify((updating ? "Weigh-in updated" : "Weigh-in saved") + " for " + prettyDate(date) + "." + celebrate(before, progress)), kept);
+  return true;
+}
+
 $("entry-form").addEventListener("submit", event => {
   event.preventDefault();
   syncDay();
   const date = $("entry-date").value;
   const existing = state.entries.find(entry => entry.date === date);
-  const weight = roundWeight(readWeight("entry-weight", existing?.weight));
-  // The form shows the date's note, so an empty field removes it.
-  const note = cleanNote($("entry-note").value);
-  if (!validDate(date) || date > today || !positive(weight)) return;
-  const updating = Boolean(existing);
-  const before = progress;
   // What was typed stays in the form until the weigh-in is saved, so a failed
   // save loses nothing. Then the form shows the saved weigh-in, unless
   // something new was typed meanwhile.
   const edits = entryEdits;
-  changeState({ op: "save-weight", date, weight, note },
-    () => notify((updating ? "Weigh-in updated" : "Weigh-in saved") + " for " + prettyDate(date) + "." + celebrate(before, progress)),
-    () => {
-      if (entryEdits !== edits) return;
-      autoFill = true;
-      syncEntryForm();
-    });
+  saveWeighIn({
+    date,
+    weight: roundWeight(readWeight("entry-weight", existing?.weight)),
+    // The form shows the date's note, so an empty field removes it.
+    note: cleanNote($("entry-note").value)
+  }, () => {
+    if (entryEdits !== edits) return;
+    autoFill = true;
+    syncEntryForm();
+  });
+});
+
+// The log sheet saves today's weigh-in and closes at once, as the dialogs do.
+// What was typed stays in it until the weigh-in is saved, so after a failed
+// save it opens with the same weight and note.
+for (const id of ["sheet-weight", "sheet-weight-lb", "sheet-note"]) $(id).addEventListener("input", () => {
+  sheetAutoFill = false;
+  sheetEdits++;
+});
+$("log-bar-button").addEventListener("click", openSheet);
+$("sheet-form").addEventListener("submit", event => {
+  event.preventDefault();
+  syncDay();
+  const date = today;
+  const existing = state.entries.find(entry => entry.date === date);
+  const edits = sheetEdits;
+  const sent = saveWeighIn({
+    date,
+    weight: roundWeight(readWeight("sheet-weight", existing?.weight)),
+    // Today's note shows in the sheet, so an empty field removes it. Left
+    // behind "Add a note", the field changes nothing.
+    note: $("sheet-note-field").hidden ? undefined : cleanNote($("sheet-note").value)
+  }, () => {
+    if (sheetEdits !== edits) return;
+    sheetAutoFill = true;
+    syncSheet();
+  });
+  if (sent) $("log-sheet").close();
+});
+$("sheet-add-note").addEventListener("click", () => {
+  showSheetNote(true);
+  $("sheet-note").focus();
+});
+// "Another day" goes to the log form, set to yesterday. Anything typed in the
+// sheet moves into the form with it. Without a note typed, the form keeps
+// yesterday's note, as it shows when that date is chosen.
+$("sheet-other-day").addEventListener("click", () => {
+  const date = shiftDate(today, -1, today);
+  $("entry-date").value = date;
+  if (sheetAutoFill) dateChanged();
+  else {
+    $("entry-weight").value = $("sheet-weight").value;
+    $("entry-weight-lb").value = $("sheet-weight-lb").value;
+    $("entry-note").value = $("sheet-note-field").hidden ? state.entries.find(entry => entry.date === date)?.note ?? "" : $("sheet-note").value;
+    autoFill = false;
+    entryEdits++;
+    sheetAutoFill = true;
+    syncEntryForm();
+    syncSheet();
+  }
+  $("log-sheet").close();
+  focusEntry("entry-date");
+});
+$("log-sheet").addEventListener("close", () => {
+  window.visualViewport?.removeEventListener("resize", fitSheet);
+  window.visualViewport?.removeEventListener("scroll", fitSheet);
+  $("log-sheet").classList.remove("over-keyboard");
 });
 
 // A word when a weigh-in carries the average past a milestone. Needs an average
@@ -2196,7 +2361,7 @@ $("ranges").addEventListener("click", event => {
   for (const item of $("ranges").querySelectorAll("button")) item.setAttribute("aria-pressed", String(item === button));
   drawChart();
 });
-$("quick-log").addEventListener("click", focusEntry);
+$("quick-log").addEventListener("click", () => focusEntry());
 $("prev-page").addEventListener("click", () => { page--; showTable(true); });
 $("next-page").addEventListener("click", () => { page++; showTable(true); });
 
@@ -2450,7 +2615,17 @@ window.addEventListener("hashchange", () => {
   page = 0;
   showPage();
   window.scrollTo({ top: 0, behavior: "auto" });
+  // The home-screen shortcut can reach an open window as a new hash.
+  followLogLink();
 });
+// A tapped reminder asks an open window for today's weigh-in (see sw.js).
+// While the log isn't on the page yet, #log waits for it (see followLogLink).
+navigator.serviceWorker?.addEventListener("message", event => {
+  if (event.data?.type !== "open-log" || !account) return;
+  if (state && !$("main").hidden) openLogEntry();
+  else history.replaceState(null, "", location.pathname + location.search + "#log");
+});
+navigator.serviceWorker?.startMessages();
 document.querySelector(".skip-link").addEventListener("click", event => {
   event.preventDefault();
   ($("main").hidden ? $("auth") : $("main")).focus();

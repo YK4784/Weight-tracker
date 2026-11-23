@@ -895,3 +895,26 @@ test("an agreement replaces an earlier one that failed, and nothing else", () =>
   assert.equal(changeTarget({ op: "consent", version: CONSENT_VERSION }), "consent");
   assert.notEqual(changeTarget({ op: "consent", version: CONSENT_VERSION }), changeTarget({ op: "set-units", units: {} }));
 });
+
+test("the log bar offers today's weigh-in, then shows it in the chosen unit", async () => {
+  const { todayLabel } = await import("../dist/model.mjs");
+  const entries = [{ date: "2026-11-22", weight: 85.2, note: null }, { date: "2026-11-23", weight: 84.94, note: "after travel" }];
+  assert.deepEqual(todayLabel([], "2026-11-23"), { text: "Log today’s weight", spoken: "Log today’s weight" });
+  // Yesterday's weigh-in doesn't count, nor does one dated after today.
+  assert.equal(todayLabel(entries.slice(0, 1), "2026-11-23", "kg").text, "Log today’s weight");
+  assert.equal(todayLabel(entries, "2026-11-21", "kg").text, "Log today’s weight");
+  assert.deepEqual(todayLabel(entries, "2026-11-23", "kg"), { text: "Today 84.9 kg · Edit", spoken: "Today 84.9 kilograms, edit" });
+  assert.deepEqual(todayLabel(entries, "2026-11-23", "lb"), { text: "Today 187.3 lb · Edit", spoken: "Today 187.3 pounds, edit" });
+  assert.deepEqual(todayLabel(entries, "2026-11-23", "st"), { text: "Today 13 st 5.3 lb · Edit", spoken: "Today 13 stone 5.3 pounds, edit" });
+  // The weight reads as it does everywhere else, rounded to 0.1 of the unit.
+  assert.equal(todayLabel([{ date: "2026-11-23", weight: 84.95 }], "2026-11-23", "kg").text, "Today " + formatWeight(84.95, "kg") + " · Edit");
+  assert.equal(todayLabel([{ date: "2026-11-23", weight: 1234.5 }], "2026-11-23", "lb").text, "Today 2,721.6 lb · Edit");
+});
+
+test("the log sheet's heading names today with its weekday", async () => {
+  const { todayHeading } = await import("../dist/model.mjs");
+  assert.equal(todayHeading("2026-11-23"), "Today, Mon Nov 23");
+  assert.equal(todayHeading("2027-01-01"), "Today, Fri Jan 1");
+  // Calendar dates, whatever the time zone the tests run in.
+  assert.equal(todayHeading("2026-03-08"), "Today, Sun Mar 8");
+});

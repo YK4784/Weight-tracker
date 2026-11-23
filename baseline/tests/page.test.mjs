@@ -85,3 +85,20 @@ test("the pages run no outside code but Clerk's, and set no cookies", async () =
   assert.deepEqual(loads, ["https://host", "https://host"]);
   assert.match(sources["auth.mjs"], /const host = frontendApiFor\(CLERK_PUBLISHABLE_KEY\)/);
 });
+
+test("every weight field has the pounds input and unit label that applyUnits sets up, the log sheet's included", async () => {
+  const app = await read("app.mjs");
+  const fields = JSON.parse(/^const WEIGHT_FIELDS = (\[[^\]]*\]);$/m.exec(app)[1]);
+  assert.ok(fields.includes("entry-weight") && fields.includes("sheet-weight"));
+  for (const id of fields) for (const suffix of ["", "-lb", "-unit"]) assert.match(page, new RegExp('id="' + id + suffix + '"'), id + suffix);
+});
+
+test("the log sheet saves from the keyboard, and the page can reach the safe area", () => {
+  const sheet = section(page, "log-sheet");
+  assert.match(sheet, /<dialog class="sheet" id="log-sheet"/);
+  for (const id of ["sheet-weight", "sheet-weight-lb"]) assert.match(/<input id="[^"]+"[^>]*>/.exec(sheet.slice(sheet.indexOf('id="' + id + '"') - 7))[0], /\benterkeyhint="done"/, id);
+  assert.match(sheet, /<button class="button primary save-button" type="submit"/);
+  // env(safe-area-inset-bottom), which keeps the bar and the sheet above the home indicator, needs it.
+  assert.match(page, /<meta name="viewport" content="[^"]*\bviewport-fit=cover\b[^"]*">/);
+  assert.match(section(page, "log-bar"), /id="log-bar-button"[^>]*>Log today’s weight</);
+});

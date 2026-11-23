@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="light dark">
   <meta name="theme-color" content="#f6f5f1" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#121315" media="(prefers-color-scheme: dark)">
@@ -452,8 +452,37 @@
       <p class="storage-status" id="storage-status"></p>
       <p class="footer-links"><a href="#your-data" id="footer-data-link">Your data</a><a href="./health-data-privacy.html">Health data privacy policy</a></p>
     </footer>
+    <!-- On phones, the way in to today's weigh-in, fixed at the bottom of the
+         overview and the log. It opens #log-sheet. -->
+    <div class="log-bar" id="log-bar">
+      <button class="button primary" type="button" id="log-bar-button" aria-haspopup="dialog" aria-controls="log-sheet">Log today’s weight</button>
+    </div>
   </main>
 
+  <!-- Today's weigh-in on phones, as a sheet from the bottom of the screen. Its
+       bottom follows the visible part of the screen, so Save sits right above
+       the keyboard (see fitSheet in app.mjs). -->
+  <dialog class="sheet" id="log-sheet" aria-labelledby="sheet-title">
+    <div class="dialog-heading"><h2 id="sheet-title">Today</h2><button class="icon-button" data-close type="button" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="./icons.svg#close"/></svg></button></div>
+    <form id="sheet-form">
+      <div class="sheet-fields" id="sheet-fields">
+        <div class="field-head">
+          <label class="field-label" for="sheet-weight">Weight</label>
+          <button class="text-button" type="button" id="sheet-other-day">Another day</button>
+        </div>
+        <div class="split-field">
+          <div class="input-frame"><input id="sheet-weight" name="weight" type="number" inputmode="decimal" enterkeyhint="done" placeholder="0.0" min="0.1" max="2000" step="0.1" aria-describedby="sheet-weight-unit" required><span class="input-unit" id="sheet-weight-unit">kg</span></div>
+          <div class="input-frame" hidden><input id="sheet-weight-lb" name="pounds" type="number" inputmode="decimal" enterkeyhint="done" placeholder="0.0" min="0" max="13.9" step="0.1" aria-label="Pounds"><span class="input-unit" aria-hidden="true">lb</span></div>
+        </div>
+        <button class="text-button sheet-add-note" type="button" id="sheet-add-note">Add a note</button>
+        <div class="sheet-note" id="sheet-note-field" hidden>
+          <label class="field-label" for="sheet-note">Note <span class="optional">(optional)</span></label>
+          <div class="input-frame"><input id="sheet-note" name="note" type="text" maxlength="100" placeholder="e.g. after travel" autocomplete="off" enterkeyhint="done"></div>
+        </div>
+      </div>
+      <button class="button primary save-button" type="submit" id="sheet-save">Save entry</button>
+    </form>
+  </dialog>
   <dialog id="profile-dialog" aria-labelledby="profile-title">
     <div class="dialog-heading"><h2 id="profile-title">Your height</h2><button class="icon-button" data-close type="button" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="./icons.svg#close"/></svg></button></div>
     <p class="dialog-detail" id="profile-description">Your height and latest weight are used to calculate BMI.</p>

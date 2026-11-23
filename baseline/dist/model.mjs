@@ -34,6 +34,7 @@ export function prettyDate(date, kind = "short") {
       short: { month: "short", day: "numeric" },
       full: { year: "numeric", month: "short", day: "numeric" },
       weekday: { weekday: "short", month: "short", day: "numeric" },
+      dayName: { weekday: "short" },
       day: { weekday: "long", month: "long", day: "numeric" },
       monthYear: { year: "numeric", month: "short" },
       month: { year: "numeric", month: "long" },
@@ -402,6 +403,21 @@ export function saveWeight(state, date, weight, note) {
   if (!validDate(date) || !validWeight(weight)) throw new Error("Enter a valid date and weight.");
   const kept = note === undefined ? state.entries.find(entry => entry.date === date)?.note : note;
   return normalizeState({ ...state, started: true, entries: [...state.entries, { date, weight, note: kept }] });
+}
+
+// The label of the bar that logs today's weight on phones: "Log today’s
+// weight", or once today has a weigh-in, "Today 84.9 kg · Edit" in the chosen
+// unit. `spoken` is the same for screen readers, which may read "st" as
+// "street".
+export function todayLabel(entries, today, unit = "kg") {
+  const entry = entries.find(item => item.date === today);
+  if (!entry) return { text: "Log today’s weight", spoken: "Log today’s weight" };
+  return { text: "Today " + formatWeight(entry.weight, unit) + " · Edit", spoken: "Today " + spokenWeight(entry.weight, unit) + ", edit" };
+}
+
+// The heading of the sheet that logs today's weight: "Today, Mon Nov 23".
+export function todayHeading(today) {
+  return "Today, " + prettyDate(today, "dayName") + " " + prettyDate(today);
 }
 
 // The changes that can wait on the device while it's offline and be sent

@@ -1,6 +1,6 @@
 // Baseline's service worker. It keeps a copy of Baseline's own files, so the
 // app opens without a connection, and it shows weigh-in reminders (see
-// server/reminders.mjs).
+// server/reminders.mjs), which open today's weigh-in when tapped.
 //
 // Files come from the network first, so the next load with a connection gets
 // a new deploy, and every answer from the network replaces the copy. The copy
@@ -145,13 +145,28 @@ self.addEventListener("push", event => {
   }));
 });
 
-// Brings an open Baseline window forward, or opens one at the weigh-in form.
+// The page a window shows, without its query string or hash.
+function pageOf(href) {
+  const url = new URL(href);
+  url.search = url.hash = "";
+  return url.href;
+}
+
+// A tapped reminder opens today's weigh-in: the log sheet on a phone, or the
+// log form on a wider screen. A window already showing Baseline is asked to
+// open it (see the "open-log" message in app.mjs) and brought forward.
+// Otherwise a new window opens at ./#log, which app.mjs follows once the log
+// is on the page. A window on the privacy policy has no app to ask, so it's
+// left as it is.
 self.addEventListener("notificationclick", event => {
   event.notification.close();
   event.waitUntil((async () => {
     const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
-    const open = windows.find(client => client.url.startsWith(self.registration.scope));
-    if (open) return open.focus();
-    return self.clients.openWindow(new URL("./#overview", self.registration.scope).href);
+    const open = windows.find(client => pageUrls.includes(pageOf(client.url)));
+    if (open) {
+      open.postMessage({ type: "open-log" });
+      return open.focus();
+    }
+    return self.clients.openWindow(new URL("./#log", self.registration.scope).href);
   })());
 });

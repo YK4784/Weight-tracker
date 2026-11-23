@@ -25,6 +25,9 @@
   --on-danger: #ffffff;
   --shadow: 0 1px 2px rgb(23 24 27 / 6%), 0 10px 30px rgb(23 24 27 / 8%);
   --font: "Funnel Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* The log bar on phones: its 48px button, 8px above and below, a hairline,
+     and the safe area under it on phones without a home button. */
+  --bar-height: calc(65px + env(safe-area-inset-bottom));
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -59,7 +62,9 @@
 
 *, *::before, *::after { box-sizing: border-box; }
 html { background: var(--paper); }
-body { margin: 0; min-width: 300px; background: var(--paper); color: var(--ink); font: 400 1rem/1.5 var(--font); -webkit-font-smoothing: antialiased; }
+/* The viewport covers the whole screen (viewport-fit=cover in index.html), so
+   the page keeps itself clear of a landscape iPhone's notch. */
+body { margin: 0; min-width: 300px; padding-inline: env(safe-area-inset-left) env(safe-area-inset-right); background: var(--paper); color: var(--ink); font: 400 1rem/1.5 var(--font); -webkit-font-smoothing: antialiased; }
 h1, h2, p, dl, dd { margin: 0; }
 button, input { font: inherit; color: inherit; }
 button { background: none; border: 0; padding: 0; cursor: pointer; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
@@ -68,7 +73,7 @@ a { color: inherit; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 [hidden] { display: none !important; }
 .sr-only, .skip-link:not(:focus), body[data-view="log"] #entries-title { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
-.skip-link:focus { position: fixed; z-index: 9; top: 8px; left: 12px; padding: 8px 14px; background: var(--surface); }
+.skip-link:focus { position: fixed; z-index: 9; top: calc(8px + env(safe-area-inset-top)); left: max(12px, env(safe-area-inset-left)); padding: 8px 14px; background: var(--surface); }
 .icon { display: inline-block; flex: none; width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; vertical-align: middle; }
 .wrap { width: min(100% - 48px, 1040px); margin-inline: auto; }
 
@@ -145,6 +150,10 @@ body:is([data-view="log"], [data-view="settings"], [data-view="data"]) h1 { font
 .log-status span { display: block; }
 .button.quick-log { display: none; }
 body[data-view="log"] .button.quick-log { display: inline-flex; }
+/* Today's weigh-in on phones: a bar fixed at the bottom of the overview and
+   the log, which opens the log sheet. It shows only under 600px (see below). */
+.log-bar { display: none; position: fixed; z-index: 4; inset: auto 0 0; padding: 8px max(16px, env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); border-top: 1px solid var(--rule); background: var(--paper); }
+.log-bar .button { width: 100%; min-height: 48px; }
 /* The log's views, under its heading. */
 .log-tabs { margin: -4px 0 18px -12px; }
 .nav.log-tabs a { padding-inline: 12px; }
@@ -424,9 +433,33 @@ body[data-weight-unit="st"] .start-row { grid-template-columns: minmax(0, 1fr); 
 .goal-preview, .dialog-note { margin-top: 18px; padding: 12px 14px; border-radius: 8px; background: var(--paper); color: var(--ink-2); text-wrap: pretty; }
 .select-frame select { width: 100%; min-width: 0; min-height: 46px; margin: 0; padding: 10px 12px; border: 0; border-radius: 8px; outline: none; background: transparent; color: inherit; font: inherit; font-size: 1.0625rem; font-variant-numeric: tabular-nums; cursor: pointer; }
 #goal-form .edit-actions .button, #reminder-form .edit-actions .button { margin-left: auto; }
+/* The log sheet rises from the bottom of the screen. Its bottom follows the
+   bottom of the visible part of the screen, which an on-screen keyboard moves
+   up, so Save sits right above the keyboard. --view-bottom and --view-height
+   come from the visual viewport while the sheet is open (see fitSheet in
+   app.mjs). Over the keyboard it needs no room for the home indicator. */
+dialog.sheet { inset: auto 0 max(0px, calc(100% - var(--view-bottom, 100%))); width: min(100%, 480px); max-width: none; max-height: calc(var(--view-height, 100dvh) - 12px); margin: 0 auto; padding: 20px max(20px, env(safe-area-inset-right)) calc(20px + env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left)); border-width: 1px 1px 0; border-radius: 14px 14px 0 0; }
+dialog.sheet.over-keyboard { padding-bottom: 12px; }
+/* On a short screen, only the fields scroll, so the heading stays and Save
+   stays above the keyboard. They keep room for the focus ring. */
+dialog.sheet[open] { display: flex; flex-direction: column; overflow: hidden; }
+.sheet form { display: flex; flex-direction: column; min-height: 0; }
+.sheet-fields { min-height: 0; margin: -4px; padding: 4px; overflow-y: auto; }
+.sheet .dialog-heading { flex: none; margin-bottom: 14px; }
+.sheet .save-button { flex: none; }
+/* Text buttons with a 44px hit area that takes no room. */
+.sheet .text-button { padding-block: 10px; margin-block: -10px; }
+.sheet .sheet-add-note { display: block; margin: 4px 0 -10px; }
+.sheet-note { margin-top: 16px; }
+.sheet .save-button { margin-top: 20px; }
+@keyframes sheet-in { from { transform: translateY(100%); } }
+@media (prefers-reduced-motion: no-preference) {
+  dialog.sheet[open] { animation: sheet-in .2s cubic-bezier(.2, .7, .3, 1); }
+  dialog.sheet[open]::backdrop { animation: fade-in .2s; }
+}
 .formula { margin-top: 10px; color: var(--ink-3); font-size: .875rem; }
 .formula a { color: var(--accent); font-weight: 600; text-underline-offset: 2px; white-space: nowrap; }
-.toast { position: fixed; z-index: 5; left: 50%; bottom: 24px; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px 16px; width: max-content; max-width: min(40rem, calc(100% - 32px)); padding: 10px 16px; border-radius: 10px; background: var(--ink); color: var(--paper); box-shadow: var(--shadow); font-weight: 600; transform: translateX(-50%); }
+.toast { position: fixed; z-index: 5; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom)); display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px 16px; width: max-content; max-width: min(40rem, calc(100% - 32px)); padding: 10px 16px; border-radius: 10px; background: var(--ink); color: var(--paper); box-shadow: var(--shadow); font-weight: 600; transform: translateX(-50%); }
 /* A closed toast keeps its status region on the page, out of sight, so screen readers hear the next message. */
 .toast:not(.is-open) { overflow: hidden; width: 1px; height: 1px; padding: 0; box-shadow: none; clip-path: inset(50%); }
 .toast-message { flex: 1 1 auto; text-align: center; text-wrap: pretty; }
@@ -441,7 +474,7 @@ body[data-weight-unit="st"] .start-row { grid-template-columns: minmax(0, 1fr); 
 @media (pointer: coarse) {
   .toast-button { min-height: 44px; margin-block: -10px; }
 }
-.noscript { position: fixed; bottom: 0; width: 100%; padding: 14px; background: var(--accent-wash); text-align: center; }
+.noscript { position: fixed; bottom: 0; width: 100%; padding: 14px 14px calc(14px + env(safe-area-inset-bottom)); background: var(--accent-wash); text-align: center; }
 
 @media (max-width: 860px) {
   .top { grid-template-columns: minmax(0, 1fr); gap: 32px; }
@@ -461,6 +494,14 @@ body[data-weight-unit="st"] .start-row { grid-template-columns: minmax(0, 1fr); 
   .skeleton .fact .bone { margin-block: 5px; }
   .page { padding-top: 24px; }
   .page-heading { margin-bottom: 16px; }
+  /* The log bar takes the place of "Log a weigh-in" on the log. The page and
+     the toast keep clear of it. It goes while a dialog is open, or while a
+     field has the keyboard. */
+  body:is([data-view="overview"], [data-view="log"]) .log-bar { display: block; }
+  body:has(dialog[open], input:is([type="number"], [type="text"], [type="date"]):focus) .log-bar { display: none; }
+  body:is([data-view="overview"], [data-view="log"]) .page { padding-bottom: calc(48px + var(--bar-height)); }
+  body:is([data-view="overview"], [data-view="log"]) #main:not([hidden]) ~ .toast { bottom: calc(12px + var(--bar-height)); }
+  body[data-view="log"] .button.quick-log { display: none; }
   body:is([data-view="log"], [data-view="settings"], [data-view="data"]) h1 { font-size: 1.875rem; }
   .policy { padding-top: 24px; }
   .policy h1 { font-size: 1.875rem; }
