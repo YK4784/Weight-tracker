@@ -199,6 +199,17 @@ body[data-weight-unit="st"] .hero:not(.is-empty) { font-size: clamp(3.5rem, 9vw 
 .progress-note { color: var(--ink-2); text-wrap: pretty; }
 .progress-note strong { font-weight: 700; color: var(--ink); }
 .progress-note.is-pending { color: var(--ink-3); }
+/* After a break the bar stays at the last average, in grey (see showProgress). */
+.goal-progress.is-stale .progress-fill { background: var(--ink-3); }
+/* An empty log: "Log your first weigh-in" as a page heading in the hero's
+   place, over one line on the average. The rest of the overview waits for a
+   weigh-in, so the line under the top is the only rule above Body fat. */
+#main[data-status="empty"] #avg-title { font-size: 2.25rem; font-weight: 700; line-height: 1.1; letter-spacing: -.025em; color: var(--ink); text-wrap: balance; }
+#main[data-status="empty"] .hero-note { max-width: 34rem; margin-top: 12px; font-size: 1.125rem; text-wrap: pretty; }
+#main[data-status="empty"] .body-fat { margin-top: 0; border-top: 0; }
+/* After a break: the last average, in grey, and when it was. */
+#main[data-status="lapsed"] :is(.hero, .hero-unit) { color: var(--ink-3); }
+#main[data-status="lapsed"] .hero-note { max-width: 34rem; text-wrap: pretty; }
 /* A caution about fast loss, as quiet as the line above it. */
 .progress-caution { margin-top: 8px; color: var(--ink-2); text-wrap: pretty; }
 .facts { display: flex; flex-wrap: wrap; gap: 16px 48px; margin-top: 32px; padding-top: 20px; border-top: 1px solid var(--rule); }
@@ -257,6 +268,7 @@ body[data-weight-unit="st"] .hero:not(.is-empty) { font-size: clamp(3.5rem, 9vw 
 .check-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .weigh-in-check + :is(.field-label, .field-head) { margin-top: 16px; }
 .form-hint { margin-top: 10px; font-size: .875rem; color: var(--ink-3); text-align: center; text-wrap: pretty; }
+.form-hint:empty { display: none; }
 .text-button, .text-link { color: var(--accent); font-weight: 700; text-decoration: underline 1px transparent; text-underline-offset: 3px; }
 .text-button:hover, .text-link:hover { text-decoration-color: currentColor; }
 
@@ -371,6 +383,7 @@ tbody:first-of-type .month-row th { padding-top: 20px; }
 /* Body fat: below the log, so the weight stays the focus of the overview. */
 .body-fat { margin-top: 48px; padding-top: 36px; border-top: 1px solid var(--rule); }
 .fat-lead { max-width: 60ch; margin-top: 10px; color: var(--ink-3); text-wrap: pretty; }
+.fat-invite { color: var(--ink-2); }
 .fat-figures { margin-top: 14px; }
 .chart-wrap.fat-chart { height: clamp(180px, 20vw, 240px); }
 .body-fat .table-wrap { margin-top: 18px; }
@@ -535,6 +548,7 @@ dialog.sheet[open] { display: flex; flex-direction: column; overflow: hidden; }
   body:is([data-view="overview"], [data-view="log"]) #main:not([hidden]) ~ .toast { bottom: calc(12px + var(--bar-height)); }
   body[data-view="log"] .button.quick-log { display: none; }
   body:is([data-view="log"], [data-view="settings"], [data-view="data"], [data-view="first-run"]) h1 { font-size: 1.875rem; }
+  #main[data-status="empty"] #avg-title { font-size: 1.875rem; }
   .policy { padding-top: 24px; }
   .policy h1 { font-size: 1.875rem; }
   /* A name over what it covers. */

@@ -1,4 +1,4 @@
-import { CM_PER_IN, CONSENT_VERSION, FAST_LOSS_DAYS, FORECAST_MAX_DAYS, GOAL_MILESTONES, GOAL_RATE_CAP, KG_PER_LB, OVERALL_MIN_DAYS, QUEUEABLE_OPS, RATE_DAYS, RATE_MIN_ENTRIES, RATE_MIN_SPAN, SEXES, WINDOW_DAYS, applyOps, averageChanges, bmi, bodyFat, bodyFatChange, bodyFatHistory, calculateRate, changeTarget, calculateTrend, checkWeighIn, cleanNote, dateOf, dayOf, defaultUnits, fastGoalRate, fastLossCaution, forecastGoal, formatAmount, formatWaist, formatWeight, fromTenths, goalProgress, goalRateAllowed, goalRateLimit, groupByMonth, hasConsent, heightParts, localToday, maxGoalRate, monthlyReports, normalizeGoal, normalizeState, oneDecimal, overallRate, positive, prettyDate, recentRange, roundHeight, roundWaist, roundWeight, shiftDate, spokenHeight, spokenWeight, toTenths, todayHeading, todayLabel, validDate, validWaist, waistParts, waistTenths, weighInQuestion, weightParts } from "./model.mjs";
+import { CM_PER_IN, CONSENT_VERSION, FAST_LOSS_DAYS, FORECAST_MAX_DAYS, GOAL_MILESTONES, GOAL_RATE_CAP, KG_PER_LB, OVERALL_MIN_DAYS, QUEUEABLE_OPS, RATE_DAYS, RATE_MIN_ENTRIES, RATE_MIN_SPAN, SEXES, WINDOW_DAYS, applyOps, averageChanges, bmi, bodyFat, bodyFatChange, bodyFatHistory, calculateRate, changeTarget, calculateTrend, checkWeighIn, cleanNote, dateOf, dayOf, defaultUnits, fastGoalRate, fastLossCaution, forecastGoal, formatAmount, formatWaist, formatWeight, fromTenths, goalProgress, goalRateAllowed, goalRateLimit, groupByMonth, hasConsent, heightParts, localToday, logStatus, maxGoalRate, monthlyReports, normalizeGoal, normalizeState, oneDecimal, overallRate, positive, prettyDate, recentRange, roundHeight, roundWaist, roundWeight, shiftDate, spokenHeight, spokenWeight, toTenths, todayHeading, todayLabel, validDate, validWaist, waistParts, waistTenths, weeklyTrendShown, weighInQuestion, weightParts } from "./model.mjs";
 import { BodyFatChart, TrendChart } from "./chart.mjs";
 import { claimLegacyLog, clearDeviceData, clearLogCache, fastLossHiddenKeyFor, hasLegacyLog, lastUser, readLogCache, readOutbox, signOutWarning, storageKeyFor, writeLogCache, writeOutbox } from "./account.mjs";
 import { csvFileName, exportJson, jsonFileName, weighInsCsv } from "./export.mjs";
@@ -48,6 +48,7 @@ let deleting = false;
 let trend;
 let weeklyRate; // calculateRate for today, or null.
 let progress; // goalProgress for today's average, or null without a goal.
+let status; // logStatus for today: whether the log is empty, active or back after a break.
 let fat = []; // bodyFatHistory through today: each waist measurement and its estimate.
 let allWaists = false; // Whether the body fat table lists every measurement.
 let waistAutoFill = true; // The waist dialog shows the measurement on its date until the user types in it.
@@ -583,28 +584,55 @@ function showHero(average) {
   }));
 }
 
+// The top of the overview, which depends on the state of the log (see logStatus
+// in model.mjs, and data-status on #main for the styles):
+// - An empty log has "Log your first weigh-in" and a line on the average, with
+//   no facts. showPage and showBodyFat leave out the rest of the overview.
+// - After a break of 14 days or more, the hero keeps the last average in grey,
+//   says when it was, and invites the next weigh-in, which ends the state.
+// - Otherwise, today's average.
+// Nothing here blames anyone for a break.
 function showMetrics() {
   const latest = trend.readings.at(-1);
   const height = state.height;
-  showHero(trend.current?.average);
+  const { kind } = status;
+  $("main").dataset.status = kind;
+  $("avg-title").textContent = kind === "empty" ? "Log your first weigh-in" : kind === "lapsed" ? "Last 14-day average" : "14-day average";
+  $("hero").hidden = kind === "empty";
+  showHero(kind === "lapsed" ? status.lastAverage : trend.current?.average);
   const count = trend.current?.count ?? 0;
-  $("avg-detail").textContent = count ? "From " + count + (count === 1 ? " weigh-in" : " weigh-ins") + " in the last 14 days" : "No weigh-ins in the last 14 days";
+  $("avg-detail").textContent = kind === "empty" ? "Baseline averages your last " + WINDOW_DAYS + " days, so day-to-day swings don’t hide where you are."
+    : kind === "lapsed" ? "Your last weigh-in was " + shortDate(status.lastDate) + ", " + status.daysAgo + " days ago. Your average then was " + weight(status.lastAverage) + ". Log today to pick up where you left off."
+    : "From " + count + (count === 1 ? " weigh-in" : " weigh-ins") + " in the last " + WINDOW_DAYS + " days";
   showRate();
   showFigures();
+  $("facts").hidden = kind === "empty";
   setWeight("weight-value", latest?.weight);
   $("weight-detail").textContent = latest ? shortDate(latest.date) : "";
-  // Height lives in Settings. Without one, BMI offers to add it here.
+  // Height lives in Settings. Without one, BMI offers to add it here. BMI uses
+  // the latest weigh-in, so its date shows with it.
   $("bmi-fact").hidden = !state.preferences.showBmi;
-  setValue("bmi-value", bmi(latest?.weight, height));
+  const bmiValue = bmi(latest?.weight, height);
+  setValue("bmi-value", bmiValue);
+  $("bmi-detail").textContent = Number.isFinite(bmiValue) ? shortDate(latest.date) : "";
   $("bmi-add").hidden = Boolean(height);
   $("fat-fact").hidden = !state.preferences.showBodyFat;
   showFatFact();
   showGoal();
   // A quiet offer of a goal, for the first two weeks of a log without one.
-  $("goal-invite").hidden = Boolean(state.goal) || !latest || dayOf(today) - dayOf(state.entries[0].date) >= GOAL_INVITE_DAYS;
+  $("goal-invite").hidden = Boolean(state.goal) || !latest || logAge() >= NEW_LOG_DAYS;
 }
 
-const GOAL_INVITE_DAYS = 14;
+// A log's first two weeks, while the goal line under the average and the hint
+// about past dates under the log form show.
+const NEW_LOG_DAYS = 14;
+// Days since the first weigh-in, for a log that has one through today.
+const logAge = () => dayOf(today) - dayOf(state.entries[0].date);
+
+// "Your weekly trend shows after 8 weigh-ins over 2 weeks.", or "returns" for a
+// log where it has shown before, as after a break.
+const trendPending = () => "Your weekly trend " + (weeklyTrendShown(state.entries, today) ? "returns" : "shows") +
+  " after " + RATE_MIN_ENTRIES + " weigh-ins over " + RATE_MIN_SPAN / 7 + " weeks.";
 
 // Body fat as shown, to 0.1 of a percent: "24.3%".
 const percent = value => oneDecimal(value) + "%";
@@ -622,15 +650,21 @@ function waistChange(from, to) {
   return (tenths < 0 ? "−" : tenths > 0 ? "+" : "") + oneDecimal(Math.abs(tenths) / 10) + " " + waistParts(to, state.units.height)[0][1];
 }
 
-// The latest waist measurement's estimate, among the facts. The section at the
-// bottom of the overview has the rest.
+// The latest body fat estimate, among the facts, with its date, even when a
+// later waist measurement has none. Without any estimate, a dash with what one
+// needs instead of a date. The section at the bottom of the overview has the rest.
 function showFatFact() {
   const latest = fat.at(-1);
-  setText("fat-value", latest?.bodyFat == null ? null : percent(latest.bodyFat));
-  $("fat-detail").textContent = latest ? shortDate(latest.date) : "";
+  const estimate = fat.findLast(point => point.bodyFat !== null);
+  setText("fat-value", estimate ? percent(estimate.bodyFat) : null);
+  $("fat-detail").textContent = estimate ? shortDate(estimate.date) : latest ? fatNeeds(latest) : "";
   $("fat-label").textContent = latest ? "Update" : "Add";
   $("fat-label").setAttribute("aria-label", latest ? "Log a new waist measurement for body fat" : "Add a waist measurement to estimate body fat");
 }
+
+// Why a waist measurement has no estimate (see bodyFat in model.mjs), short
+// enough to sit on the fact's line on a phone.
+const fatNeeds = point => !state.sex ? "No formula chosen" : point.weight === null ? "No weigh-in near its date" : "Outside the formula’s range";
 
 // Up to two decimals, as the target rate is entered, and at least one.
 const rateFormat = new Intl.NumberFormat("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 2 });
@@ -652,44 +686,55 @@ function writeLine(element, lead, rest = "") {
   element.replaceChildren(strong, rest);
 }
 
+// After a break, the bar stays where the last average left it, in grey, and the
+// note says which day that was. `progress` stays today's, which has none, so
+// the forecast stays hidden and the next weigh-in isn't counted as reaching
+// milestones (see celebrate).
 function showProgress() {
-  $("goal-progress").hidden = !progress;
-  if (!progress) return;
+  const stale = status.kind === "lapsed";
+  const shown = stale ? goalProgress(state.goal, status.lastAverage, unit()) : progress;
+  $("goal-progress").hidden = !shown;
+  $("goal-progress").classList.toggle("is-stale", stale);
+  if (!shown) return;
   const note = $("progress-note");
-  const { current, direction } = progress;
+  const line = (lead, rest) => {
+    writeLine(note, lead, rest);
+    if (stale) note.prepend("As of " + shortDate(status.lastDate) + " · ");
+  };
+  const { current, direction } = shown;
   $("progress-track").hidden = current === null || direction === "maintain";
   note.classList.toggle("is-pending", current === null);
   if (current === null) {
-    note.textContent = "Log a weigh-in to see your progress toward " + weight(progress.goal) + ".";
+    note.textContent = "Log a weigh-in to see your progress toward " + weight(shown.goal) + ".";
     return;
   }
   if (direction === "maintain") {
-    const off = progress.difference;
-    if (off === 0) writeLine(note, "At your goal", " of " + weight(progress.goal));
-    else writeLine(note, amount(off) + (off > 0 ? " above" : " below"), " your goal of " + weight(progress.goal));
+    const off = shown.difference;
+    if (off === 0) line("At your goal", " of " + weight(shown.goal));
+    else line(amount(off) + (off > 0 ? " above" : " below"), " your goal of " + weight(shown.goal));
     return;
   }
-  const count = progress.milestones.length;
-  $("progress-fill").style.width = progress.overall * 100 + "%";
-  $("progress-track").replaceChildren($("progress-fill"), ...progress.milestones.slice(0, -1).map(milestone => {
+  const count = shown.milestones.length;
+  $("progress-fill").style.width = shown.overall * 100 + "%";
+  $("progress-track").replaceChildren($("progress-fill"), ...shown.milestones.slice(0, -1).map(milestone => {
     const tick = document.createElement("span");
     tick.className = "progress-tick";
     tick.style.left = milestone.index / count * 100 + "%";
     return tick;
   }));
   const losing = direction === "lose";
-  if (progress.reached) {
-    const past = Math.abs(progress.difference);
-    writeLine(note, "Goal reached", past ? " · " + amount(past) + (losing ? " below " : " above ") + weight(progress.goal) : "");
+  if (shown.reached) {
+    const past = Math.abs(shown.difference);
+    line("Goal reached", past ? " · " + amount(past) + (losing ? " below " : " above ") + weight(shown.goal) : "");
     return;
   }
   const details = [];
-  if (progress.behindStart) details.push(amount(progress.behindStart) + (losing ? " above" : " below") + " where you started");
+  if (shown.behindStart) details.push(amount(shown.behindStart) + (losing ? " above" : " below") + " where you started");
   else {
-    if (progress.next.index < count) details.push(amount(progress.next.toGo) + " to milestone " + progress.next.index + " of " + count);
-    details.push(Math.floor(progress.overall * 100) + "% of the way");
+    if (shown.next.index < count) details.push(amount(shown.next.toGo) + " to milestone " + shown.next.index + " of " + count);
+    details.push(Math.floor(shown.overall * 100) + "% of the way");
   }
-  writeLine(note, amount(progress.toGo) + " to go", details.map(text => " · " + text).join(""));
+  line(amount(shown.toGo) + " to go", details.map(text => " · " + text).join(""));
 }
 
 // Hiding the note about fast loss lasts for that goal, known by its start date,
@@ -764,7 +809,7 @@ function showForecast() {
       button.textContent = "Add a target rate";
       lead.replaceChildren(button, " to forecast from the pace you’re aiming for.");
     } else if (source === "current") {
-      lead.textContent = !weeklyRate ? "Your weekly trend shows after " + RATE_MIN_ENTRIES + " weigh-ins over " + RATE_MIN_SPAN / 7 + " weeks."
+      lead.textContent = !weeklyRate ? trendPending()
         : !weeklyRate.clear ? "Your weight shows no clear change over the last " + RATE_DAYS / 7 + " weeks, so there’s no date to forecast."
         : "Your weight is going " + (weeklyRate.perWeek > 0 ? "up" : "down") + " over the last " + RATE_DAYS / 7 + " weeks, " + away;
     } else {
@@ -790,10 +835,10 @@ function showForecast() {
 
 function showRate() {
   const line = $("rate-detail");
-  line.hidden = !state.entries.length;
+  line.hidden = status.kind === "empty";
   line.classList.toggle("is-pending", !weeklyRate);
   if (!weeklyRate) {
-    line.textContent = "Your weekly trend shows after " + RATE_MIN_ENTRIES + " weigh-ins over " + RATE_MIN_SPAN / 7 + " weeks.";
+    line.textContent = trendPending();
     return;
   }
   const strong = document.createElement("strong");
@@ -838,8 +883,10 @@ function figure(label, value, note = "", missing = "", quiet = false) {
 }
 
 // Changes in the average and the recent high and low, above the chart. They
-// need a weigh-in in the last 14 days, like the average itself.
+// need a weigh-in in the last 14 days, like the average itself. An empty log
+// has no Trend section at all, rather than an empty chart.
 function showFigures() {
+  $("trend").hidden = status.kind === "empty";
   $("trend-figures").hidden = !trend.current;
   if (!trend.current) return;
   const changes = averageChanges(trend, unit());
@@ -864,8 +911,11 @@ function syncEntryForm() {
   // aria-disabled keeps the button focusable when repeated presses reach today.
   $("next-day").setAttribute("aria-disabled", String(validDate(date) && date >= today));
   $("save-label").textContent = entry ? "Update entry" : "Save entry";
-  $("entry-hint").textContent = !state.entries.length ? "Your first weigh-in starts your log."
-    : entry ? "You have a weigh-in on this date." : "Choose an earlier date to add a past weigh-in.";
+  // The hint about past dates helps while the log is new, and once a date other
+  // than today is picked. After that it would sit under Save every day.
+  $("entry-hint").textContent = status.kind === "empty" ? "Your first weigh-in starts your log."
+    : entry ? "You have a weigh-in on this date."
+    : logAge() < NEW_LOG_DAYS || date !== today ? "Choose an earlier date to add a past weigh-in." : "";
 }
 
 // The weekly trend as it stood on a row's date (see showRate). Phones head the
@@ -928,11 +978,17 @@ function showTable(isLog) {
 
 // The body fat section at the bottom of the overview: the latest estimate and
 // the change since the first, a chart of every estimate, and the measurements.
+// With no weigh-ins and no measurements, the section is one line that offers
+// Log waist.
 function showBodyFat() {
   const estimates = fat.filter(point => point.bodyFat !== null);
   const latest = estimates.at(-1);
+  const invite = status.kind === "empty" && !fat.length;
+  $("fat-invite").hidden = !invite;
+  $("fat-head").hidden = invite;
+  $("fat-note").hidden = invite;
   const lead = $("fat-lead");
-  lead.hidden = estimates.length > 0;
+  lead.hidden = invite || estimates.length > 0;
   lead.textContent = !fat.length ? "Measure your waist now and then and log it here. Baseline estimates your body fat from it and your 14-day average."
     : !state.sex ? "Choose a formula in Log waist to see your body fat."
     : "Your body fat shows once a waist measurement has a weigh-in in the 14 days up to it.";
@@ -1091,7 +1147,8 @@ function showPage() {
   $("overview-view").hidden = !overview;
   showFirstRun(firstRun);
   $("log-tabs").hidden = !isLog;
-  $("entries").hidden = !(overview || view === "entries");
+  // An empty log's overview leaves out Recent entries; the log keeps its line about them.
+  $("entries").hidden = !(overview && status.kind !== "empty" || view === "entries");
   $("months").hidden = view !== "months";
   $("settings-view").hidden = section !== "settings";
   $("data-view").hidden = section !== "data";
@@ -1169,6 +1226,7 @@ function drawChart() {
 
 function render() {
   trend = calculateTrend(state.entries, today);
+  status = logStatus(state.entries, today);
   weeklyRate = calculateRate(state.entries, today, unit());
   progress = goalProgress(state.goal, trend.current?.average, unit());
   fat = bodyFatHistory(state.entries, state.waists, state.sex, today);
@@ -1900,7 +1958,7 @@ function showReminder() {
   $("reminder-value").textContent = reminder ? hourLabel(reminder.hour) : "Off";
   $("reminder-value").classList.toggle("is-empty", !reminder);
   // One short note at most; the dialog has the details.
-  $("reminder-detail").textContent = !reminder ? "" : !onThisDevice() ? "Not this device"
+  $("reminder-detail").textContent = !reminder ? "" : !onThisDevice() ? "Reminders go to another device"
     : reminder.timeZone !== deviceZone() ? zoneName(reminder.timeZone) + " time" : "";
   $("reminder-label").textContent = reminder ? "Edit" : "Set";
   $("reminder-label").setAttribute("aria-label", reminder ? "Edit your daily reminder at " + hourLabel(reminder.hour) : "Set a daily reminder");

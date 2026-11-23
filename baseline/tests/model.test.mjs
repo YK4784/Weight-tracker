@@ -1082,3 +1082,53 @@ test("the question under the weight field names the reference and what each butt
   // A date in another year shows its year.
   assert.equal(ask(79, "kg", checkLog(["2025-12-30", 85]), "2026-01-02").text.includes("(85.0 kg on Dec 30, 2025)"), true);
 });
+
+test("the overview's state: an empty log, one with a weigh-in in the last 14 days, and one back after a break", async () => {
+  const { logStatus } = await import("../dist/model.mjs");
+  const today = "2026-11-23";
+  const log = (...items) => items.map(([date, weight]) => ({ date, weight, note: null }));
+  assert.deepEqual(logStatus([], today), { kind: "empty", lastDate: null, daysAgo: null, lastAverage: null });
+  // A weigh-in today, or 13 days ago, keeps the log active.
+  assert.deepEqual(logStatus(log(["2026-11-20", 85], ["2026-11-23", 84]), today), { kind: "active", lastDate: "2026-11-23", daysAgo: 0, lastAverage: 84.5 });
+  assert.deepEqual(logStatus(log(["2026-11-10", 85]), today), { kind: "active", lastDate: "2026-11-10", daysAgo: 13, lastAverage: 85 });
+  // Exactly 14 days ago is outside the 14 days through today, which have no average.
+  const fortnight = log(["2026-11-01", 86], ["2026-11-09", 85]);
+  assert.deepEqual(logStatus(fortnight, today), { kind: "lapsed", lastDate: "2026-11-09", daysAgo: 14, lastAverage: 85.5 });
+  assert.equal(calculateTrend(fortnight, today).current, null);
+  // 23 days: the average is the one on the last weigh-in's date, from the 14 days up to it.
+  const lapsed = log(["2026-10-10", 90], ["2026-10-20", 87], ["2026-10-25", 86.4], ["2026-10-31", 86]);
+  assert.deepEqual(logStatus(lapsed, today), { kind: "lapsed", lastDate: "2026-10-31", daysAgo: 23, lastAverage: (8700 + 8640 + 8600) / 300 });
+  // Weigh-ins dated after today don't count until their day comes.
+  assert.deepEqual(logStatus(log(["2026-11-24", 85]), today), { kind: "empty", lastDate: null, daysAgo: null, lastAverage: null });
+  assert.equal(logStatus(log(["2026-11-24", 85]), "2026-11-24").kind, "active");
+  assert.deepEqual(logStatus([...lapsed, ...log(["2026-11-24", 85])], today), logStatus(lapsed, today));
+  // The first weigh-in after a break ends it.
+  assert.equal(logStatus([...lapsed, ...log([today, 85.5])], today).kind, "active");
+});
+
+test("the weekly trend has shown once 8 weigh-ins fit in 3 weeks and span 2", async () => {
+  const { weeklyTrendShown } = await import("../dist/model.mjs");
+  const daily = (from, count) => Array.from({ length: count }, (_, i) => entry(from + i, 80));
+  // 8 weigh-ins over 13 days, then and later; over 12 days isn't enough.
+  const spread = [0, 2, 4, 6, 8, 10, 12, 13].map(day => entry(day, 80));
+  assert.equal(weeklyTrendShown(spread, dateOf(first + 13)), true);
+  assert.equal(weeklyTrendShown(spread, dateOf(first + 300)), true);
+  assert.equal(weeklyTrendShown(spread, dateOf(first + 12)), false);
+  assert.equal(weeklyTrendShown(daily(0, 13), dateOf(first + 300)), false);
+  // 8 weigh-ins over 21 days don't fit in the 3 weeks.
+  assert.equal(weeklyTrendShown([0, 3, 6, 9, 12, 15, 18, 21].map(day => entry(day, 80)), dateOf(first + 21)), false);
+  assert.equal(weeklyTrendShown([], dateOf(first)), false);
+  // The same answer as asking calculateRate on every day, for logs with gaps.
+  let seed = 7;
+  const random = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  for (let trial = 0; trial < 60; trial++) {
+    const chance = 0.15 + random() * 0.5;
+    const entries = Array.from({ length: 80 }, (_, i) => i).filter(() => random() < chance).map(day => entry(day, 80 + random()));
+    for (const end of [10, 25, 40, 79]) {
+      const throughDate = dateOf(first + end);
+      let shown = false;
+      for (let day = 0; day <= end; day++) shown ||= calculateRate(entries, dateOf(first + day)) !== null;
+      assert.equal(weeklyTrendShown(entries, throughDate), shown, "trial " + trial + " through day " + end);
+    }
+  }
+});

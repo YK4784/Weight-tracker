@@ -734,6 +734,44 @@ export function calculateRate(entries, throughDate, unit = "kg") {
   return { perWeek, clear: perWeek !== 0 && Math.abs(slope) > RATE_CLEAR_ERRORS * error, count: n };
 }
 
+// Whether the weekly trend (see calculateRate) has shown on any day through
+// `throughDate`: whether some RATE_MIN_ENTRIES weigh-ins fit in RATE_DAYS days
+// and span at least RATE_MIN_SPAN of them. If it showed on any day, it showed
+// on the date of the last weigh-in in that day's window, so only those dates
+// need checking. The input is a normalized log (one entry per date, ascending).
+export function weeklyTrendShown(entries, throughDate) {
+  const days = entries.filter(entry => entry.date <= throughDate).map(entry => dayOf(entry.date));
+  let first = 0;
+  for (let last = 0; last < days.length; last++) {
+    while (days[first] <= days[last] - RATE_DAYS) first++;
+    if (last - first + 1 >= RATE_MIN_ENTRIES && days[last] - days[first] >= RATE_MIN_SPAN - 1) return true;
+  }
+  return false;
+}
+
+// What the overview has to show on `today`:
+// - "empty": no weigh-ins through today.
+// - "lapsed": weigh-ins, but none in the WINDOW_DAYS days through today, so
+//   there's no 14-day average today.
+// - "active": a weigh-in in those days, and so an average today.
+// `lastDate` is the last weigh-in's date, `daysAgo` how many days before today
+// it was, and `lastAverage` the 14-day average in kg on that date; all three
+// are null for an empty log. Weigh-ins dated after today, which a device in a
+// time zone ahead can save, don't count until their day comes, as in
+// calculateTrend. The input is a normalized log (one entry per date, ascending).
+export function logStatus(entries, today) {
+  const past = entries.filter(entry => entry.date <= today);
+  if (!past.length) return { kind: "empty", lastDate: null, daysAgo: null, lastAverage: null };
+  const lastDate = past.at(-1).date;
+  const daysAgo = dayOf(today) - dayOf(lastDate);
+  return {
+    kind: daysAgo < WINDOW_DAYS ? "active" : "lapsed",
+    lastDate,
+    daysAgo,
+    lastAverage: calculateTrend(past, lastDate).current.average
+  };
+}
+
 // A change per day in kg as a weekly rate, rounded to the 0.1 of `unit` shown.
 // For kg this is Math.round(perDay * 70) / 10.
 function weeklyTenths(perDay, unit) {

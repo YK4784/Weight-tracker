@@ -141,3 +141,11 @@ test("the charts leave vertical swipes to the page, and note marks have a key in
   assert.equal([...app.matchAll(/Chart\(\{ cover: "log-bar" \}\)/g)].length, 2);
   assert.match(page, /id="log-bar"/);
 });
+
+test("nothing the app says blames anyone for a break in weighing", async () => {
+  // The welcome-back state after a break, and everything else, keeps to plain facts.
+  for (const name of ["index.html", "app.mjs", "model.mjs"]) {
+    const source = await read(name);
+    assert.doesNotMatch(source, /\bmissed\b|\bstreaks?\b|\bfell off\b|\bback on track\b|\bdon[’']t give up\b/i, name);
+  }
+});

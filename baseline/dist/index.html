@@ -119,7 +119,9 @@
     </section>
   </main>
 
-  <main class="wrap page" id="main" tabindex="-1" hidden>
+  <!-- data-status is logStatus's kind (see showMetrics in app.mjs): "active",
+       "lapsed" (no weigh-in in the last 14 days) or "empty" (no weigh-ins). -->
+  <main class="wrap page" id="main" tabindex="-1" data-status="active" hidden>
     <div class="page-heading">
       <div>
         <h1 id="page-title">Overview</h1>
@@ -170,10 +172,10 @@
             <p class="progress-note" id="progress-note"></p>
             <p class="progress-caution" id="fast-loss" hidden><span id="fast-loss-text"></span> <button class="text-button" type="button" id="hide-fast-loss" aria-label="Hide the note about fast loss">Hide</button></p>
           </div>
-          <dl class="facts">
+          <dl class="facts" id="facts">
             <div class="fact"><dt>Latest weigh-in</dt><dd><span class="fact-value" id="weight-value">—</span><span class="fact-note" id="weight-detail"></span></dd></div>
             <div class="fact"><dt>Goal</dt><dd><span class="fact-value" id="goal-value">—</span><button class="text-button" type="button" data-goal id="goal-label">Set</button></dd></div>
-            <div class="fact" id="bmi-fact"><dt>BMI</dt><dd><span class="fact-value" id="bmi-value">—</span><button class="text-button" type="button" data-profile id="bmi-add" aria-label="Add your height for BMI" hidden>Add height</button></dd></div>
+            <div class="fact" id="bmi-fact"><dt>BMI</dt><dd><span class="fact-value" id="bmi-value">—</span><span class="fact-note" id="bmi-detail"></span><button class="text-button" type="button" data-profile id="bmi-add" aria-label="Add your height for BMI" hidden>Add height</button></dd></div>
             <div class="fact" id="fat-fact"><dt>Body fat</dt><dd><span class="fact-value" id="fat-value">—</span><span class="fact-note" id="fat-detail"></span><button class="text-button" type="button" data-waist id="fat-label">Add</button></dd></div>
           </dl>
         </section>
@@ -234,7 +236,7 @@
         </div>
       </section>
 
-      <section class="trend" aria-labelledby="trend-title">
+      <section class="trend" id="trend" aria-labelledby="trend-title">
         <div class="section-head">
           <h2 id="trend-title">Trend</h2>
           <div id="ranges" class="ranges" role="group" aria-label="Chart date range">
@@ -282,10 +284,12 @@
     </section>
 
     <section class="body-fat" id="body-fat" aria-labelledby="fat-title">
-      <div class="section-head">
+      <div class="section-head" id="fat-head">
         <h2 id="fat-title">Body fat</h2>
         <button class="text-button" type="button" data-waist>Log waist</button>
       </div>
+      <!-- In place of the rest while the log and the measurements are empty. -->
+      <p class="fat-invite" id="fat-invite" hidden>You can track your waist too. <button class="text-button" type="button" data-waist>Log waist</button></p>
       <p class="fat-lead" id="fat-lead" hidden></p>
       <dl class="figures fat-figures" id="fat-figures" hidden></dl>
       <div class="chart-wrap fat-chart" id="fat-chart-wrap" tabindex="0" role="group" aria-label="Body fat chart. Use the left and right arrow keys to inspect measurements." hidden>
@@ -301,7 +305,7 @@
         </table>
       </div>
       <button class="small-button waist-more" type="button" id="waist-more" aria-controls="waist-table" aria-expanded="false" hidden>Show all</button>
-      <p class="note">An estimate from the U.S. Army’s one-site tape formula, using your waist at the navel and your 14-day average on the day you measured. A tape estimate can be several points off a lab scan, so it’s most useful for following your own trend.</p>
+      <p class="note" id="fat-note">An estimate from the U.S. Army’s one-site tape formula, using your waist at the navel and your 14-day average on the day you measured. A tape estimate can be several points off a lab scan, so it’s most useful for following your own trend.</p>
     </section>
 
     <!-- Settings: a section per topic, each a list of rows between hairlines. -->
