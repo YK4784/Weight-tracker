@@ -244,6 +244,7 @@
           </div>
         </div>
         <div class="trend-figures" id="trend-figures" hidden>
+          <p class="figures-note" id="figures-as-of" hidden></p>
           <dl class="figures" id="change-figures"></dl>
           <p class="figures-pending" id="change-pending" hidden>Your 7-day change shows once your log is a week old.</p>
           <dl class="figures" id="range-figures"></dl>
@@ -257,9 +258,9 @@
         <span class="sr-only" role="status" id="chart-announce"></span>
         <div id="trend-forecast" hidden>
           <p class="forecast-words" id="forecast-words"></p>
-          <p class="note" id="forecast-method">The forecast carries on your weekly trend from today’s 14-day average. The shaded band is the likely range: if the trend holds, the average lands inside it 8 times in 10, given how much your weigh-ins swing from day to day. It can’t foresee a change in what you eat or do, and it looks at most 12 weeks ahead, because weight change usually slows over months.</p>
+          <p class="note" id="forecast-method">The forecast carries on your weekly trend from the 14-day average on your last weigh-in. The shaded band is the likely range: if the trend holds, the average lands inside it 8 times in 10, given how much your weigh-ins swing from day to day. It can’t foresee a change in what you eat or do, and it looks at most 12 weeks ahead, because weight change usually slows over months.</p>
         </div>
-        <p class="note">Each point on the line averages the weigh-ins from that day and the 13 days before it. Days without a weigh-in are skipped. Each change compares today’s average with the one 7, 30 or 90 days earlier, or with your first weigh-in for all time.</p>
+        <p class="note">On a day with a weigh-in, the line averages the weigh-ins from that day and the 13 days before it. A day without one keeps the last weigh-in’s average, for up to 13 days, so the line holds flat when weigh-ins stop. It’s dashed there, and where an average rests on fewer than 4 weigh-ins. Each change compares the average on your last weigh-in with the one 7, 30 or 90 days before it, or with your first weigh-in for all time.</p>
       </section>
     </div>
 
@@ -281,7 +282,7 @@
       <h2 class="sr-only" id="months-title">Monthly summary</h2>
       <ol class="month-list" id="month-list"></ol>
       <p class="table-empty" id="months-empty" hidden>Your monthly summary will appear here after your first weigh-in.</p>
-      <p class="note" id="months-note">Each month starts with the 14-day average as it began and ends with the average on its last day, so it picks up where the month before ended. When the log starts partway through a month, or has a break of more than two weeks, a date shows which day an average comes from. The weekly trend is as it stood on the month’s last day, and milestones show in the month your average first reached them.</p>
+      <p class="note" id="months-note">Each month starts with the 14-day average as it began and ends with the average on its last weigh-in, so it picks up where the month before ended. When an average comes from a weigh-in on another day, as when a month’s last weigh-in comes before its last day or the log starts partway through a month, a date shows which day. The weekly trend is as it stood on the month’s last weigh-in, and milestones show in the month your average first reached them.</p>
     </section>
 
     <section class="body-fat" id="body-fat" aria-labelledby="fat-title">

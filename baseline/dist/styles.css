@@ -21,6 +21,9 @@
   --accent-wash: #e7ebfc;
   /* The trend forecast's likely range: the accent, thin enough for grid lines to show through. */
   --band: rgb(36 67 217 / 12%);
+  /* The trend line where it says less (see lineParts in chart.mjs): the accent at 65%
+     on paper, which still keeps 3:1 against it. */
+  --accent-thin: #6e81e1;
   --on-accent: #ffffff;
   --dot: #8a867d;
   --danger: #b3261e;
@@ -45,6 +48,7 @@
     --accent-strong: #8b9ff8;
     --accent-wash: #1f2647;
     --band: rgb(112 136 245 / 17%);
+    --accent-thin: #4f5fa7;
     --on-accent: #0b0e26;
     --dot: #7d7a73;
     --danger: #f2877e;
@@ -324,6 +328,8 @@ body[data-weight-unit="st"] .hero:not(.is-empty) { font-size: clamp(3.5rem, 9vw 
 .trend-figures { display: flex; flex-wrap: wrap; gap: 16px 64px; margin-top: 14px; padding-bottom: 24px; border-bottom: 1px solid var(--rule); }
 .figures { display: flex; flex-wrap: wrap; gap: 16px 40px; }
 .figures-pending { align-self: center; color: var(--ink-3); }
+/* When the figures are as of an earlier weigh-in, a line over them says which. */
+.figures-note { flex-basis: 100%; margin-bottom: -4px; color: var(--ink-3); font-size: .9375rem; }
 .trend-figures + .legend { margin-top: 20px; }
 .legend { display: flex; flex-wrap: wrap; gap: 6px 22px; margin-top: 6px; color: var(--ink-2); font-size: .9375rem; }
 .legend span { display: inline-flex; align-items: center; gap: 8px; }
@@ -344,6 +350,10 @@ body[data-weight-unit="st"] .hero:not(.is-empty) { font-size: clamp(3.5rem, 9vw 
 :is(#trend-chart, #fat-chart) .grid { stroke: var(--rule); stroke-width: 1; }
 #trend-chart .avg { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 #trend-chart .avg-single { fill: var(--accent); }
+/* Where the average rests on fewer than 4 weigh-ins, or holds after the last
+   weigh-in, the line is dashed and lighter. */
+#trend-chart .avg-thin { fill: none; stroke: var(--accent-thin); stroke-width: 2; stroke-dasharray: 5 4; stroke-linejoin: round; }
+#trend-chart .avg-single.thin { fill: var(--accent-thin); }
 #trend-chart .dot { fill: var(--dot); stroke: var(--paper); stroke-width: 3; paint-order: stroke; }
 #trend-chart .end-dot, #trend-chart .cursor-avg { fill: var(--accent); stroke: var(--paper); stroke-width: 4; paint-order: stroke; }
 #trend-chart .cursor-dot { fill: var(--ink-2); stroke: var(--paper); stroke-width: 4; paint-order: stroke; }
@@ -612,6 +622,7 @@ dialog.sheet[open] { display: flex; flex-direction: column; overflow: hidden; }
   .month-figures .fact-value { font-size: 1rem; }
   .month-figures + .month-note { margin-top: 0; padding-top: 10px; border-top: 1px solid var(--rule); }
   .figures-pending { padding-block: 10px; border-top: 1px solid var(--rule); }
+  .figures-note { margin-bottom: 0; padding-bottom: 10px; }
   .fact { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding-block: 10px; border-top: 1px solid var(--rule); }
   .fact dt { flex: none; font-size: 1rem; }
   .fact dd { justify-content: flex-end; margin-top: 0; }

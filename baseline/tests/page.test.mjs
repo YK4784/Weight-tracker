@@ -142,6 +142,17 @@ test("the charts leave vertical swipes to the page, and note marks have a key in
   assert.match(page, /id="log-bar"/);
 });
 
+test("the trend line's thin parts are dashed and lighter, in both color schemes", async () => {
+  const css = await read("styles.css");
+  const light = /^:root \{[^}]*\}/m.exec(css)[0];
+  const dark = /@media \(prefers-color-scheme: dark\) \{\s*:root \{[^}]*\}/.exec(css)[0];
+  for (const scheme of [light, dark]) assert.match(scheme, /--accent-thin: #[0-9a-f]{6};/);
+  const thin = /^#trend-chart \.avg-thin \{[^}]*\}/m.exec(css)[0];
+  assert.match(thin, /stroke: var\(--accent-thin\);/);
+  assert.match(thin, /stroke-dasharray: \d/);
+  assert.match(css, /^#trend-chart \.avg-single\.thin \{ fill: var\(--accent-thin\); \}/m);
+});
+
 test("nothing the app says blames anyone for a break in weighing", async () => {
   // The welcome-back state after a break, and everything else, keeps to plain facts.
   for (const name of ["index.html", "app.mjs", "model.mjs"]) {

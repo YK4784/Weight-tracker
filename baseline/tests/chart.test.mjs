@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { nearestIndex, rangeStart, separateLabel, stoneTick, yDomain } from "../dist/chart.mjs";
-import { dateOf, dayOf } from "../dist/model.mjs";
+import { lineParts, nearestIndex, rangeStart, separateLabel, stoneTick, yDomain } from "../dist/chart.mjs";
+import { THIN_COUNT, calculateTrend, dateOf, dayOf } from "../dist/model.mjs";
 
 const points = [{ average: 70, weight: 70.5 }, { average: 69.8, weight: null }, { average: 69.6, weight: 69.2 }];
 
@@ -81,4 +81,45 @@ test("a range starts as far back as it goes, but not before the first average", 
   assert.equal(rangeStart(trend, "all", today), end - 50);
   assert.equal(rangeStart({ days: [] }, "30", today), end, "an empty log");
   assert.equal(dateOf(rangeStart(trend, "14", today)), "2026-11-11");
+});
+
+// The line's pieces for weigh-ins on `days` (counted from 1 Mar 2026), through `through`.
+const partsFor = (days, through) => {
+  const start = dayOf("2026-03-01");
+  const entries = days.map(day => ({ date: dateOf(start + day), weight: 80, note: null }));
+  return lineParts(calculateTrend(entries, dateOf(start + through)).days)
+    .map(part => [part.thin, part.points[0].day - start, part.points.at(-1).day - start]);
+};
+
+test("the line is thin until its average rests on 4 weigh-ins", () => {
+  assert.equal(THIN_COUNT, 4);
+  // Daily weigh-ins: days 0–2 have 1–3 of them, so the line into day 3 is the last thin piece.
+  assert.deepEqual(partsFor([0, 1, 2, 3, 4, 5, 6, 7, 8, 9], 9), [[true, 0, 3], [false, 3, 9]]);
+  // Weekly weigh-ins never have more than 2 in 14 days.
+  assert.deepEqual(partsFor([0, 7, 14, 21, 28], 28), [[true, 0, 28]]);
+  // As older weigh-ins leave the window, a sparse log can thin out again: day
+  // 16's average has days 3, 9 and 16. Days 10–15 hold day 9's, from 5.
+  assert.deepEqual(partsFor([0, 1, 2, 3, 9, 16], 16), [[true, 0, 3], [false, 3, 15], [true, 15, 16]]);
+});
+
+test("after a run's last weigh-in, the line is thin and holds, and a gap of 14 days breaks it", () => {
+  // Daily to day 9, then three days without one: thin from day 9.
+  assert.deepEqual(partsFor([0, 1, 2, 3, 4, 5, 6, 7, 8, 9], 12), [[true, 0, 3], [false, 3, 9], [true, 9, 12]]);
+  // Days 10–22 hold day 9's average, day 23 has none, and a new run starts on day 30.
+  assert.deepEqual(partsFor([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 30, 31, 32, 33, 34], 34), [[true, 0, 3], [false, 3, 9], [true, 9, 22], [true, 30, 33], [false, 33, 34]]);
+  // Days without a weigh-in inside a run aren't after its last one.
+  assert.deepEqual(partsFor([0, 1, 2, 3, 4, 5, 9, 10], 10), [[true, 0, 3], [false, 3, 10]]);
+});
+
+test("a range that shows only the days after a weigh-in draws them thin, and one day is a piece of its own", () => {
+  const start = dayOf("2026-03-01");
+  const entries = [0, 1, 2, 3, 4].map(day => ({ date: dateOf(start + day), weight: 80, note: null }));
+  const held = calculateTrend(entries, dateOf(start + 10)).days.filter(point => point.day >= start + 6);
+  assert.deepEqual(lineParts(held).map(part => [part.thin, part.points.length]), [[true, 5]]);
+  assert.deepEqual(lineParts(held.slice(-1)).map(part => [part.thin, part.points.length]), [[true, 1]]);
+  assert.deepEqual(partsFor([0], 0), [[true, 0, 0]], "a first weigh-in");
+  assert.deepEqual(lineParts([]), []);
+  // Neighbouring pieces share a point, so the line stays joined.
+  const parts = lineParts(calculateTrend(entries, dateOf(start + 8)).days);
+  for (let i = 1; i < parts.length; i++) assert.equal(parts[i].points[0], parts[i - 1].points.at(-1));
 });

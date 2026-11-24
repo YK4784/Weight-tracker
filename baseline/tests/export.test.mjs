@@ -57,6 +57,13 @@ test("each weigh-in is a row, oldest first, with its weight as stored and as sho
   assert.equal(rows.every(row => row.length === 5), true);
 });
 
+test("the CSV's average is the 14-day mean on each weigh-in's own date, with a row only for weigh-ins", () => {
+  // Days without a weigh-in keep the last one's average on screen, but they have no row here.
+  const gappy = normalizeState({ entries: [{ date: "2026-11-01", weight: 85 }, { date: "2026-11-10", weight: 84 }, { date: "2026-11-20", weight: 82 }] });
+  const rows = parseCsv(weighInsCsv(gappy).slice(1)).slice(1);
+  assert.deepEqual(rows.map(row => [row[0], row[4]]), [["2026-11-01", "85.00"], ["2026-11-10", "84.50"], ["2026-11-20", "83.00"]], "Nov 1 has left Nov 20's window");
+});
+
 test("the shown weight follows the unit, including stones and pounds", () => {
   const weightOn = (unit, index = 0) => parseCsv(weighInsCsv(log(), unit).slice(1))[index + 1][2];
   assert.equal(weightOn("kg"), "85.0 kg");
