@@ -760,7 +760,9 @@ function showProgress() {
   const details = [];
   if (shown.behindStart) details.push(amount(shown.behindStart) + (losing ? " above" : " below") + " where you started");
   else {
-    if (shown.next.index < count) details.push(amount(shown.next.toGo) + " to milestone " + shown.next.index + " of " + count);
+    // The next milestone by its weight too, which is what the scale will read,
+    // kept on one line: "9 st 9.0 lb" shouldn't wrap before its "lb".
+    if (shown.next.index < count) details.push(amount(shown.next.toGo) + " to milestone " + shown.next.index + " of " + count + ", at " + weight(shown.next.weight).replaceAll(" ", "\u00a0"));
     details.push(Math.floor(shown.overall * 100) + "% of the way");
   }
   line(amount(shown.toGo) + " to go", details.map(text => " · " + text).join(""));
@@ -803,9 +805,12 @@ function duration(days) {
   return "about " + Math.round(days / 30.44) + " months";
 }
 
-function expected(row) {
+// When a row of the forecast is due. `soon` adds how long until then, as for
+// the next milestone: "Nov 26 · in 2 days".
+function expected(row, soon = false) {
   if (!row.date) return "Over " + FORECAST_MAX_DAYS / 365 + " years";
-  return row.days ? shortDate(row.date) : "Any day now";
+  if (!row.days) return "Any day now";
+  return shortDate(row.date) + (soon ? " · " + (row.days === 1 ? "tomorrow" : "in " + duration(row.days)) : "");
 }
 
 // The forecast shows only while there is distance left to cover.
@@ -862,8 +867,9 @@ function showForecast() {
     lead.replaceChildren(pace + "you’d reach " + weight(progress.goal) + " around ", strong, ", in " + duration(last.days) + ".");
   }
   const count = progress.milestones.length;
-  $("forecast-rows").innerHTML = rows.map(row => "<tr><td>" + (row.index === count ? "Goal" : row.index + " of " + count) + "</td>" +
-    '<td class="num">' + weightCell(row.weight) + '</td><td class="num">' + expected(row) + "</td></tr>").join("");
+  // The first row is the next milestone. The goal's time to go is in the lead.
+  $("forecast-rows").innerHTML = rows.map((row, i) => "<tr><td>" + (row.index === count ? "Goal" : row.index + " of " + count) + "</td>" +
+    '<td class="num">' + weightCell(row.weight) + '</td><td class="num">' + expected(row, i === 0) + "</td></tr>").join("");
 }
 
 // The change in the average that sits beside the weekly trend under it.
