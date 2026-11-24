@@ -12,8 +12,10 @@
   --paper: #f6f5f1;
   --surface: #ffffff;
   --ink: #17181b;
-  --ink-2: #4d4f55;
-  --ink-3: #696b71;
+  /* The secondary inks are warm greys, like the paper and the hairlines. Each
+     keeps the contrast of the blue-greys they replaced: 7.5:1 and 4.9:1 on the paper. */
+  --ink-2: #544e49;
+  --ink-3: #706a65;
   --rule: #e2e0d9;
   --field-border: #96938b;
   --accent: #2443d9;
@@ -191,7 +193,7 @@ body[data-view="log"] .button.quick-log { display: inline-flex; }
 /* Summary + entry */
 .top { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 360px); align-items: start; gap: 40px 64px; padding-bottom: 40px; border-bottom: 1px solid var(--rule); }
 .eyebrow { font-size: 1rem; font-weight: 600; color: var(--ink-2); }
-.hero { display: flex; align-items: baseline; gap: 12px; margin-top: 2px; font-size: clamp(5.5rem, 14vw + 1rem, 9rem); font-weight: 700; line-height: 1; letter-spacing: -.045em; }
+.hero { display: flex; align-items: baseline; gap: 12px; margin-top: 2px; font-size: clamp(5.5rem, 14vw + 1rem, 9rem); font-weight: 500; line-height: 1; letter-spacing: -.045em; }
 .hero-unit { font-size: clamp(1.5rem, 1.8vw + 1rem, 2rem); font-weight: 600; letter-spacing: 0; color: var(--ink-2); }
 /* Stones and pounds are two numbers, so they get a smaller size to fit a phone. */
 body[data-weight-unit="st"] .hero:not(.is-empty) { font-size: clamp(3.5rem, 9vw + 1rem, 7rem); }
