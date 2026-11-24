@@ -74,7 +74,7 @@ test("the pages run no outside code but Clerk's, and set no cookies", async () =
   // The app's one script is its own; the policy has none.
   assert.deepEqual([...page.matchAll(/<script\b[^>]*>/g)].map(([tag]) => tag), ['<script type="module" src="./app.mjs">']);
   assert.doesNotMatch(policy, /<script\b/);
-  const sources = Object.fromEntries(await Promise.all(["app.mjs", "model.mjs", "chart.mjs", "account.mjs", "export.mjs", "auth.mjs", "config.mjs", "sw.js"].map(async name => [name, await read(name)])));
+  const sources = Object.fromEntries(await Promise.all(["app.mjs", "model.mjs", "chart.mjs", "account.mjs", "export.mjs", "importers.mjs", "import-worker.mjs", "auth.mjs", "config.mjs", "sw.js"].map(async name => [name, await read(name)])));
   for (const [name, source] of Object.entries(sources)) {
     assert.doesNotMatch(source, /document\.cookie|sendBeacon|XMLHttpRequest|new WebSocket|new EventSource|geolocation/, name);
     // The app talks only to its own API, and the worker only fetches what the page asked for.
@@ -213,4 +213,22 @@ test("small controls get a 44px hit area, and removing the goal asks first", asy
   const goal = section(page, "goal-dialog");
   assert.match(goal, /<div id="goal-confirm" hidden><p class="dialog-detail" id="goal-confirm-text">Remove your goal\? Your weigh-ins stay\.<\/p>/);
   assert.match(goal, /<button class="button secondary" type="button" id="keep-goal">Keep goal<\/button><button class="button danger" type="button" id="confirm-clear-goal">Remove goal<\/button>/);
+});
+
+test("Import sits beside Download on Your data, reads files on the device, and asks before undoing", async () => {
+  const importAt = page.indexOf('id="import"');
+  assert.ok(importAt > page.indexOf('id="data-view"') && importAt < page.indexOf('id="download-csv"'), "on Your data, next to Download");
+  assert.equal(page.slice(importAt, page.indexOf('id="download-csv"')).match(/<section\b/g)?.length, 1, "the next section is Download or delete");
+  const importSection = section(page, "import");
+  assert.match(importSection, /Bring in weigh-ins from a CSV file or another app’s export\. You’ll see what will change before anything is saved\./);
+  assert.match(importSection, /<input type="file" id="import-file" accept="\.csv,\.txt,\.json,\.xml,\.zip" multiple hidden>/);
+  assert.match(importSection, /Dates already in your log keep their current weight\./);
+  assert.match(section(page, "undo-import-dialog"), /id="confirm-undo-import">Undo import</);
+  // Read by a worker from Baseline's own origin, which the Content Security Policy allows.
+  const app = await read("app.mjs");
+  assert.match(app, /new Worker\("\.\/import-worker\.mjs", \{ type: "module" \}\)/);
+  assert.match(await read("import-worker.mjs"), /^import \{ ImportError, readImportFiles \} from "\.\/importers\.mjs";$/m);
+  // Values from a file reach the page only as text.
+  const code = app.slice(app.indexOf("// Import: weigh-ins from a file"), app.indexOf("let undoImportTarget"));
+  assert.doesNotMatch(code, /innerHTML|insertAdjacentHTML|outerHTML/);
 });

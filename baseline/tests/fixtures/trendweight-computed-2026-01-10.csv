@@ -1,0 +1,6 @@
+Date,Actual Weight,Weight Is Interpolated,Trend Weight,Actual Fat %,Fat Is Interpolated,Trend Fat %
+2026-01-05,185.2,No,185.2,22.1,No,22.1
+2026-01-06,185.0,Yes,185.1,22.0,Yes,22.1
+2026-01-07,184.6,No,185.0,,Yes,22.0
+2026-01-08,184.4,Yes,184.9,,Yes,22.0
+2026-01-09,184.1,No,184.8,21.8,No,21.9

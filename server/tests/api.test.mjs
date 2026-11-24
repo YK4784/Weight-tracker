@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createHandler } from "../api.mjs";
 import { readFile } from "node:fs/promises";
-import { CONSENT_ERROR_CODE, ConsentRequired, DELETE_WORD, MAX_IMPORT_ENTRIES, OPS_WITHOUT_CONSENT, latestDate, needsConsent, parseOp } from "../ops.mjs";
+import { CONSENT_ERROR_CODE, ConsentRequired, DELETE_WORD, MAX_IMPORT_ENTRIES, MAX_MERGE_ENTRIES, OPS_WITHOUT_CONSENT, latestDate, needsConsent, parseOp } from "../ops.mjs";
 import { schema } from "../schema.mjs";
 import { createStore } from "../store.mjs";
 import { SetupError, describeError, logError, requestId } from "../log.mjs";
@@ -277,7 +277,7 @@ test("the API passes a confirmed deletion to the store as the signed-in user, an
 test("deleting an account reaches every table", async () => {
   const store = await readFile(new URL("../store.mjs", import.meta.url), "utf8");
   const tables = schema.flatMap(text => [.../CREATE TABLE IF NOT EXISTS (\w+)/g.exec(text)?.slice(1) ?? []]);
-  assert.deepEqual(tables.sort(), ["profiles", "push_subscriptions", "waist_measurements", "weigh_ins"]);
+  assert.deepEqual(tables.sort(), ["import_batches", "profiles", "push_subscriptions", "waist_measurements", "weigh_ins"]);
   const deleteRows = /const deleteRows = userId => \[([^\]]*)\]/.exec(store)[1];
   for (const table of tables) assert.match(deleteRows, new RegExp("DELETE FROM " + table + " WHERE user_id = \\$\\{userId\\}`"), table);
 });
@@ -307,7 +307,9 @@ const VALID_OPS = {
   "consent": { version: CONSENT_VERSION },
   "delete-data": { confirm: "delete" },
   "delete-account": { confirm: "delete" },
-  "import": { log: { entries: [] } }
+  "import": { log: { entries: [] } },
+  "merge-import": { batch: "0b6f3c1e-2a4d-4c3b-9e1f-7a8b9c0d1e2f", source: "csv", entries: [{ date: "2026-11-22", weight: 80 }] },
+  "undo-import": { batch: "0b6f3c1e-2a4d-4c3b-9e1f-7a8b9c0d1e2f" }
 };
 
 test("every change that saves data needs the agreement, and only removing data or agreeing doesn't", () => {
@@ -315,7 +317,7 @@ test("every change that saves data needs the agreement, and only removing data o
   for (const op of ops) assert.ok(parseOp({ op, ...VALID_OPS[op] }, NOW), op + " is valid");
   assert.deepEqual(ops.filter(op => !needsConsent({ op })).sort(), [...OPS_WITHOUT_CONSENT].sort());
   assert.deepEqual(ops.filter(op => needsConsent({ op })).sort(),
-    ["import", "save-waist", "save-weight", "set-goal", "set-height", "set-preferences", "set-reminder", "set-units", "start", "update-weight"]);
+    ["import", "merge-import", "save-waist", "save-weight", "set-goal", "set-height", "set-preferences", "set-reminder", "set-units", "start", "undo-import", "update-weight"]);
   // Reading the log, and any op added later, follow the safe default.
   assert.equal(needsConsent(null), false);
   assert.equal(needsConsent({ op: "something-new" }), true);
@@ -346,32 +348,32 @@ function fakeStore(answer) {
   return { store: createStore("postgres://fake", { connect: () => sql }), transactions };
 }
 
-// The read at the end of every transaction: a profile, weigh-ins, waists and devices.
-const READS = [[{ started: true, consent_version: CONSENT_VERSION, consented_at: "2026-11-23T09:41:00Z", weight_unit: "kg", height_unit: "cm", preferences: {} }], [], [], []];
+// The reads at the end of every transaction: a profile, weigh-ins, waists, devices and imports.
+const READS = [[{ started: true, consent_version: CONSENT_VERSION, consented_at: "2026-11-23T09:41:00Z", weight_unit: "kg", height_unit: "cm", preferences: {} }], [], [], [], []];
 
 // The first statement of every request: row-level security reads the user from it.
 const SETTING = /^SELECT set_config\('app\.user_id', \$\d*, true\)$/;
 
 test("the store sets the user for row-level security first, then checks the agreement, in the same transaction as the change", async () => {
-  const { store, transactions } = fakeStore(queries => [...queries.slice(0, -4).map(() => [{ "?column?": 1 }]), ...READS]);
+  const { store, transactions } = fakeStore(queries => [...queries.slice(0, -5).map(() => [{ "?column?": 1 }]), ...READS]);
   await store.run("user_1", parseOp({ op: "save-weight", date: "2026-11-22", weight: 80 }, NOW));
   const [setting, guard, ...rest] = transactions[0];
   assert.match(setting.text, SETTING);
   assert.deepEqual(setting.params, ["user_1"]);
   assert.match(guard.text, /^SELECT require_consent\(\$/);
   assert.deepEqual(guard.params, ["user_1", CONSENT_VERSION]);
-  assert.equal(rest.length, 2 + 4, "the weigh-in's two writes, then the four reads");
+  assert.equal(rest.length, 2 + 5, "the weigh-in's two writes, then the five reads");
   for (const op of ["delete-weight", "consent", "delete-data", "clear-goal"]) {
     await store.run("user_1", parseOp({ op, ...VALID_OPS[op] }, NOW));
     assert.match(transactions.at(-1)[0].text, SETTING, op);
     assert.doesNotMatch(transactions.at(-1)[1].text, /require_consent/, op);
   }
   await store.run("user_1");
-  assert.equal(transactions.at(-1).length, 1 + 4, "a read is the setting and the reads");
+  assert.equal(transactions.at(-1).length, 1 + 5, "a read is the setting and the reads");
 });
 
 test("every request's transaction starts by setting the signed-in user, whatever the change", async () => {
-  const { store, transactions } = fakeStore(queries => [...queries.slice(0, -4).map(() => [{ imported: 0 }]), ...READS]);
+  const { store, transactions } = fakeStore(queries => [...queries.slice(0, -5).map(() => [{ imported: 0 }]), ...READS]);
   for (const op of [null, ...Object.keys(VALID_OPS)]) {
     await store.run("user_" + op, op && parseOp({ op, ...VALID_OPS[op] }, NOW));
     const [first, ...others] = transactions.at(-1);
@@ -382,7 +384,7 @@ test("every request's transaction starts by setting the signed-in user, whatever
 });
 
 test("the store reads the change's own result after the setting and the guard", async () => {
-  const { store } = fakeStore(queries => [[], [], ...queries.slice(2, -4).map(() => []), ...READS]);
+  const { store } = fakeStore(queries => [[], [], ...queries.slice(2, -5).map(() => []), ...READS]);
   assert.equal((await store.run("user_1", parseOp({ op: "update-weight", date: "2026-11-22", weight: 80 }, NOW))).found, false);
   const found = fakeStore(queries => [[], [], [{ "?column?": 1 }], ...READS]).store;
   assert.equal((await found.run("user_1", parseOp({ op: "update-weight", date: "2026-11-22", weight: 80 }, NOW))).found, true);
@@ -400,7 +402,7 @@ function twoRoles(appUrl) {
     sql.transaction = async queries => {
       const schemaRun = queries.length === schema.length && queries[0].text === schema[0];
       ran.push([role, schemaRun ? "schema" : queries.map(query => query.text.trim().split(/\s+/).slice(0, 2).join(" ")).join("; ")]);
-      return schemaRun ? [] : queries.length > 4 || /set_config/.test(queries[0].text) ? [...queries.slice(0, -4).map(() => []), ...READS] : [[]];
+      return schemaRun ? [] : queries.length > 5 || /set_config/.test(queries[0].text) ? [...queries.slice(0, -5).map(() => []), ...READS] : [[]];
     };
     return sql;
   };
@@ -435,7 +437,7 @@ test("DATABASE_URL_APP must reach the same database as DATABASE_URL", () => {
 });
 
 test("turning reminders on releases the device from another account before adding it", async () => {
-  const { store, transactions } = fakeStore(queries => [...queries.slice(0, -4).map(() => []), ...READS]);
+  const { store, transactions } = fakeStore(queries => [...queries.slice(0, -5).map(() => []), ...READS]);
   const subscription = { endpoint: "https://fcm.googleapis.com/fcm/send/abc", keys: { p256dh: Buffer.concat([Buffer.from([4]), Buffer.alloc(64, 1)]).toString("base64url"), auth: Buffer.alloc(16, 2).toString("base64url") } };
   await store.run("user_1", parseOp({ op: "set-reminder", hour: 8, timeZone: "UTC", subscription }, NOW));
   const texts = transactions[0].map(query => query.text);
@@ -518,7 +520,7 @@ test("the store turns the guard's error into ConsentRequired, and passes other e
 test("the log carries the agreement as the server recorded it", async () => {
   const { store } = fakeStore(() => READS);
   assert.deepEqual((await store.run("user_1")).log.consent, { version: CONSENT_VERSION, at: "2026-11-23T09:41:00Z" });
-  const none = fakeStore(() => [[], [], [], []]).store;
+  const none = fakeStore(() => [[], [], [], [], []]).store;
   assert.equal((await none.run("user_2")).log.consent, null);
 });
 
@@ -545,4 +547,119 @@ test("the server takes the change that undoes a deletion as the app sends it", a
     assert.ok(inverse, change.op);
     assert.deepEqual(parseOp(JSON.parse(JSON.stringify(inverse)), NOW), inverse, change.op);
   }
+});
+
+const BATCH = "0b6f3c1e-2a4d-4c3b-9e1f-7a8b9c0d1e2f";
+const merge = (entries, extra = {}) => parseOp({ op: "merge-import", batch: BATCH, source: "apple-health", entries, ...extra }, NOW);
+
+test("an import's weigh-ins are checked as a saved weigh-in is, and keep their notes and sources", () => {
+  assert.deepEqual(merge([{ date: "2026-11-01", weight: 80.044, note: "  after\ntravel " }, { date: "2026-11-02", weight: 81 }]), {
+    op: "merge-import", batch: BATCH, source: "apple-health",
+    entries: [{ date: "2026-11-01", weight: 80.04, note: "after travel", source: "apple-health" }, { date: "2026-11-02", weight: 81, note: null, source: "apple-health" }]
+  });
+  // Baseline's own export brings each weigh-in's source, null for one typed in Baseline.
+  assert.deepEqual(merge([{ date: "2026-11-01", weight: 80, source: null }, { date: "2026-11-02", weight: 81, source: "fitbit" }], { source: "baseline" }).entries.map(entry => entry.source), [null, "fitbit"]);
+  for (const entry of [
+    { date: "2026-11-01", weight: 0.09 }, { date: "2026-11-01", weight: 2000.01 }, { date: "2026-11-01", weight: "80" }, { date: "2026-11-01" },
+    { date: "2026-02-30", weight: 80 }, { date: "2026-11-24", weight: 80 }, { weight: 80 }, null,
+    { date: "2026-11-01", weight: 80, note: "x".repeat(101) }, { date: "2026-11-01", weight: 80, note: 5 },
+    { date: "2026-11-01", weight: 80, source: "Withings" }, { date: "2026-11-01", weight: 80, source: "" }
+  ]) assert.equal(merge([{ date: "2026-10-01", weight: 80 }, entry]), null, JSON.stringify(entry));
+  // The latest date is tomorrow in UTC, as for save-weight.
+  assert.ok(merge([{ date: "2026-11-23", weight: 80 }]));
+  assert.ok(merge([{ date: "2026-11-01", weight: 80, note: "x".repeat(100) }]));
+});
+
+test("an import names its batch and source, has no date twice, and holds at most 5,000 weigh-ins", () => {
+  const day = index => new Date(Date.UTC(2010, 0, 1 + index)).toISOString().slice(0, 10);
+  const many = count => Array.from({ length: count }, (_, index) => ({ date: day(index), weight: 80 }));
+  assert.equal(MAX_MERGE_ENTRIES, 5000);
+  assert.equal(merge(many(5000)).entries.length, 5000);
+  assert.equal(merge(many(5001)), null);
+  assert.equal(merge([]), null);
+  assert.equal(merge({ length: 1, 0: { date: "2026-11-01", weight: 80 } }), null);
+  assert.equal(merge([{ date: "2026-11-01", weight: 80 }, { date: "2026-11-01", weight: 81 }]), null, "a date twice");
+  for (const batch of [undefined, "", "not-a-uuid", BATCH.toUpperCase(), BATCH + "0", 5]) {
+    assert.equal(merge([{ date: "2026-11-01", weight: 80 }], { batch }), null, String(batch));
+    assert.equal(parseOp({ op: "undo-import", batch }, NOW), null, String(batch));
+  }
+  for (const source of [undefined, null, "", "Apple Health", "-csv", "a".repeat(33), 1]) assert.equal(merge([{ date: "2026-11-01", weight: 80 }], { source }), null, String(source));
+  assert.deepEqual(parseOp({ op: "undo-import", batch: BATCH, entries: [] }, NOW), { op: "undo-import", batch: BATCH });
+});
+
+test("the API passes an import to the store as the signed-in user, and refuses one too large", async () => {
+  const { calls, send } = setup();
+  const day = index => new Date(Date.UTC(2010, 0, 1 + index)).toISOString().slice(0, 10);
+  const entries = Array.from({ length: 5000 }, (_, index) => ({ date: day(index), weight: 80.25, note: index ? undefined : "first" }));
+  assert.equal((await send("POST", { op: "merge-import", batch: BATCH, source: "csv", entries, userId: "user_2" })).status, 200);
+  assert.equal(calls[0][0], "user_1");
+  assert.equal(calls[0][1].entries.length, 5000);
+  assert.equal((await send("POST", { op: "merge-import", batch: BATCH, source: "csv", entries: [...entries, { date: day(5000), weight: 80 }] })).status, 400);
+  assert.equal((await send("POST", { op: "undo-import", batch: BATCH })).status, 200);
+  assert.deepEqual(calls.slice(1), [["user_1", { op: "undo-import", batch: BATCH }]]);
+});
+
+test("an import adds weigh-ins only on dates the log doesn't have, to a batch of this account's", async () => {
+  const { store, transactions } = fakeStore(queries => [...queries.slice(0, -6).map(() => []), [{ added: 2 }], ...READS]);
+  const change = merge([{ date: "2026-11-01", weight: 80, note: "first" }, { date: "2026-11-02", weight: 81 }]);
+  const result = await store.run("user_1", change);
+  assert.equal(result.added, 2);
+  const [setting, guard, profile, batch, insert] = transactions[0];
+  assert.match(setting.text, SETTING);
+  assert.match(guard.text, /^SELECT require_consent\(/);
+  assert.match(profile.text, /INSERT INTO profiles \(user_id, started\) VALUES \(\$, true\)\s+ON CONFLICT \(user_id\) DO UPDATE SET started = true/);
+  assert.match(batch.text, /^INSERT INTO import_batches \(id, user_id, source\) VALUES \(\$, \$, \$\) ON CONFLICT \(id\) DO NOTHING$/);
+  assert.deepEqual(batch.params, [BATCH, "user_1", "apple-health"]);
+  // Never an update: a date already in the log keeps its weight and note.
+  assert.match(insert.text, /ON CONFLICT \(user_id, date\) DO NOTHING/);
+  assert.doesNotMatch(insert.text, /DO UPDATE/);
+  assert.match(insert.text, /WHERE EXISTS \(SELECT 1 FROM import_batches WHERE id = \$ AND user_id = \$\)/);
+  assert.deepEqual(insert.params, ["user_1", BATCH, ["2026-11-01", "2026-11-02"], [80, 81], ["first", null], ["apple-health", "apple-health"], BATCH, "user_1"]);
+});
+
+test("undoing an import removes its weigh-ins and its batch, and only this account's", async () => {
+  const { store, transactions } = fakeStore(queries => [...queries.slice(0, -6).map(() => []), [{ removed: 412 }], ...READS]);
+  const result = await store.run("user_1", parseOp({ op: "undo-import", batch: BATCH }, NOW));
+  assert.equal(result.removed, 412);
+  const [, , batch, rows] = transactions[0];
+  assert.match(batch.text, /^DELETE FROM import_batches WHERE user_id = \$ AND id = \$$/);
+  assert.deepEqual(batch.params, ["user_1", BATCH]);
+  assert.match(rows.text, /DELETE FROM weigh_ins WHERE user_id = \$ AND import_batch = \$ RETURNING 1/);
+  assert.deepEqual(rows.params, ["user_1", BATCH]);
+});
+
+test("saving a weigh-in again takes it out of its import, and a new weight drops its source", async () => {
+  const { store, transactions } = fakeStore(queries => [...queries.slice(0, -5).map(() => [{ "?column?": 1 }]), ...READS]);
+  await store.run("user_1", parseOp({ op: "save-weight", date: "2026-11-22", weight: 80 }, NOW));
+  await store.run("user_1", parseOp({ op: "update-weight", date: "2026-11-22", weight: 80 }, NOW));
+  const save = transactions[0].find(query => /INSERT INTO weigh_ins/.test(query.text)).text;
+  const update = transactions[1].find(query => /UPDATE weigh_ins/.test(query.text)).text;
+  assert.match(save, /source = CASE WHEN weigh_ins\.weight_kg = excluded\.weight_kg THEN weigh_ins\.source END, import_batch = NULL/);
+  assert.match(update, /source = CASE WHEN weight_kg = \$ THEN source END, import_batch = NULL/);
+});
+
+test("the log carries each imported weigh-in's source and the recent imports with weigh-ins left", async () => {
+  const reads = structuredClone(READS);
+  reads[1] = [{ date: "2026-11-01", weight: 80, note: null, source: "apple-health" }, { date: "2026-11-02", weight: 81, note: "typed", source: null }];
+  reads[4] = [{ id: BATCH, source: "apple-health", created_at: "2026-11-24T09:41:00Z", count: 1 }];
+  const { store, transactions } = fakeStore(() => reads);
+  const { log } = await store.run("user_1");
+  assert.deepEqual(log.entries, [{ date: "2026-11-01", weight: 80, note: null, source: "apple-health" }, { date: "2026-11-02", weight: 81, note: "typed" }]);
+  assert.deepEqual(log.imports, [{ id: BATCH, source: "apple-health", createdAt: "2026-11-24T09:41:00Z", count: 1 }]);
+  const imports = transactions[0].at(-1);
+  assert.match(imports.text, /FROM import_batches b JOIN weigh_ins w ON w\.user_id = b\.user_id AND w\.import_batch = b\.id/);
+  assert.match(imports.text, /ORDER BY b\.created_at DESC, b\.id LIMIT \$$/);
+  assert.deepEqual(imports.params, ["user_1", 10]);
+});
+
+test("the import columns and table are added to existing databases, safely run again", () => {
+  const table = schema.find(text => /CREATE TABLE IF NOT EXISTS import_batches/.test(text));
+  assert.match(table, /id text PRIMARY KEY/);
+  assert.match(table, /user_id text NOT NULL/);
+  assert.match(table, /created_at timestamptz NOT NULL DEFAULT now\(\)/);
+  assert.ok(schema.includes("CREATE INDEX IF NOT EXISTS import_batches_user_id ON import_batches (user_id)"));
+  const columns = schema.find(text => /ADD COLUMN IF NOT EXISTS import_batch/.test(text));
+  assert.match(columns, /ALTER TABLE weigh_ins\s+ADD COLUMN IF NOT EXISTS import_batch text[^,]*,\s+ADD COLUMN IF NOT EXISTS source text/);
+  // The table exists before row-level security is turned on for it.
+  assert.ok(schema.indexOf(table) < schema.findIndex(text => /ENABLE ROW LEVEL SECURITY/.test(text)));
 });

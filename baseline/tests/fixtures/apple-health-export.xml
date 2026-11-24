@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE HealthData [
+<!-- A synthetic Apple Health export: the shape of export.xml, with made-up values. -->
+<!ELEMENT HealthData (ExportDate,Me,(Record|Correlation|Workout|ActivitySummary)*)>
+<!ATTLIST HealthData
+  locale CDATA #REQUIRED
+>
+<!ELEMENT ExportDate EMPTY>
+<!ATTLIST ExportDate
+  value CDATA #REQUIRED
+>
+<!ELEMENT Record ((MetadataEntry|HeartRateVariabilityMetadataList)*)>
+<!ATTLIST Record
+  type          CDATA #REQUIRED
+  unit          CDATA #IMPLIED
+  value         CDATA #IMPLIED
+  sourceName    CDATA #REQUIRED
+  sourceVersion CDATA #IMPLIED
+  device        CDATA #IMPLIED
+  creationDate  CDATA #IMPLIED
+  startDate     CDATA #REQUIRED
+  endDate       CDATA #REQUIRED
+>
+]>
+<HealthData locale="en_US">
+ <ExportDate value="2026-01-10 09:00:00 -0800"/>
+ <Me HKCharacteristicTypeIdentifierDateOfBirth="" HKCharacteristicTypeIdentifierBiologicalSex="HKBiologicalSexNotSet" HKCharacteristicTypeIdentifierBloodType="HKBloodTypeNotSet" HKCharacteristicTypeIdentifierFitzpatrickSkinType="HKFitzpatrickSkinTypeNotSet" HKCharacteristicTypeIdentifierCardioFitnessMedicationsUse="None"/>
+ <Record type="HKQuantityTypeIdentifierStepCount" sourceName="Example Phone" sourceVersion="17.1" device="&lt;&lt;HKDevice: 0x0000&gt;, name:Example Phone, manufacturer:Example&gt;" unit="count" creationDate="2026-01-05 08:00:00 -0800" startDate="2026-01-05 07:00:00 -0800" endDate="2026-01-05 07:59:00 -0800" value="812"/>
+ <Record type="HKQuantityTypeIdentifierBodyMass" sourceName="Example Scale &amp; Co" sourceVersion="3" unit="lb" creationDate="2026-01-05 07:31:02 -0800" startDate="2026-01-05 07:30:00 -0800" endDate="2026-01-05 07:30:00 -0800" value="185.2">
+  <MetadataEntry key="HKWasUserEntered" value="0"/>
+ </Record>
+ <Record type="HKQuantityTypeIdentifierBodyMassIndex" sourceName="Example Scale &amp; Co" sourceVersion="3" unit="count" creationDate="2026-01-05 07:31:02 -0800" startDate="2026-01-05 07:30:00 -0800" endDate="2026-01-05 07:30:00 -0800" value="27.3"/>
+ <Record type="HKQuantityTypeIdentifierLeanBodyMass" sourceName="Example Scale &amp; Co" sourceVersion="3" unit="lb" creationDate="2026-01-05 07:31:02 -0800" startDate="2026-01-05 07:30:00 -0800" endDate="2026-01-05 07:30:00 -0800" value="141.6"/>
+ <Record type="HKQuantityTypeIdentifierBodyMass" sourceName="Health" sourceVersion="17.1" unit="lb" creationDate="2026-01-05 21:12:40 -0800" startDate="2026-01-05 21:12:00 -0800" endDate="2026-01-05 21:12:00 -0800" value="186.9">
+  <MetadataEntry key="HKWasUserEntered" value="1"/>
+ </Record>
+ <Record type="HKQuantityTypeIdentifierBodyMass" sourceName="Health" sourceVersion="17.1" unit="lb" creationDate="2026-01-06 23:40:00 -0800" startDate="2026-01-06 23:40:00 -0800" endDate="2026-01-06 23:40:00 -0800" value="185.0"/>
+ <Record type="HKQuantityTypeIdentifierHeartRate" sourceName="Example Watch" unit="count/min" creationDate="2026-01-07 06:00:00 -0800" startDate="2026-01-07 06:00:00 -0800" endDate="2026-01-07 06:00:00 -0800" value="61"/>
+ <Record type="HKQuantityTypeIdentifierBodyMass" sourceName="Example Scale &amp; Co" sourceVersion="3" unit="lb" creationDate="2026-01-07 06:58:00 -0800" startDate="2026-01-07 06:58:00 -0800" endDate="2026-01-07 06:58:00 -0800" value="184.6"/>
+ <Record type="HKQuantityTypeIdentifierBodyMass" sourceName="Travel Scale" sourceVersion="1" unit="kg" creationDate="2026-01-09 07:05:00 +0100" startDate="2026-01-09 07:05:00 +0100" endDate="2026-01-09 07:05:00 +0100" value="83.6"/>
+ <Record type="HKQuantityTypeIdentifierBodyMass" sourceName="Health" sourceVersion="17.1" unit="lb" creationDate="2026-01-09 06:50:00 -0800" startDate="2026-01-09 06:50:00 -0800" endDate="2026-01-09 06:50:00 -0800" value="184.1"/>
+ <Record type="HKQuantityTypeIdentifierBodyMass" sourceName="Health" sourceVersion="17.1" unit="lb" creationDate="2026-01-10 07:00:00 -0800" startDate="2026-01-10 07:00:00 -0800" endDate="2026-01-10 07:00:00 -0800" value="4410"/>
+ <ActivitySummary dateComponents="2026-01-09" activeEnergyBurned="0" activeEnergyBurnedGoal="0" activeEnergyBurnedUnit="Cal"/>
+</HealthData>

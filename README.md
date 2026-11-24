@@ -160,7 +160,7 @@ The API lives in `api/log.mjs`, with its code in `server/`. It accepts only requ
 ### Limit the app to each user's rows
 
 Every query in `server/store.mjs` names the signed-in user in its `WHERE` clause. Row-level security is a second lock behind it, in the database itself:
-- `server/schema.mjs` turns on row-level security on all four tables, with one policy each, `own_rows`. It shows and accepts only the rows whose `user_id` equals the setting `app.user_id`, and no rows without it.
+- `server/schema.mjs` turns on row-level security on all five tables, with one policy each, `own_rows`. It shows and accepts only the rows whose `user_id` equals the setting `app.user_id`, and no rows without it.
 - `run` in `store.mjs` makes `SELECT set_config('app.user_id', …, true)` the first statement of every request's transaction. `true` keeps it to that transaction.
 - So a query that forgot its `WHERE` clause still reads and writes only the signed-in user's rows.
 
@@ -189,7 +189,7 @@ To turn it on:
    CREATE ROLE baseline_app LOGIN PASSWORD 'paste-the-password-here' NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
    GRANT CONNECT ON DATABASE neondb TO baseline_app;
    GRANT USAGE ON SCHEMA public TO baseline_app;
-   GRANT SELECT, INSERT, UPDATE, DELETE ON profiles, weigh_ins, waist_measurements, push_subscriptions TO baseline_app;
+   GRANT SELECT, INSERT, UPDATE, DELETE ON profiles, weigh_ins, waist_measurements, push_subscriptions, import_batches TO baseline_app;
    -- Tables the owner creates later get the same grants.
    ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO baseline_app;
    ```
@@ -307,7 +307,7 @@ The server's log lines in Vercel never hold a weight, a note, an email address, 
 
 The service worker in `baseline/dist/sw.js` keeps a copy of the app's own files: the page, its modules and styles, the font, the icons and the manifest. They're listed in `SHELL` at the top of the file. Each file comes from the network first, and the answer replaces the copy, so a deploy reaches the next load that has a connection. The copy is used when the network fails, returns an error or takes more than 3 seconds. A page that opened from the copy gets its modules from the copy too, so it never mixes versions. The worker never handles `/api/` requests, other sites such as Clerk, or anything but `GET`.
 
-When you add a file to `baseline/dist/`, add it to `SHELL`, or to the list of files left out on purpose in `baseline/tests/worker.test.mjs`. `npm test` fails until you do. When `SHELL` changes, bump the version in the cache's name, now `baseline-shell-v3`, so the new worker starts a fresh cache and deletes the old one. Edits to a listed file need no bump.
+When you add a file to `baseline/dist/`, add it to `SHELL`, or to the list of files left out on purpose in `baseline/tests/worker.test.mjs`. `npm test` fails until you do. When `SHELL` changes, bump the version in the cache's name, now `baseline-shell-v4`, so the new worker starts a fresh cache and deletes the old one. Edits to a listed file need no bump.
 
 Clerk's scripts load from its servers on every start, through a redirect that browsers can't cache, so sign-in can't load offline. Baseline shows the copy of the log kept on the device instead, and loads sign-in when the connection returns.
 
@@ -371,7 +371,7 @@ The **Weight log** shows every entry with its weekly trend and note, 15 to a pag
 - **Height:** the height BMI uses, with **Add** or **Edit**, which opens the height dialog and its **cm** or **ft** switch.
 - **Reminder:** the reminder's time, or **Off**, with **Set** or **Edit**, which opens the reminder dialog. "Reminders go to another device" means reminders are on, but not for the device you're using. A city's name, such as "London time", means the reminder was saved from a device in another time zone.
 - **Show on overview:** **BMI** and **Body fat estimate**, both on at first. Turning off **BMI** hides the BMI figure. Turning off **Body fat estimate** hides the body fat figure and the whole **Body fat** section, with its chart and waist measurements. Hiding one deletes nothing: your height and waist measurements stay saved, and turning it back on shows everything again. The choice is saved to your account, so it applies on every device you sign in on.
-- **Your data:** **Open Your data** goes to the Your data page, which [Your data](#your-data) describes.
+- **Your data:** **Open Your data** goes to the Your data page, which [Your data](#your-data) describes. Importing weigh-ins from another app is there too (see [Importing weigh-ins](#importing-weigh-ins)).
 - **Account:** the email you're signed in with. **Manage account** opens Clerk's account page, where you change your email, password or sign-in methods. **Sign out** signs you out on this device. It needs a connection. If changes are still waiting to sync, it says how many and asks first, since signing out deletes them. The avatar at the top right can also manage your account or sign out.
 
 Entries and their notes, height, waist measurements and the body fat formula you chose, your goal, your units, what the overview shows, your reminder time and your agreement to the health data policy are saved to your account, so the same log opens on any device you sign in on. A change shows right away and is saved in the background. Switching back to the tab picks up changes made on another device.
@@ -407,7 +407,7 @@ Earlier versions kept logs only in the browser. The first time an account with a
 
 ## Your data
 
-**Your data** is a page of its own, linked from **Settings** and from the bottom of every page of the app. It says what Baseline stores and where, what it never does and who handles your data, as the health data policy does in full (see [Privacy](#privacy)). It shows when you agreed to the policy, with **Withdraw**. And it downloads your log or deletes it. Both downloads include changes still waiting on the device. On an iPhone or iPad with Baseline on the Home Screen, where a download does nothing useful, the share sheet opens instead, so you can save the file to Files.
+**Your data** is a page of its own, linked from **Settings** and from the bottom of every page of the app. It says what Baseline stores and where, what it never does and who handles your data, as the health data policy does in full (see [Privacy](#privacy)). It shows when you agreed to the policy, with **Withdraw**. It imports weigh-ins from a file, as [Importing weigh-ins](#importing-weigh-ins) describes. And it downloads your log or deletes it. Both downloads include changes still waiting on the device. On an iPhone or iPad with Baseline on the Home Screen, where a download does nothing useful, the share sheet opens instead, so you can save the file to Files.
 
 **Download weigh-ins (CSV)** saves `baseline-weigh-ins-` and today's date, such as `baseline-weigh-ins-2026-11-23.csv`, for a spreadsheet. It has a row for each weigh-in, oldest first, with these columns:
 
@@ -433,12 +433,12 @@ The file is UTF-8 with a byte order mark and CRLF line ends, and a field with a 
   "goal": { "weightKg": 75, "startDate": "2026-11-01", "startWeightKg": 84.91, "rateKgPerWeek": 0.5, "milestones": 10 },
   "reminder": { "hour": 8, "timeZone": "Europe/London" },
   "consent": { "version": "2026-11-23", "agreedAt": "2026-11-23T09:40:12Z" },
-  "entries": [{ "date": "2026-11-01", "weightKg": 85, "note": null }],
+  "entries": [{ "date": "2026-11-01", "weightKg": 85, "note": null, "source": null }, { "date": "2026-11-02", "weightKg": 84.6, "note": null, "source": "apple-health" }],
   "waists": [{ "date": "2026-11-02", "waistCm": 86.61 }]
 }
 ```
 
-`units` are the units Baseline shows, `preferences` says whether the overview shows BMI and body fat, and `sex` is the body fat formula you chose. `consent` is the version of the health data policy you agreed to and when the server recorded it; `agreedAt` is null while an agreement made offline hasn't synced. `heightCm`, `sex`, `goal`, `reminder` and `consent` are null when they aren't set, as is `rateKgPerWeek` for a goal without a target rate. The file holds no account ID, email address or push subscription.
+`units` are the units Baseline shows, `preferences` says whether the overview shows BMI and body fat, and `sex` is the body fat formula you chose. Each weigh-in's `source` is where it came from: null for one typed in Baseline, or the name of what it was imported from, such as `apple-health` (see [Importing weigh-ins](#importing-weigh-ins)). Importing this file brings each weigh-in back with its own source. `consent` is the version of the health data policy you agreed to and when the server recorded it; `agreedAt` is null while an agreement made offline hasn't synced. `heightCm`, `sex`, `goal`, `reminder` and `consent` are null when they aren't set, as is `rateKgPerWeek` for a goal without a target rate. The file holds no account ID, email address or push subscription.
 
 **Delete my data** empties your log and keeps your account. **Delete my account** empties your log, then deletes your account and signs you out. Each opens a dialog that lists what goes and offers **Download a copy first**. It goes ahead only once you type "delete". Deleting needs a connection, and the log changes only once the server has deleted it. If that fails, the dialog says so and you can try again.
 
@@ -450,16 +450,52 @@ Either one deletes, from your account:
 - your settings: units go back to kg and cm, and the overview shows BMI and body fat again
 - your reminder time and time zone, and every device that gets reminders, so reminders stop on all of them
 - your agreement to the health data policy, so Baseline asks for it again before it saves anything new
+- the record of your imports, so **Recent imports** is empty
 
 **Withdraw**, next to your agreement, is **Delete my data** under another name: the dialog asks "Withdraw your agreement?", and its button reads **Withdraw and delete**. Withdrawing the agreement deletes the data it allowed Baseline to keep.
 
-**Delete my data** leaves an empty profile in its place, without the agreement, and the app shows the consent step until you agree again. The profile counts as started, so a log from before accounts, in any browser, never moves back into the account. **Delete my account** leaves no row for your user ID in any table: `profiles`, `weigh_ins`, `waist_measurements` and `push_subscriptions`. Then it deletes your Clerk user, which signs you out, and the sign-in page says "Your account and all your data have been deleted." If your data is deleted but Clerk can't delete the account, the dialog says so, and **Try again** deletes only the account.
+**Delete my data** leaves an empty profile in its place, without the agreement, and the app shows the consent step until you agree again. The profile counts as started, so a log from before accounts, in any browser, never moves back into the account. **Delete my account** leaves no row for your user ID in any table: `profiles`, `weigh_ins`, `waist_measurements`, `push_subscriptions` and `import_batches`. Then it deletes your Clerk user, which signs you out, and the sign-in page says "Your account and all your data have been deleted." If your data is deleted but Clerk can't delete the account, the dialog says so, and **Try again** deletes only the account.
 
 On the device you delete on, Baseline also removes the copy of your log, changes waiting to sync, a log from before accounts and the hidden note about fast loss, and it unsubscribes the device from notifications. After **Delete my data**, the copy is replaced by the empty log. After **Delete my account**, your user ID goes too. Other devices show the consent step the next time they load the log, and after an account is deleted they're signed out. A change still waiting on another device, because that device was offline, stays there when it tries to sync: the server turns it down for want of an agreement, and that device shows the consent step. Agreeing again saves it into the emptied log, and deleting the data there drops it.
 
 **Delete my account** needs the Clerk Dashboard setting that lets users delete their own accounts. Baseline reads it from the signed-in user's `deleteSelfEnabled`, and the button shows only when it's on. With it on, Clerk's own account page, from **Manage account** or the avatar menu, can delete the account too, but that removes only the Clerk user and leaves the log in the database. Use **Delete my account** in Baseline instead.
 
 Neon keeps a history of every change so the database can be restored to an earlier moment, and deleted rows stay in that history until its window passes. On Neon's Free plan, which the setup command above chooses, the window is 6 hours, which is both the plan's default and its maximum. The window shows under **Settings → Postgres → History window** in the Neon console. Paid plans default to 1 day and allow up to 7 days on Launch or 30 on Scale. A restore keeps the data it replaced in a backup branch named after the branch, `_old_` and the time. That branch keeps deleted rows until you delete it, and the health data policy promises it's gone within 7 days, so delete it once you've checked the restore. `docs/breach-runbook.md` has the steps.
+
+## Importing weigh-ins
+
+**Import**, on the Your data page next to **Download**, brings weigh-ins in from a CSV file or another app's export. **Choose a file** opens the file picker. Nothing is saved until you've seen a preview and pressed **Import**.
+
+**Reading the file.** The file is read on your device, in a Web Worker (`baseline/dist/import-worker.mjs`, which runs `readImportFiles` in `importers.mjs`), so even a large Apple Health export doesn't freeze the page. Only the weigh-ins in it, each one's date, weight and note, are sent to Baseline. The file itself never is. Baseline tells the format from the file's name, its first lines and its shape:
+
+| File | How Baseline reads it |
+|---|---|
+| **Apple Health** `export.xml` | An XML file whose root is `HealthData`. Baseline streams it, a piece at a time, and keeps only the `HKQuantityTypeIdentifierBodyMass` records, with the unit each one states (kg, lb or stones). A progress line shows how far it has got. Health exports a zip: unzip `export.zip` first, then choose the `export.xml` inside it. Choosing the zip says so. |
+| **Fitbit** (Google Takeout) | The monthly `weight-YYYY-MM-DD.json` files in `Takeout/Fitbit/Global Export Data/`, a JSON list of entries with `logId` and `bmi`. Choose several at once. Fitbit doesn't document the date format or the unit, so dates are read as any file's are, and you confirm the unit. |
+| **Baseline's own downloads** | **Download everything (JSON)** (`"format": "baseline-export"`, version 1) brings back each weigh-in with its note and source. The rest of the file, such as waist measurements and the goal, isn't imported, and the preview says so. **Download weigh-ins (CSV)** is read from its `weight_kg` column, and the apostrophe written in front of a note that starts with `=`, `+`, `-` or `@` comes off. |
+| **TrendWeight** | Its two downloads, as `apps/web/src/lib/download/csv-export.ts` in [TrendWeight's code](https://github.com/ervwalter/trendweight) writes them: the computed one (`Date,Actual Weight,Weight Is Interpolated,…`), whose filled-in days are left out, and a scale's readings (`Date,Time,Weight,Body Fat %`). Weights follow the account's unit, which the file doesn't name, so you confirm it. |
+| **Libra** | The CSV its help page documents ([libra-app.eu/support/csv](https://libra-app.eu/support/csv/)): a `#Units: kg` or `#Units: lbs` line, then `#date;weight;weight trend;…;log`. The `log` column is the note. |
+| **Any other CSV** | Comma, semicolon or tab separated, with quotes as RFC 4180 has them. Baseline finds the date column (`Date`, `Day`, `Timestamp`, or `Time` on its own) and the weight column (`Weight`, `Body weight`, `Mass`, `kg` or `lb`), and a separate `Time`, `Unit` and `Note` or `Comment` column if there is one. A file with a few lines before its headers works too. |
+
+Other apps' exports, such as Withings' and MacroFactor's, have no documented format, so they have no preset of their own. They go through the generic CSV reader, which reads most of them.
+
+**Dates.** Dates can be ISO (2026-03-04, with or without a time) or written with slashes, dots or dashes (03/04/2026, 4.3.26). When the year comes last, a first number over 12 makes the file day-first, and a second number over 12 makes it month-first. If every date could be read both ways, the preview asks, for example "Is 03/04/2026 the 3rd of April or March 4th?", and shows nothing until you answer. Baseline never guesses. A time with an offset, such as Apple Health's `2026-01-05 21:30:00 -0800`, keeps the date written with it. A time in UTC, such as Libra's `2026-01-05T22:30:00.000Z`, is moved to your device's time zone first, so a morning weigh-in in Tokyo lands on the right day.
+
+**Units.** Each weight can carry its unit ("84.5 kg", "186.3 lbs", or stones and pounds such as "13 st 2"). Otherwise the unit comes from the header ("Weight (kg)", "weight_lbs"), a unit column, or the file itself (Apple Health, Libra, Baseline). When the file doesn't say, Baseline guesses from the numbers, comparing them with your log if you have one, and the preview asks you to confirm it, with the guess picked.
+
+**Several weigh-ins on one day.** Baseline keeps one weigh-in a day, so it keeps each day's earliest: by its time where the file gives one, and otherwise by the file's order, read oldest first. The preview says how many were left out.
+
+**The preview** compares the file with your log and shows:
+- three counts: new dates, dates already in your log with the same weight (within 0.05 kg), and dates where your log has a different weight, with the first few weigh-ins of each
+- the dates the file covers, and the unit it was read in
+- rows that can't be imported, each with its reason: no date, a date that isn't recognized, no weight, a weight that isn't recognized, a weight outside 0.1–2,000 kg, or a date after today
+- notes longer than 100 characters, which are cut to fit
+
+**Importing** adds only the new dates. Dates already in your log keep their current weight and note, and the preview says so. The button reads **Import 412 weigh-ins**. Importing needs a connection: offline, the preview still works and the button waits. The weigh-ins go to the server as `merge-import` changes, in parts of up to 5,000, one after another with one batch ID, with a progress line. The server inserts with `ON CONFLICT DO NOTHING`, so it never changes a date the log has. If a part fails, the preview stays and **Try again** carries on from that part. Afterwards, "Imported 412 weigh-ins from Withings." shows under **Import** and as a message with **Undo**.
+
+**Undo.** **Recent imports**, under **Import**, lists your last 10 imports that still have weigh-ins, each with **Undo import**. It asks first: "Remove the 412 weigh-ins this import added? Weigh-ins you've edited since will stay." Saving an imported weigh-in again, from the form, the sheet or the edit dialog, takes it out of its import, so undoing never removes something you've touched since. It keeps its source if its weight stays the same. A new weight, typed in Baseline, has none. Undoing needs a connection too.
+
+**On the server.** `import_batches` holds each import's ID, source and time. `weigh_ins.import_batch` names the import a weigh-in came in with, and `weigh_ins.source` where it came from, null for one typed in Baseline. `merge-import` and `undo-import` need the agreement to the health data policy, like every change that saves data, and never wait on the device. The log the server returns lists the recent imports as `imports`. A `baseline_app` role made with the SQL in [Limit the app to each user's rows](#limit-the-app-to-each-users-rows) before `import_batches` existed gets its grants on it from `ALTER DEFAULT PRIVILEGES`, and row-level security covers it like the other tables.
 
 ## Privacy
 
@@ -523,6 +559,7 @@ The policy and Your data make these promises. Each line says what makes it true.
 | Baseline makes no other backups | No backup code exists. Check that the Neon project has no manual snapshot. |
 | A restore's backup branch goes within 7 days | A promise to keep by hand (`docs/breach-runbook.md`). |
 | Download has everything but the account and push addresses | `exportJson` in `export.mjs`. Tests: `baseline/tests/export.test.mjs`. |
+| An imported file is read on your device, and only its weigh-ins are sent | `readImportFiles` in `importers.mjs` runs in `import-worker.mjs`, in the browser. `importParts` sends each weigh-in's date, weight, note and source, and nothing else from the file. Tests: `baseline/tests/importers.test.mjs`. |
 | Deleting takes effect on the server at once | `delete-data` and `delete-account` in `server/store.mjs` run in one transaction, and the app waits for the answer. |
 | Withdrawing deletes the log, and nothing new is saved until you agree again | **Withdraw** opens the `delete-data` dialog. `deleteRows` removes the profile and its agreement, and `require_consent` refuses changes until a new one. |
 | The device's copy goes when you sign out or delete | `clearLogCache` and `clearDeviceData` in `account.mjs`. Tests: `baseline/tests/account.test.mjs`. |

@@ -42,7 +42,8 @@ export function weighInsCsv(state, unit = "kg") {
 
 // Everything in the log, as Baseline stores it, in metric units: the units
 // shown, what the overview shows, height, the body fat formula, the goal, the
-// reminder's hour and time zone, the weigh-ins with their notes, the waist
+// reminder's hour and time zone, the weigh-ins with their notes and where each
+// came from (`source`, null for one typed in Baseline), the waist
 // measurements, and which version of the health data policy the account agreed
 // to and when. It holds nothing that identifies the account or a device: no
 // user ID, email, or push subscription. `now` is when it was exported.
@@ -67,7 +68,7 @@ export function exportJson(state, now = new Date()) {
     reminder: log.reminder && { hour: log.reminder.hour, timeZone: log.reminder.timeZone },
     // `agreedAt` is null while an agreement made on this device hasn't synced.
     consent: log.consent && { version: log.consent.version, agreedAt: log.consent.at },
-    entries: log.entries.map(entry => ({ date: entry.date, weightKg: entry.weight, note: entry.note })),
+    entries: log.entries.map(entry => ({ date: entry.date, weightKg: entry.weight, note: entry.note, source: entry.source ?? null })),
     waists: log.waists.map(item => ({ date: item.date, waistCm: item.waist }))
   }, null, 2) + "\n";
 }

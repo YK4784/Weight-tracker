@@ -1647,3 +1647,27 @@ test("a goal saved before the cap on the target rate can't be set again as it wa
   assert.equal(inverseOf({ op: "clear-goal" }, goal(1.35)).goal.rate, 1.35);
   assert.equal(inverseOf({ op: "clear-goal" }, goal(1.351)).goal.rate, 1.351);
 });
+
+test("the log keeps up to 10 recent imports that have weigh-ins left, and each imported weigh-in's source", async () => {
+  const { IMPORTS_LISTED, normalizeImports, sourceName, sourcePhrase, validSource } = await import("../dist/model.mjs");
+  const item = index => ({ id: "batch-" + index, source: "apple-health", createdAt: "2026-11-24T09:41:00Z", count: index + 1, extra: "dropped" });
+  assert.equal(IMPORTS_LISTED, 10);
+  assert.deepEqual(normalizeImports([item(0)]), [{ id: "batch-0", source: "apple-health", createdAt: "2026-11-24T09:41:00Z", count: 1 }]);
+  assert.equal(normalizeImports(Array.from({ length: 12 }, (_, index) => item(index))).length, 10);
+  for (const bad of [{ count: 0 }, { count: 1.5 }, { source: "Apple Health" }, { createdAt: "yesterday" }, { id: "" }, { id: "x".repeat(65) }]) {
+    assert.deepEqual(normalizeImports([{ ...item(0), ...bad }]), [], JSON.stringify(bad));
+  }
+  assert.deepEqual(normalizeImports("nope"), []);
+  assert.deepEqual(normalizeState({}).imports, []);
+  assert.deepEqual(normalizeState({ imports: [item(2)] }).imports.map(entry => entry.count), [3]);
+  // A source is a short lower-case name; a weigh-in typed in Baseline has none.
+  for (const good of ["csv", "apple-health", "a1", "x".repeat(32)]) assert.ok(validSource(good), good);
+  for (const bad of ["", "-csv", "CSV", "apple health", "x".repeat(33), null, 5]) assert.ok(!validSource(bad), String(bad));
+  assert.deepEqual(normalizeState({ entries: [{ date: "2026-11-01", weight: 80, source: "fitbit" }, { date: "2026-11-02", weight: 80, source: null }] }).entries,
+    [{ date: "2026-11-01", weight: 80, note: null, source: "fitbit" }, { date: "2026-11-02", weight: 80, note: null }]);
+  assert.equal(sourceName("apple-health"), "Apple Health");
+  assert.equal(sourcePhrase("csv"), "a CSV file");
+  assert.equal(sourcePhrase("baseline"), "a Baseline export");
+  assert.equal(sourcePhrase("fitbit"), "Fitbit");
+  assert.equal(sourceName("telegram"), "telegram", "a source a later version adds reads as its name");
+});

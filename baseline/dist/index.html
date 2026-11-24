@@ -383,7 +383,7 @@
         <div class="section-head"><h2 id="data-title">Your data</h2></div>
         <div class="setting-row">
           <div class="setting-text">
-            <p>What Baseline stores and where, who handles it, your agreement to the health data policy, and downloading or deleting your data.</p>
+            <p>What Baseline stores and where, who handles it, your agreement to the health data policy, importing weigh-ins from another app, and downloading or deleting your data.</p>
           </div>
           <div class="setting-actions"><a class="small-button" href="#your-data">Open Your data</a></div>
         </div>
@@ -413,12 +413,13 @@
          line here has to stay true to the code; README.md's "Privacy" section
          lists what backs each one. -->
     <div class="settings data-page" id="data-view" hidden>
-      <p class="data-lead">What Baseline keeps about you, where it’s kept and who handles it, and how to download or delete it. The <a class="text-link" href="./health-data-privacy.html">health data privacy policy</a> has the details.</p>
+      <p class="data-lead">What Baseline keeps about you, where it’s kept and who handles it, and how to import weigh-ins, download your data or delete it. The <a class="text-link" href="./health-data-privacy.html">health data privacy policy</a> has the details.</p>
 
       <section class="settings-section" aria-labelledby="stored-title">
         <div class="section-head"><h2 id="stored-title">What Baseline stores</h2></div>
         <dl class="data-list">
-          <div class="data-row"><dt>Your log</dt><dd>Weigh-ins and their notes, waist measurements and the body fat formula you chose, your height and goal, your units and what the overview shows, and your reminder time and time zone. In Baseline’s database at Neon, in the United States, until you delete it.</dd></div>
+          <div class="data-row"><dt>Your log</dt><dd>Weigh-ins and their notes, waist measurements and the body fat formula you chose, your height and goal, your units and what the overview shows, and your reminder time and time zone. For weigh-ins you import, which app they came from, and when you imported them. In Baseline’s database at Neon, in the United States, until you delete it.</dd></div>
+          <div class="data-row"><dt>Files you import</dt><dd>Read on your device. Only the weigh-ins in them, with their dates and notes, are sent to Baseline. The file itself never is.</dd></div>
           <div class="data-row"><dt>Reminder devices</dt><dd>A push address for each device you turn reminders on from, in the same database, until you turn reminders off.</dd></div>
           <div class="data-row"><dt>Your agreement</dt><dd>Which version of the health data policy you agreed to, and when, in the same database.</dd></div>
           <div class="data-row"><dt>Your account</dt><dd>Your email address, your name and picture if you sign in with Google, and a record of your sign-ins, such as the browser and IP address. Kept by Clerk, which runs sign-in. None of your log goes to Clerk.</dd></div>
@@ -456,12 +457,68 @@
         </div>
       </section>
 
+      <!-- Import: weigh-ins from a file, read on this device (importers.mjs, in
+           import-worker.mjs), shown as a preview, then sent in parts. Recent
+           imports can each be undone. Every value from the file is shown as
+           text (textContent), never as HTML. -->
+      <section class="settings-section import" id="import" aria-labelledby="import-title">
+        <div class="section-head"><h2 id="import-title">Import</h2></div>
+        <div class="setting-row wide-actions">
+          <div class="setting-text">
+            <p>Bring in weigh-ins from a CSV file or another app’s export. You’ll see what will change before anything is saved.</p>
+            <p class="import-result" id="import-result" hidden></p>
+          </div>
+          <div class="setting-actions">
+            <button class="small-button" type="button" id="import-choose">Choose a file</button>
+            <input type="file" id="import-file" accept=".csv,.txt,.json,.xml,.zip" multiple hidden>
+          </div>
+        </div>
+        <div class="import-panel" id="import-panel" role="group" aria-labelledby="import-file-name" hidden>
+          <h3 class="import-file-name" id="import-file-name" tabindex="-1"></h3>
+          <p class="import-kind" id="import-kind"></p>
+          <div class="import-reading" id="import-reading" hidden>
+            <div class="progress-track" aria-hidden="true"><span class="progress-fill" id="import-progress-fill"></span></div>
+            <p class="import-progress" id="import-progress"></p>
+          </div>
+          <fieldset class="choice-group" id="import-order" hidden>
+            <legend class="field-label" id="import-order-question"></legend>
+            <div class="choices">
+              <label class="choice"><input type="radio" name="import-order" value="day-first"><span id="import-day-first"></span></label>
+              <label class="choice"><input type="radio" name="import-order" value="month-first"><span id="import-month-first"></span></label>
+            </div>
+          </fieldset>
+          <fieldset class="choice-group" id="import-unit" hidden>
+            <legend class="field-label">Which unit are the weights in?</legend>
+            <p class="field-hint" id="import-unit-hint"></p>
+            <div class="choices">
+              <label class="choice"><input type="radio" name="import-unit" value="kg">Kilograms</label>
+              <label class="choice"><input type="radio" name="import-unit" value="lb">Pounds</label>
+            </div>
+          </fieldset>
+          <div class="import-summary" id="import-summary" hidden>
+            <p class="import-range" id="import-range"></p>
+            <div class="import-groups" id="import-groups"></div>
+            <ul class="import-warnings" id="import-warnings"></ul>
+            <p class="note">Dates already in your log keep their current weight.</p>
+          </div>
+          <p class="import-note" id="import-status" role="status"></p>
+          <div class="import-actions">
+            <button class="button primary" type="button" id="import-submit">Import</button>
+            <button class="button secondary" type="button" id="import-cancel">Cancel</button>
+          </div>
+        </div>
+        <div class="import-recent" id="import-recent" hidden>
+          <h3 class="import-recent-title" id="import-recent-title">Recent imports</h3>
+          <ul class="import-list" id="import-list" aria-labelledby="import-recent-title"></ul>
+        </div>
+      </section>
+
       <section class="settings-section" aria-labelledby="files-title">
         <div class="section-head"><h2 id="files-title">Download or delete</h2></div>
         <div class="setting-row wide-actions">
           <div class="setting-text">
             <h3>Download</h3>
-            <p>Your weigh-ins as a spreadsheet, with each one’s note and 14-day average. Or everything in your log as JSON: weigh-ins and notes, waist measurements, height, the body fat formula, your goal, units, what the overview shows, reminder time and your agreement to the health data policy.</p>
+            <p>Your weigh-ins as a spreadsheet, with each one’s note and 14-day average. Or everything in your log as JSON: weigh-ins with their notes and where imported ones came from, waist measurements, height, the body fat formula, your goal, units, what the overview shows, reminder time and your agreement to the health data policy.</p>
           </div>
           <div class="setting-actions">
             <button class="small-button" type="button" id="download-csv">Download weigh-ins (CSV)</button>
@@ -650,6 +707,11 @@
       <p class="dialog-note" id="erase-status" aria-live="polite" hidden></p>
       <div class="dialog-actions"><button class="button secondary" type="button" id="erase-cancel" data-close>Cancel</button><button class="button danger" type="submit" id="erase-submit" disabled>Delete my data</button></div>
     </form>
+  </dialog>
+  <dialog id="undo-import-dialog" aria-labelledby="undo-import-title" aria-describedby="undo-import-text">
+    <div class="dialog-heading"><h2 id="undo-import-title">Undo this import?</h2><button class="icon-button" data-close type="button" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="./icons.svg#close"/></svg></button></div>
+    <p class="dialog-detail" id="undo-import-text"></p>
+    <div class="dialog-actions"><button class="button secondary" type="button" id="undo-import-cancel" data-close>Cancel</button><button class="button danger" type="button" id="confirm-undo-import">Undo import</button></div>
   </dialog>
   <dialog id="sign-out-dialog" aria-labelledby="sign-out-title" aria-describedby="sign-out-warning">
     <div class="dialog-heading"><h2 id="sign-out-title">Sign out?</h2><button class="icon-button" data-close type="button" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="./icons.svg#close"/></svg></button></div>

@@ -1,7 +1,13 @@
-import { CONSENT_VERSION, GOAL_MAX_MILESTONES, GOAL_MIN_RATE, GOAL_STORED_MAX_RATE, HEIGHT_UNITS, NOTE_MAX_LENGTH, SEXES, WAIST_MAX, WAIST_MIN, WEIGHT_UNITS, cleanNote, dateOf, dayOf, goalRateAllowed, noteLength, normalizeState, preferencesChange, roundHeight, roundRate, roundWaist, roundWeight, validDate, validTimeZone } from "../baseline/dist/model.mjs";
+import { CONSENT_VERSION, GOAL_MAX_MILESTONES, GOAL_MIN_RATE, GOAL_STORED_MAX_RATE, HEIGHT_UNITS, NOTE_MAX_LENGTH, SEXES, WAIST_MAX, WAIST_MIN, WEIGHT_UNITS, cleanNote, dateOf, dayOf, goalRateAllowed, noteLength, normalizeState, preferencesChange, roundHeight, roundRate, roundWaist, roundWeight, validDate, validSource, validTimeZone } from "../baseline/dist/model.mjs";
 import { parseSubscription } from "./push.mjs";
 
 export const MAX_IMPORT_ENTRIES = 20_000;
+// The most weigh-ins one merge-import request carries. The app sends a larger
+// import in parts of this size with the same batch, which keeps each request
+// well under Vercel's 4.5 MB limit on a request body.
+export const MAX_MERGE_ENTRIES = 5000;
+// An import's batch id, which the app makes with crypto.randomUUID().
+const BATCH = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 // What a deletion's `confirm` must be. The app sends it once the user has typed it.
 export const DELETE_WORD = "delete";
 
@@ -30,20 +36,53 @@ export function latestDate(now = new Date()) {
   return dateOf(dayOf(now.toISOString().slice(0, 10)) + 1);
 }
 
+// A weigh-in's date and weight, and its note if `item` has one, checked as a
+// weigh-in saved in the app is: a real date no later than `latest`, a weight
+// of 0.1 to 2,000 kg kept to 0.01 kg, and a note of text no longer than
+// NOTE_MAX_LENGTH. Null if any of them is wrong.
+function weighIn(item, latest) {
+  if (!validDate(item?.date) || item.date > latest || !inRange(item.weight, 0.1, 2000)) return null;
+  const entry = { date: item.date, weight: roundWeight(item.weight) };
+  if (item.note === undefined) return entry;
+  if (item.note !== null && typeof item.note !== "string") return null;
+  const note = cleanNote(item.note);
+  return note && noteLength(note) > NOTE_MAX_LENGTH ? null : { ...entry, note };
+}
+
 // Checks a change sent by the app. Returns the cleaned change, or null if it is invalid.
 export function parseOp(body, now = new Date()) {
   const latest = latestDate(now);
   switch (body?.op) {
+    // Without a note the existing one stays; null or "" removes it.
     case "save-weight":
     case "update-weight": {
-      if (!validDate(body.date) || body.date > latest || !inRange(body.weight, 0.1, 2000)) return null;
-      const change = { op: body.op, date: body.date, weight: roundWeight(body.weight) };
-      // Without a note the existing one stays; null or "" removes it.
-      if (body.note === undefined) return change;
-      if (body.note !== null && typeof body.note !== "string") return null;
-      const note = cleanNote(body.note);
-      return note && noteLength(note) > NOTE_MAX_LENGTH ? null : { ...change, note };
+      const entry = weighIn(body, latest);
+      return entry && { op: body.op, ...entry };
     }
+    // Weigh-ins from a file, added only on dates the log doesn't have (see
+    // store.mjs). `batch` names the import, so it can be undone, and a large
+    // one arrives in several requests with the same batch. `source` says where
+    // it came from (see IMPORT_SOURCES in model.mjs). An entry can carry its
+    // own source, or null for one typed in Baseline, as an entry in Baseline's
+    // own export does; otherwise it takes the import's. Each entry is checked
+    // as save-weight checks a weigh-in, and no date may come twice.
+    case "merge-import": {
+      if (typeof body.batch !== "string" || !BATCH.test(body.batch) || !validSource(body.source)) return null;
+      if (!Array.isArray(body.entries) || !body.entries.length || body.entries.length > MAX_MERGE_ENTRIES) return null;
+      const dates = new Set();
+      const entries = [];
+      for (const item of body.entries) {
+        const entry = weighIn(item, latest);
+        if (!entry || dates.has(entry.date)) return null;
+        if (item.source !== undefined && item.source !== null && !validSource(item.source)) return null;
+        dates.add(entry.date);
+        entries.push({ date: entry.date, weight: entry.weight, note: entry.note ?? null, source: item.source === undefined ? body.source : item.source });
+      }
+      return { op: body.op, batch: body.batch, source: body.source, entries };
+    }
+    // Removes the weigh-ins an import added that haven't been saved again since.
+    case "undo-import":
+      return typeof body.batch === "string" && BATCH.test(body.batch) ? { op: body.op, batch: body.batch } : null;
     case "delete-weight":
       return validDate(body.date) ? { op: body.op, date: body.date } : null;
     case "set-height":

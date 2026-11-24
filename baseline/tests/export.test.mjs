@@ -12,7 +12,7 @@ const log = () => normalizeState({
   reminder: { hour: 8, timeZone: "Europe/London", devices: [ENDPOINT] },
   entries: [
     { date: "2026-11-03", weight: 84.4, note: "says \"hi\", then 🙂 left" },
-    { date: "2026-11-01", weight: 85, note: null },
+    { date: "2026-11-01", weight: 85, note: null, source: "apple-health" },
     { date: "2026-11-02", weight: 84.91, note: "=HYPERLINK(\"http://evil.test\")" }
   ],
   waists: [{ date: "2026-11-02", waist: 86.61 }]
@@ -117,9 +117,9 @@ test("the JSON export holds the whole log, in metric units, under a named format
     reminder: { hour: 8, timeZone: "Europe/London" },
     consent: { version: "2026-11-23", agreedAt: "2026-11-23T08:00:00Z" },
     entries: [
-      { date: "2026-11-01", weightKg: 85, note: null },
-      { date: "2026-11-02", weightKg: 84.91, note: "=HYPERLINK(\"http://evil.test\")" },
-      { date: "2026-11-03", weightKg: 84.4, note: "says \"hi\", then 🙂 left" }
+      { date: "2026-11-01", weightKg: 85, note: null, source: "apple-health" },
+      { date: "2026-11-02", weightKg: 84.91, note: "=HYPERLINK(\"http://evil.test\")", source: null },
+      { date: "2026-11-03", weightKg: 84.4, note: "says \"hi\", then 🙂 left", source: null }
     ],
     waists: [{ date: "2026-11-02", waistCm: 86.61 }]
   });

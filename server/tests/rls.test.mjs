@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createECDH, randomBytes } from "node:crypto";
+import { createECDH, randomBytes, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import test, { after, before } from "node:test";
 import { parseEnv } from "node:util";
@@ -22,7 +22,7 @@ const OWNER_URL = process.env.TEST_DATABASE_URL;
 const GIVEN_APP_URL = process.env.TEST_DATABASE_URL_APP;
 const skip = !OWNER_URL && "set TEST_DATABASE_URL to a Neon branch's connection string to run it (see README.md)";
 
-const TABLES = ["profiles", "weigh_ins", "waist_measurements", "push_subscriptions"];
+const TABLES = ["profiles", "weigh_ins", "waist_measurements", "push_subscriptions", "import_batches"];
 const ROLE = "baseline_rls_test";
 const NOW = new Date();
 const today = NOW.toISOString().slice(0, 10);
@@ -175,6 +175,33 @@ test("the store saves each kind of change as the app's role, and reads only that
   assert.deepEqual(other.units, { weight: "kg", height: "cm" });
 });
 
+test("an import adds only new dates, into a batch of this account's, and undoing one removes only its weigh-ins", { skip }, async () => {
+  const batch = randomUUID();
+  const entries = [{ date: daysAgo(2), weight: 70 }, { date: daysAgo(6), weight: 81, note: "imported" }, { date: daysAgo(7), weight: 81.2 }];
+  const added = await store.run(A, change({ op: "merge-import", batch, source: "csv", entries }));
+  assert.equal(added.added, 2);
+  assert.deepEqual(added.log.entries, [
+    { date: daysAgo(7), weight: 81.2, note: null, source: "csv" },
+    { date: daysAgo(6), weight: 81, note: "imported", source: "csv" },
+    { date: daysAgo(2), weight: 79.4, note: "edited" }
+  ], "a date already in the log keeps its weight and note");
+  assert.deepEqual(added.log.imports.map(item => [item.id, item.source, item.count]), [[batch, "csv", 2]]);
+  // B can't add to A's batch, or undo it.
+  const borrowed = await store.run(B, change({ op: "merge-import", batch, source: "csv", entries: [{ date: daysAgo(8), weight: 90 }] }));
+  assert.equal(borrowed.added, 0);
+  assert.deepEqual(borrowed.log.imports, []);
+  assert.equal((await store.run(B, change({ op: "undo-import", batch }))).removed, 0);
+  // Saving one again takes it out of the batch, so undoing leaves it.
+  await store.run(A, change({ op: "save-weight", date: daysAgo(7), weight: 81.2 }));
+  assert.deepEqual((await store.run(A)).log.imports.map(item => item.count), [1]);
+  const undone = await store.run(A, change({ op: "undo-import", batch }));
+  assert.equal(undone.removed, 1);
+  assert.deepEqual(undone.log.entries.map(entry => [entry.date, entry.source ?? null]), [[daysAgo(7), "csv"], [daysAgo(2), null]]);
+  assert.deepEqual(undone.log.imports, []);
+  // A second import stays, for the reads below.
+  await store.run(A, change({ op: "merge-import", batch: randomUUID(), source: "apple-health", entries: [{ date: daysAgo(10), weight: 82 }] }));
+});
+
 test("a query without a WHERE clause returns only the signed-in user's rows", { skip }, async () => {
   const rows = await asUser(A, ...TABLES.map(table => app.query("SELECT user_id FROM " + table)));
   for (const [index, table] of TABLES.entries()) {
@@ -234,6 +261,9 @@ test("importing, deleting the data and deleting the account work as the app's ro
   const imported = await store.run(C, change({ op: "import", log: { height: 180, entries: [{ date: daysAgo(5), weight: 90 }, { date: daysAgo(4), weight: 89.6, note: "moved in" }] } }));
   assert.equal(imported.imported, true);
   assert.equal(imported.log.entries.length, 2);
+  const merged = await store.run(C, change({ op: "merge-import", batch: randomUUID(), source: "fitbit", entries: [{ date: daysAgo(6), weight: 90.4 }] }));
+  assert.equal(merged.log.entries.length, 3);
+  assert.equal(merged.log.imports.length, 1);
   const emptied = await store.run(C, change({ op: "delete-data", confirm: "delete" }));
   assert.deepEqual(emptied.log.entries, []);
   assert.equal(emptied.log.started, true);

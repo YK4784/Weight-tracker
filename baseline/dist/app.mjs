@@ -1,4 +1,4 @@
-import { CM_PER_IN, CONSENT_VERSION, FAST_LOSS_DAYS, FORECAST_MAX_DAYS, GOAL_MILESTONES, GOAL_RATE_CAP, KG_PER_LB, OVERALL_MIN_DAYS, QUEUEABLE_OPS, RATE_DAYS, RATE_MIN_ENTRIES, RATE_MIN_SPAN, SEXES, WINDOW_DAYS, applyOps, averageChanges, bmi, bodyFat, bodyFatChange, bodyFatHistory, calculateRate, changeTarget, calculateTrend, checkWeighIn, cleanNote, dateOf, dayOf, defaultUnits, fastGoalRate, fastLossCaution, forecastGoal, forecastReach, forecastTrend, formatAmount, formatRange, formatWaist, formatWeight, fromTenths, goalProgress, goalRateAllowed, goalRateLimit, groupByMonth, hasConsent, heightParts, inverseOf, localToday, logStatus, maxGoalRate, monthlyReports, normalizeGoal, normalizeState, oneDecimal, overallRate, positive, prettyDate, rateAsOf, recentRange, roundHeight, roundWaist, roundWeight, shiftDate, spokenHeight, spokenWeight, toTenths, todayHeading, todayLabel, validDate, validWaist, waistParts, waistTenths, weeklyTrendShown, weeklyTrendWords, weighInQuestion, weightParts } from "./model.mjs";
+import { CM_PER_IN, CONSENT_VERSION, sourceName, sourcePhrase, FAST_LOSS_DAYS, FORECAST_MAX_DAYS, GOAL_MILESTONES, GOAL_RATE_CAP, KG_PER_LB, OVERALL_MIN_DAYS, QUEUEABLE_OPS, RATE_DAYS, RATE_MIN_ENTRIES, RATE_MIN_SPAN, SEXES, WINDOW_DAYS, applyOps, averageChanges, bmi, bodyFat, bodyFatChange, bodyFatHistory, calculateRate, changeTarget, calculateTrend, checkWeighIn, cleanNote, dateOf, dayOf, defaultUnits, fastGoalRate, fastLossCaution, forecastGoal, forecastReach, forecastTrend, formatAmount, formatRange, formatWaist, formatWeight, fromTenths, goalProgress, goalRateAllowed, goalRateLimit, groupByMonth, hasConsent, heightParts, inverseOf, localToday, logStatus, maxGoalRate, monthlyReports, normalizeGoal, normalizeState, oneDecimal, overallRate, positive, prettyDate, rateAsOf, recentRange, roundHeight, roundWaist, roundWeight, shiftDate, spokenHeight, spokenWeight, toTenths, todayHeading, todayLabel, validDate, validWaist, waistParts, waistTenths, weeklyTrendShown, weeklyTrendWords, weighInQuestion, weightParts } from "./model.mjs";
 import { BodyFatChart, TrendChart, rangeStart } from "./chart.mjs";
 import { claimLegacyLog, clearDeviceData, clearLogCache, fastLossHiddenKeyFor, hasLegacyLog, lastUser, readLogCache, readOutbox, signOutWarning, storageKeyFor, writeLogCache, writeOutbox } from "./account.mjs";
 import { csvFileName, exportJson, jsonFileName, weighInsCsv } from "./export.mjs";
@@ -1606,6 +1606,9 @@ async function refreshLog() {
 // nobody signed out and they exist nowhere else.
 function closeLog({ keepOutbox = false } = {}) {
   forgetChanges();
+  cancelImport();
+  importResult = null;
+  undoingImports.clear();
   account = null;
   session = null;
   state = saved = null;
@@ -2210,6 +2213,370 @@ function showYourData() {
   $("delete-note").textContent = "Delete my data empties your log on every device and keeps your account." +
     (whole ? " Delete my account deletes your log, then your account." : "");
   showAgreement();
+  showImport();
+}
+
+// Import: weigh-ins from a file, in Your data. The file is read on this
+// device, off the page's thread (import-worker.mjs), and only the weigh-ins
+// in it are sent. Before anything is saved, a preview compares them with the
+// log on screen (see importers.mjs). Importing adds weigh-ins only on dates
+// the log doesn't have, in parts of MERGE_PART, all under one batch, which
+// the recent imports list can undo. It needs a connection, and never waits on
+// this device (see merge-import and undo-import in server/ops.mjs).
+const MERGE_PART = 5000; // MAX_MERGE_ENTRIES in server/ops.mjs.
+const IMPORT_EXAMPLES = 3; // Weigh-ins shown from each group in the preview.
+// The import on screen, or null: { names, stage, progress, error, file,
+// answers, resolved, key, send }. `stage` is "reading", "error", "preview",
+// "sending" or "failed"; `file` is what the worker read; `answers` holds the
+// user's { dateOrder, unit }; `resolved` is resolveImport's result for them;
+// `send` follows the parts on their way, with the preview as it was when
+// they set off, so the counts hold still while the parts land.
+let importing = null;
+let importWorker = null;
+let importLib = null; // importers.mjs, once it has loaded.
+let importLoading = null;
+let importResult = null; // The line under Import after the last import, or null.
+const undoingImports = new Set(); // Batches whose undo is on its way.
+// The first file chosen loads importers.mjs, which most visits never need.
+const loadImporters = () => importLoading ??= import("./importers.mjs").then(lib => importLib = lib, error => {
+  importLoading = null;
+  throw error;
+});
+const count = (number, one, many = one + "s") => number.toLocaleString("en-US") + " " + (number === 1 ? one : many);
+
+// Stops reading a file, and closes the panel.
+function cancelImport() {
+  importWorker?.terminate();
+  importWorker = null;
+  importing = null;
+}
+
+async function startImport(files) {
+  if (!files.length || !state) return;
+  cancelImport();
+  const job = importing = { names: files.map(file => file.name), stage: "reading", progress: null, answers: { dateOrder: null, unit: null } };
+  importResult = null;
+  showImport();
+  const done = (file, message) => {
+    if (importing !== job) return;
+    importWorker?.terminate();
+    importWorker = null;
+    if (message) Object.assign(job, { stage: "error", error: message });
+    else Object.assign(job, { stage: "preview", file });
+    showImport();
+    focusImport();
+  };
+  let lib;
+  try { lib = await loadImporters(); } catch (error) { console.error(error); return done(null, "Baseline couldn’t open the importer. Check your connection, then try again."); }
+  if (importing !== job) return;
+  // A browser without module workers reads the file on the page instead.
+  const readHere = () => lib.readImportFiles(files, { onProgress: showReadProgress(job) })
+    .then(file => done(file), error => { console.error(error); done(null, error instanceof lib.ImportError ? error.message : "Baseline couldn’t read this file."); });
+  let worker;
+  try { worker = importWorker = new Worker("./import-worker.mjs", { type: "module" }); } catch { return readHere(); }
+  worker.addEventListener("message", ({ data }) => {
+    if (data.type === "progress") showReadProgress(job)(data);
+    else done(data.file ?? null, data.type === "error" ? data.message : null);
+  });
+  worker.addEventListener("error", event => {
+    event.preventDefault();
+    if (importing !== job) return;
+    worker.terminate();
+    importWorker = null;
+    readHere();
+  });
+  worker.postMessage({ files });
+}
+
+const showReadProgress = job => ({ read, total }) => {
+  if (importing !== job) return;
+  job.progress = total ? read / total : null;
+  showImportProgress();
+};
+
+// Moves focus to the panel's heading, so a screen reader starts there.
+function focusImport() {
+  if (currentView() === "data" && !$("import-panel").hidden) $("import-file-name").focus({ preventScroll: true });
+}
+
+// What the file holds, read with the user's answers, and how it compares with the log on screen.
+function resolveImporting() {
+  const job = importing;
+  const key = [job.answers.dateOrder, job.answers.unit, today].join(" ");
+  if (job.key !== key) {
+    job.resolved = importLib.resolveImport(job.file, { ...job.answers, today, log: state.entries.map(entry => entry.weight), accountUnit: unit() });
+    job.key = key;
+  }
+  return { resolved: job.resolved, preview: job.resolved.ready ? importLib.previewImport(job.resolved.rows, state.entries) : null };
+}
+
+const unitWords = { kg: "kilograms", lb: "pounds", st: "stones and pounds", mixed: "kilograms and pounds, as each row says" };
+
+function listOf(id, lines) {
+  $(id).replaceChildren(...lines.map(text => {
+    const item = document.createElement("li");
+    item.textContent = text;
+    return item;
+  }));
+}
+
+// A group in the preview: its count as a heading, then a line for each of
+// `examples`, and how many more there are.
+function importGroup(head, examples, describe, more = 0) {
+  const group = document.createElement("div");
+  group.className = "import-group";
+  const title = document.createElement("p");
+  title.className = "import-group-head" + (examples.length ? "" : " is-empty");
+  title.textContent = head;
+  const list = document.createElement("ul");
+  list.className = "import-examples";
+  list.hidden = !examples.length;
+  const lines = examples.map(describe);
+  if (more > 0) lines.push("and " + more.toLocaleString("en-US") + " more");
+  for (const text of lines) {
+    const item = document.createElement("li");
+    item.textContent = text;
+    list.append(item);
+  }
+  group.append(title, list);
+  return group;
+}
+// The first few of `rows`, for importGroup.
+const firstOf = (head, rows, describe) => importGroup(head, rows.slice(0, IMPORT_EXAMPLES), describe, rows.length - IMPORT_EXAMPLES);
+
+const noted = row => row.note ? " · “" + row.note + "”" : "";
+
+// The Import section: the line after the last import, the panel for a file,
+// and the recent imports. Every value from a file goes in as text.
+function showImport() {
+  if (!state) return;
+  const offline = navigator.onLine === false;
+  $("import-result").textContent = importResult ?? "";
+  $("import-result").hidden = !importResult;
+  $("import-choose").disabled = importing?.stage === "sending";
+  showRecentImports(offline);
+  const job = importing;
+  $("import-panel").hidden = !job;
+  if (!job) return;
+  $("import-file-name").textContent = job.names.length === 1 ? job.names[0] : count(job.names.length, "file") + ": " + job.names.join(", ");
+  const source = job.file?.source;
+  $("import-kind").textContent = source ? "From " + sourcePhrase(source) : "";
+  $("import-kind").hidden = !source;
+  const reading = job.stage === "reading";
+  $("import-reading").hidden = !reading && job.stage !== "sending";
+  let status = "";
+  let submit = null; // The button's label, or null to hide it.
+  let ready = false;
+  if (job.stage === "error") {
+    status = job.error;
+  } else if (!reading) {
+    const { resolved, preview } = job.send ? job.send.shown : resolveImporting();
+    showImportQuestions(resolved);
+    // Once parts are on their way, the answers they were read with stay.
+    $("import-order").disabled = $("import-unit").disabled = Boolean(job.send);
+    $("import-summary").hidden = !preview;
+    if (preview) {
+      showImportPreview(resolved, preview);
+      const fresh = preview.fresh.length;
+      submit = job.stage === "failed" ? "Try again" : fresh ? "Import " + count(fresh, "weigh-in") : "Nothing to import";
+      ready = fresh > 0 && job.stage !== "sending";
+      if (!resolved.rows.length && !resolved.rejected.length) status = "There are no weigh-ins in this file.";
+      else if (!fresh && resolved.rows.length) status = "Every date in this file is already in your log.";
+    } else {
+      submit = "Import";
+      status = "Answer the question above to see what this file holds.";
+    }
+    if (job.stage === "failed") status = job.error;
+    else if (job.stage === "sending") submit = "Importing…";
+    else if (offline && ready) {
+      status = "Importing needs a connection. Try again when you’re back online.";
+      ready = false;
+    }
+  }
+  if (reading || job.stage === "error") {
+    $("import-order").hidden = $("import-unit").hidden = $("import-summary").hidden = true;
+  }
+  $("import-status").textContent = status;
+  $("import-submit").hidden = submit === null;
+  $("import-submit").textContent = submit ?? "";
+  $("import-submit").disabled = !ready;
+  $("import-cancel").textContent = job.stage === "error" ? "Close" : "Cancel";
+  $("import-cancel").disabled = job.stage === "sending";
+  showImportProgress();
+}
+
+function showImportProgress() {
+  const job = importing;
+  if (!job || $("import-reading").hidden) return;
+  let share = job.progress;
+  let text = share === null ? "Reading…" : "Reading… " + Math.floor(share * 100) + "%";
+  if (job.stage === "sending") {
+    share = job.send.total ? job.send.sent / job.send.total : 0;
+    text = "Importing… " + job.send.sent.toLocaleString("en-US") + " of " + count(job.send.total, "weigh-in");
+  }
+  $("import-progress-fill").style.width = share === null ? "0%" : (share * 100).toFixed(1) + "%";
+  $("import-progress").textContent = text;
+}
+
+function showImportQuestions(resolved) {
+  const order = resolved.ask.dateOrder;
+  $("import-order").hidden = !order;
+  if (order) {
+    $("import-order-question").textContent = order.text;
+    $("import-day-first").textContent = order.dayFirst[0].toUpperCase() + order.dayFirst.slice(1);
+    $("import-month-first").textContent = order.monthFirst;
+    for (const input of document.querySelectorAll('[name="import-order"]')) input.checked = input.value === order.answer;
+  }
+  const units = resolved.ask.unit;
+  $("import-unit").hidden = !units;
+  if (units) {
+    const chosen = units.answer ?? units.guess;
+    $("import-unit-hint").textContent = units.answer ? "The file doesn’t say." : "The file doesn’t say. They look like " + unitWords[units.guess] + ", so check before you import.";
+    for (const input of document.querySelectorAll('[name="import-unit"]')) input.checked = input.value === chosen;
+  }
+}
+
+function showImportPreview(resolved, preview) {
+  const range = preview.from ? (preview.from === preview.to ? prettyDate(preview.from, "full") : prettyDate(preview.from, "full") + " – " + prettyDate(preview.to, "full")) : "";
+  $("import-range").textContent = [range, resolved.unit && "weights in " + unitWords[resolved.unit]].filter(Boolean).join(" · ");
+  $("import-range").hidden = !$("import-range").textContent;
+  const groups = [
+    firstOf(count(preview.fresh.length, "new date"), preview.fresh, row => shortDate(row.date) + " · " + weight(row.weightKg) + noted(row)),
+    firstOf(preview.same.length.toLocaleString("en-US") + " already in your log with the same weight", preview.same, row => shortDate(row.date) + " · " + weight(row.weightKg)),
+    firstOf(count(preview.different.length, "date where your log has", "dates where your log has") + " a different weight", preview.different,
+      row => shortDate(row.date) + " · " + weight(row.weightKg) + " in the file, " + weight(row.logKg) + " in your log")
+  ];
+  // Rows that can't be imported: a few of each reason, as written in the file.
+  if (resolved.rejected.length) {
+    const reasons = new Map();
+    for (const row of resolved.rejected) reasons.set(row.reason, [...reasons.get(row.reason) ?? [], row]);
+    const examples = [...reasons].flatMap(([reason, rows]) => rows.slice(0, IMPORT_EXAMPLES).map(row => ({ reason, row, total: rows.length })));
+    groups.push(importGroup(count(resolved.rejected.length, "row") + " can’t be imported", examples, ({ reason, row, total }) =>
+      reason + (total > 1 ? " (" + total.toLocaleString("en-US") + ")" : "") + ": " + row.place + [row.date, row.weight].filter(Boolean).map(text => " · " + text).join("")));
+  }
+  $("import-groups").replaceChildren(...groups);
+  listOf("import-warnings", resolved.warnings);
+}
+
+function showRecentImports(offline) {
+  const imports = state.imports;
+  $("import-recent").hidden = !imports.length;
+  $("import-list").replaceChildren(...imports.map(item => {
+    const row = document.createElement("li");
+    row.className = "setting-row";
+    const text = document.createElement("div");
+    text.className = "setting-text";
+    const name = document.createElement("h4");
+    name.className = "import-source";
+    name.textContent = sourceName(item.source);
+    const detail = document.createElement("p");
+    detail.textContent = count(item.count, "weigh-in") + " · imported " + shortDate(localToday(new Date(item.createdAt)));
+    text.append(name, detail);
+    const actions = document.createElement("div");
+    actions.className = "setting-actions";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "small-button";
+    button.dataset.undoImport = item.id;
+    const busy = undoingImports.has(item.id);
+    button.textContent = busy ? "Undoing…" : "Undo import";
+    button.disabled = busy || offline || importing?.stage === "sending";
+    actions.append(button);
+    row.append(text, actions);
+    return row;
+  }));
+}
+
+// Sends the new dates in parts, one after another, with one batch id. After a
+// failure, sending again goes on from the part that failed: a part the server
+// already has adds nothing a second time.
+async function sendImport() {
+  const job = importing;
+  if (!job || !state || job.stage !== "preview" && job.stage !== "failed" || navigator.onLine === false) return;
+  if (job.stage === "preview") {
+    const { resolved, preview } = resolveImporting();
+    if (!preview?.fresh.length) return;
+    job.send = { batch: crypto.randomUUID(), source: resolved.source, parts: importLib.importParts(preview.fresh, MERGE_PART), next: 0, sent: 0, total: preview.fresh.length, shown: { resolved, preview } };
+  }
+  const send = job.send;
+  const current = session;
+  const userId = account.id;
+  Object.assign(job, { stage: "sending", error: null });
+  showImport();
+  while (send.next < send.parts.length) {
+    const part = send.parts[send.next];
+    let result = null;
+    let failure = null;
+    try { result = await enqueue(() => sendLog({ op: "merge-import", batch: send.batch, source: send.source, entries: part }, userId)); } catch (error) { failure = error; }
+    if (session !== current || importing !== job) return;
+    if (failure) {
+      console.error(failure);
+      if (lacksConsent(failure)) {
+        importing = null;
+        forgetConsent();
+        showState();
+        return;
+      }
+      const sofar = send.sent ? " " + send.sent.toLocaleString("en-US") + " of " + count(send.total, "weigh-in") + " are in your log, and Recent imports can undo them." : "";
+      Object.assign(job, { stage: "failed", error: (turnedDown(failure) ? "Baseline didn’t accept part of this file." : failure instanceof Unreachable ? "Couldn’t reach Baseline. Check your connection and try again." : "Couldn’t import. Try again.") + sofar });
+      showImport();
+      return;
+    }
+    send.next++;
+    send.sent += part.length;
+    receive(result.log);
+    showState();
+  }
+  importing = null;
+  const added = saved.imports.find(item => item.id === send.batch)?.count ?? 0;
+  importResult = added ? "Imported " + count(added, "weigh-in") + " from " + sourcePhrase(send.source) + "." : "Nothing was imported. Every date was already in your log.";
+  showImport();
+  $("import-choose").focus({ preventScroll: true });
+  if (added) notify(importResult, offered({ label: "Undo", duration: UNDO_DURATION, run: () => undoImport(send.batch) }));
+}
+
+// Removes what an import added and hasn't been saved since. It needs a
+// connection, and the log changes once the server has done it.
+async function undoImport(batch) {
+  if (!state || !account) return;
+  if (navigator.onLine === false) {
+    notify("Undoing an import needs a connection. Try again when you’re back online.");
+    return;
+  }
+  const current = session;
+  const userId = account.id;
+  undoingImports.add(batch);
+  showImport();
+  let result = null;
+  let failure = null;
+  try { result = await enqueue(() => sendLog({ op: "undo-import", batch }, userId)); } catch (error) { failure = error; }
+  if (session !== current) return;
+  undoingImports.delete(batch);
+  if (failure) {
+    console.error(failure);
+    if (lacksConsent(failure)) {
+      forgetConsent();
+      showState();
+      return;
+    }
+    notify("Couldn’t undo the import. Check your connection and try again.", { error: true, action: { label: "Try again", run: () => undoImport(batch) } });
+    showImport();
+    return;
+  }
+  importResult = null;
+  receive(result.log);
+  showState();
+  notify("Import undone. " + (result.removed ? count(result.removed, "weigh-in") + " removed." : "Nothing was left to remove."));
+}
+
+let undoImportTarget = null;
+function openUndoImport(batch) {
+  const item = state?.imports.find(entry => entry.id === batch);
+  if (!item) return;
+  undoImportTarget = batch;
+  $("undo-import-text").textContent = "Remove the " + count(item.count, "weigh-in") + " this import added? Weigh-ins you’ve edited since will stay.";
+  $("undo-import-dialog").showModal();
+  $("undo-import-cancel").focus();
 }
 
 // An iPhone or iPad app on the Home Screen, where a download link does nothing useful.
@@ -2329,6 +2696,9 @@ function eraseFailed(failure, message) {
 // anything sent before the deletion. The empty log replaces it on screen.
 function startAfresh(userId, log) {
   forgetChanges();
+  cancelImport();
+  importResult = null;
+  undoingImports.clear();
   session = {};
   cachedAt = null;
   cacheUpdating = false;
@@ -2981,6 +3351,36 @@ $("confirm-sign-out").addEventListener("click", () => {
   $("sign-out-dialog").close();
   finishSignOut();
 });
+$("import-choose").addEventListener("click", () => {
+  $("import-file").value = "";
+  $("import-file").click();
+});
+$("import-file").addEventListener("change", () => startImport([...$("import-file").files]));
+$("import-cancel").addEventListener("click", () => {
+  if (importing?.stage === "sending") return;
+  cancelImport();
+  showImport();
+  $("import-choose").focus({ preventScroll: true });
+});
+$("import-submit").addEventListener("click", sendImport);
+$("import-order").addEventListener("change", event => {
+  if (!importing) return;
+  importing.answers.dateOrder = event.target.value;
+  showImport();
+});
+$("import-unit").addEventListener("change", event => {
+  if (!importing) return;
+  importing.answers.unit = event.target.value;
+  showImport();
+});
+$("import-list").addEventListener("click", event => {
+  const batch = event.target.closest("[data-undo-import]")?.dataset.undoImport;
+  if (batch) openUndoImport(batch);
+});
+$("confirm-undo-import").addEventListener("click", () => {
+  $("undo-import-dialog").close();
+  undoImport(undoImportTarget);
+});
 $("download-csv").addEventListener("click", downloadCsv);
 $("download-json").addEventListener("click", downloadJson);
 $("erase-download").addEventListener("click", downloadJson);
@@ -3078,8 +3478,15 @@ document.addEventListener("visibilitychange", () => {
   syncDay();
   reconnect();
 });
-window.addEventListener("online", reconnect);
-window.addEventListener("offline", () => { if (state) showLogStatus(); });
+window.addEventListener("online", () => {
+  reconnect();
+  if (state) showImport();
+});
+window.addEventListener("offline", () => {
+  if (!state) return;
+  showLogStatus();
+  showImport();
+});
 window.addEventListener("focus", syncDay);
 startAuth();
 startWorker();

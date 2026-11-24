@@ -14,7 +14,7 @@
 // files are stored changes. The new worker then fills a new cache and deletes
 // this one. Edits to a listed file need no bump, since each load with a
 // connection stores the new copy.
-const CACHE = "baseline-shell-v3";
+const CACHE = "baseline-shell-v4";
 
 // Every file the app needs to open, relative to this worker. npm test checks
 // that each file in baseline/dist/ is listed here or deliberately left out.
@@ -28,6 +28,8 @@ const SHELL = [
   "chart.mjs",
   "account.mjs",
   "export.mjs",
+  "importers.mjs",
+  "import-worker.mjs",
   "auth.mjs",
   "config.mjs",
   "icons.svg",

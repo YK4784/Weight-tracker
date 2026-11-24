@@ -1,0 +1,8 @@
+#Version: 6
+#Units: lbs
+
+#date;weight;weight trend;body fat;body fat trend;muscle mass;muscle mass trend;log
+2026-01-05T15:30:00.000Z;185.2;185.2;22.1;22.1;;;
+2026-01-06T15:41:00.000Z;184.8;185.1;;;;;after travel
+2026-01-06T22:10:00.000Z;186.0;185.2;;;;;
+2026-01-07T14:58:00.000Z;184.6;185.0;;;;;

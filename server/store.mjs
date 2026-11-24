@@ -1,11 +1,14 @@
 import { neon } from "@neondatabase/serverless";
 import { schema } from "./schema.mjs";
-import { CONSENT_VERSION, normalizeConsent, normalizePreferences } from "../baseline/dist/model.mjs";
+import { CONSENT_VERSION, IMPORTS_LISTED, normalizeConsent, normalizePreferences } from "../baseline/dist/model.mjs";
 import { CONSENT_ERROR_CODE, ConsentRequired, needsConsent } from "./ops.mjs";
 import { SetupError } from "./log.mjs";
 
 // The most devices an account can get reminders on.
 export const MAX_DEVICES = 10;
+// The reads at the end of every request's transaction: the profile, the
+// weigh-ins, the waist measurements, the devices and the recent imports.
+const READS = 5;
 
 // The Neon endpoint and database a connection string points at. The pooled
 // host is the endpoint's host with "-pooler" added, so both count as one.
@@ -54,6 +57,7 @@ export function createStore(url = process.env.DATABASE_URL, { connect = neon, ap
     sql`DELETE FROM weigh_ins WHERE user_id = ${userId}`,
     sql`DELETE FROM waist_measurements WHERE user_id = ${userId}`,
     sql`DELETE FROM push_subscriptions WHERE user_id = ${userId}`,
+    sql`DELETE FROM import_batches WHERE user_id = ${userId}`,
     sql`DELETE FROM profiles WHERE user_id = ${userId}`
   ];
 
@@ -62,18 +66,53 @@ export function createStore(url = process.env.DATABASE_URL, { connect = neon, ap
       case undefined:
         return [];
       // A change without a note keeps the note already on that date (see parseOp).
+      // Saving an imported weigh-in again takes it out of its import, so undoing
+      // the import never removes a weigh-in saved since. It keeps its source
+      // only if the weight stays the same; a new weight was typed in Baseline.
       case "save-weight":
         return [
           sql`INSERT INTO profiles (user_id, started) VALUES (${userId}, true)
               ON CONFLICT (user_id) DO UPDATE SET started = true, updated_at = now()`,
           sql`INSERT INTO weigh_ins (user_id, date, weight_kg, note) VALUES (${userId}, ${change.date}::date, ${change.weight}, ${change.note ?? null}::text)
               ON CONFLICT (user_id, date) DO UPDATE SET weight_kg = excluded.weight_kg,
-                note = CASE WHEN ${change.note === undefined}::boolean THEN weigh_ins.note ELSE excluded.note END, updated_at = now()`
+                note = CASE WHEN ${change.note === undefined}::boolean THEN weigh_ins.note ELSE excluded.note END,
+                source = CASE WHEN weigh_ins.weight_kg = excluded.weight_kg THEN weigh_ins.source END, import_batch = NULL, updated_at = now()`
         ];
       case "update-weight":
         return [sql`UPDATE weigh_ins SET weight_kg = ${change.weight},
-                      note = CASE WHEN ${change.note === undefined}::boolean THEN note ELSE ${change.note ?? null}::text END, updated_at = now()
+                      note = CASE WHEN ${change.note === undefined}::boolean THEN note ELSE ${change.note ?? null}::text END,
+                      source = CASE WHEN weight_kg = ${change.weight} THEN source END, import_batch = NULL, updated_at = now()
                     WHERE user_id = ${userId} AND date = ${change.date}::date RETURNING 1`];
+      // Adds the weigh-ins on dates the log doesn't have, and never changes one
+      // it has. The import's row comes first, made by the first request of the
+      // batch, and the weigh-ins go in only if it belongs to this account. The
+      // last query counts what went in.
+      case "merge-import":
+        return [
+          sql`INSERT INTO profiles (user_id, started) VALUES (${userId}, true)
+              ON CONFLICT (user_id) DO UPDATE SET started = true, updated_at = now()`,
+          sql`INSERT INTO import_batches (id, user_id, source) VALUES (${change.batch}, ${userId}, ${change.source}) ON CONFLICT (id) DO NOTHING`,
+          sql`
+            WITH added AS (
+              INSERT INTO weigh_ins (user_id, date, weight_kg, note, source, import_batch)
+              SELECT ${userId}, t.date, t.weight, t.note, t.source, ${change.batch}
+              FROM unnest(${change.entries.map(entry => entry.date)}::date[], ${change.entries.map(entry => entry.weight)}::numeric[],
+                          ${change.entries.map(entry => entry.note)}::text[], ${change.entries.map(entry => entry.source)}::text[]) AS t(date, weight, note, source)
+              WHERE EXISTS (SELECT 1 FROM import_batches WHERE id = ${change.batch} AND user_id = ${userId})
+              ON CONFLICT (user_id, date) DO NOTHING
+              RETURNING 1
+            )
+            SELECT count(*)::int AS added FROM added`
+        ];
+      // Removes the import's weigh-ins that haven't been saved since, and the
+      // import itself. The last query counts what was removed.
+      case "undo-import":
+        return [
+          sql`DELETE FROM import_batches WHERE user_id = ${userId} AND id = ${change.batch}`,
+          sql`
+            WITH removed AS (DELETE FROM weigh_ins WHERE user_id = ${userId} AND import_batch = ${change.batch} RETURNING 1)
+            SELECT count(*)::int AS removed FROM removed`
+        ];
       case "delete-weight":
         return [sql`DELETE FROM weigh_ins WHERE user_id = ${userId} AND date = ${change.date}::date`];
       case "set-height":
@@ -208,18 +247,24 @@ export function createStore(url = process.env.DATABASE_URL, { connect = neon, ap
                      goal_rate_kg_week::float8 AS goal_rate, goal_milestones, weight_unit, height_unit, preferences, reminder_hour, time_zone, sex,
                      consent_version, to_char(consented_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS consented_at
               FROM profiles WHERE user_id = ${userId}`,
-          sql`SELECT to_char(date, 'YYYY-MM-DD') AS date, weight_kg::float8 AS weight, note
+          sql`SELECT to_char(date, 'YYYY-MM-DD') AS date, weight_kg::float8 AS weight, note, source
               FROM weigh_ins WHERE user_id = ${userId} ORDER BY date`,
           sql`SELECT to_char(date, 'YYYY-MM-DD') AS date, waist_cm::float8 AS waist
               FROM waist_measurements WHERE user_id = ${userId} ORDER BY date`,
-          sql`SELECT endpoint FROM push_subscriptions WHERE user_id = ${userId} ORDER BY created_at, endpoint`
+          sql`SELECT endpoint FROM push_subscriptions WHERE user_id = ${userId} ORDER BY created_at, endpoint`,
+          // The recent imports with weigh-ins left to undo (see normalizeImports in model.mjs).
+          sql`SELECT b.id, b.source, to_char(b.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_at, count(*)::int AS count
+              FROM import_batches b JOIN weigh_ins w ON w.user_id = b.user_id AND w.import_batch = b.id
+              WHERE b.user_id = ${userId}
+              GROUP BY b.id ORDER BY b.created_at DESC, b.id LIMIT ${IMPORTS_LISTED}`
         ]);
       } catch (error) {
         throw error?.code === CONSENT_ERROR_CODE ? new ConsentRequired() : error;
       }
-      const [[profile], entries, waists, devices] = results.slice(-4);
-      // What the change's own query returned, after the setting and the guard.
-      const written = results[account.length + guard.length];
+      const [[profile], entries, waists, devices, imports] = results.slice(-READS);
+      // What the change's own query returned, after the setting and the guard:
+      // the last of its queries.
+      const written = results[account.length + guard.length + queries.length - 1];
       const goal = profile?.goal_weight == null ? null : {
         weight: profile.goal_weight, startDate: profile.goal_start_date, startWeight: profile.goal_start_weight,
         rate: profile.goal_rate, milestones: profile.goal_milestones
@@ -231,9 +276,17 @@ export function createStore(url = process.env.DATABASE_URL, { connect = neon, ap
       const reminder = profile?.reminder_hour == null || !devices.length ? null
         : { hour: profile.reminder_hour, timeZone: profile.time_zone, devices: devices.map(device => device.endpoint) };
       const consent = normalizeConsent({ version: profile?.consent_version, at: profile?.consented_at });
-      const result = { log: { started: Boolean(profile?.started), consent, height: profile?.height ?? null, sex: profile?.sex ?? null, goal, units, preferences, reminder, entries, waists } };
+      const result = { log: {
+        started: Boolean(profile?.started), consent, height: profile?.height ?? null, sex: profile?.sex ?? null, goal, units, preferences, reminder,
+        // A weigh-in typed in Baseline has no source, so the reply leaves it out.
+        entries: entries.map(({ source, ...entry }) => source ? { ...entry, source } : entry),
+        waists,
+        imports: imports.map(row => ({ id: row.id, source: row.source, createdAt: row.created_at, count: row.count }))
+      } };
       if (change?.op === "update-weight") result.found = written.length > 0;
       if (change?.op === "import") result.imported = written[0]?.imported > 0;
+      if (change?.op === "merge-import") result.added = written[0]?.added ?? 0;
+      if (change?.op === "undo-import") result.removed = written[0]?.removed ?? 0;
       return result;
     },
 

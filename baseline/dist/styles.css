@@ -480,6 +480,37 @@ a.small-button { display: inline-block; text-decoration: none; }
 :is(.data-row, .policy-list > div) dd { max-width: 60ch; color: var(--ink-2); text-wrap: pretty; }
 .data-never, .policy ul { margin: 0; padding: 0; list-style: none; }
 :is(.data-never, .policy ul) li { padding-block: 14px; border-bottom: 1px solid var(--rule); color: var(--ink-2); text-wrap: pretty; }
+/* Import: the panel for a file, between hairlines like the rows around it,
+   with the three counts as rows and a few of each group's weigh-ins under them. */
+.setting-text .import-result { margin-top: 8px; color: var(--ink); font-weight: 600; }
+.import-panel { padding-block: 16px 20px; border-bottom: 1px solid var(--rule); }
+.import-file-name:focus { outline: none; }
+.import-file-name { margin: 0; font-size: 1rem; font-weight: 700; overflow-wrap: anywhere; }
+.import-kind { margin-top: 2px; color: var(--ink-2); }
+.import-reading { margin-top: 14px; }
+.import-reading .progress-track { margin-bottom: 8px; }
+.import-progress { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.import-panel .choice-group { margin-top: 18px; }
+.import-panel .choice-group .field-hint { margin: -2px 0 8px; }
+.import-range { margin-top: 14px; color: var(--ink-2); }
+.import-groups { margin-top: 12px; border-top: 1px solid var(--ink); }
+.import-group { padding-block: 12px; border-bottom: 1px solid var(--rule); }
+.import-group-head { font-weight: 700; }
+.import-group-head.is-empty { color: var(--ink-3); font-weight: 500; }
+.import-examples { margin: 4px 0 0; padding: 0; list-style: none; color: var(--ink-2); font-size: .9375rem; font-variant-numeric: tabular-nums; }
+.import-examples li { overflow-wrap: anywhere; }
+.import-examples li + li { margin-top: 2px; }
+.import-warnings { margin: 12px 0 0; padding-left: 1.25em; color: var(--ink-2); }
+.import-warnings:empty { display: none; }
+.import-warnings li + li { margin-top: 4px; }
+.import-summary .note { margin-top: 12px; }
+.import-note { margin-top: 14px; padding: 12px 14px; border-radius: 8px; background: var(--surface); color: var(--ink-2); text-wrap: pretty; }
+.import-note:empty { display: none; }
+.import-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+.import-recent { margin-top: 24px; }
+.import-recent-title { margin: 0 0 8px; font-size: 1rem; font-weight: 700; }
+.import-list { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--rule); }
+.import-source { margin: 0; font-size: 1rem; font-weight: 700; }
 /* The account line and the links to Your data and the policy. */
 .app-footer { margin-top: 48px; color: var(--ink-3); font-size: .875rem; text-align: center; }
 .footer-links { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 20px; }

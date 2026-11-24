@@ -289,9 +289,34 @@ export function noteLength(note) {
 }
 
 // Cuts a cleaned note to NOTE_MAX_LENGTH characters.
-function shortNote(value) {
+export function shortNote(value) {
   const note = cleanNote(value);
   return note && noteLength(note) > NOTE_MAX_LENGTH ? [...note].slice(0, NOTE_MAX_LENGTH).join("").trim() : note;
+}
+
+// Where a weigh-in came from (weigh_ins.source in server/schema.mjs): a short
+// name, such as "apple-health" for one brought in by the importer, or null for
+// one typed in Baseline. It follows the weight, so saving a different weight
+// on that date in Baseline sets it back to null (see saveWeight). The importer
+// (importers.mjs) uses the names in IMPORT_SOURCES. Later ways in, such as an
+// API, add their own.
+export const IMPORT_SOURCES = { csv: "CSV file", baseline: "Baseline export", "apple-health": "Apple Health", fitbit: "Fitbit", trendweight: "TrendWeight", libra: "Libra" };
+const SOURCE_ARTICLES = new Set(["csv", "baseline"]);
+export const validSource = value => typeof value === "string" && /^[a-z0-9][a-z0-9-]{0,31}$/.test(value);
+export const sourceName = source => IMPORT_SOURCES[source] ?? source;
+// For a sentence: "a CSV file" or "Apple Health".
+export const sourcePhrase = source => (SOURCE_ARTICLES.has(source) ? "a " : "") + sourceName(source);
+
+// The most recent imports the log lists, each of which can be undone (see
+// merge-import and undo-import in server/store.mjs): its batch id, its source,
+// when it was made (an ISO time from the server) and how many of its weigh-ins
+// are left to undo. Newest first. An import with nothing left isn't listed.
+export const IMPORTS_LISTED = 10;
+export function normalizeImports(value) {
+  const valid = item => typeof item?.id === "string" && item.id.length >= 1 && item.id.length <= 64 && validSource(item.source)
+    && typeof item.createdAt === "string" && Number.isFinite(Date.parse(item.createdAt)) && Number.isInteger(item.count) && item.count > 0;
+  return (Array.isArray(value) ? value : []).filter(valid).slice(0, IMPORTS_LISTED)
+    .map(({ id, source, createdAt, count }) => ({ id, source, createdAt, count }));
 }
 
 // An IANA time zone the runtime knows, such as "Europe/London".
@@ -373,7 +398,10 @@ export function normalizeState(value) {
   const byDate = new Map();
   for (const item of Array.isArray(value?.entries) ? value.entries : []) {
     if (validDate(item?.date) && validWeight(item.weight)) {
-      byDate.set(item.date, { date: item.date, weight: roundWeight(item.weight), note: shortNote(item.note) });
+      const entry = { date: item.date, weight: roundWeight(item.weight), note: shortNote(item.note) };
+      // Only an imported weigh-in has a source (see IMPORT_SOURCES).
+      if (validSource(item.source)) entry.source = item.source;
+      byDate.set(item.date, entry);
     }
   }
   const entries = [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
@@ -391,7 +419,8 @@ export function normalizeState(value) {
   const preferences = normalizePreferences(value?.preferences);
   // Agreeing to the policy saves no data, so it doesn't start the log.
   const consent = normalizeConsent(value?.consent);
-  return { version: 1, started: Boolean(value?.started || entries.length || height || goal || waists.length), consent, height, sex, goal, units, preferences, reminder, entries, waists };
+  const imports = normalizeImports(value?.imports);
+  return { version: 1, started: Boolean(value?.started || entries.length || height || goal || waists.length), consent, height, sex, goal, units, preferences, reminder, entries, waists, imports };
 }
 
 // Adds or replaces the waist measurement on `date`, and sets which body fat
@@ -426,11 +455,16 @@ export function changeTarget(change) {
 }
 
 // Adds or replaces the weigh-in on `date`. Leaving out `note` keeps the note
-// already on that date; null or "" removes it. The server does the same.
+// already on that date; null or "" removes it. An imported weigh-in saved again
+// at the same weight keeps its source, and a different weight, typed in
+// Baseline, has none. The server does the same, and also takes the weigh-in
+// out of its import, so undoing the import leaves it (see store.mjs).
 export function saveWeight(state, date, weight, note) {
   if (!validDate(date) || !validWeight(weight)) throw new Error("Enter a valid date and weight.");
-  const kept = note === undefined ? state.entries.find(entry => entry.date === date)?.note : note;
-  return normalizeState({ ...state, started: true, entries: [...state.entries, { date, weight, note: kept }] });
+  const existing = state.entries.find(entry => entry.date === date);
+  const kept = note === undefined ? existing?.note : note;
+  const source = existing && existing.weight === roundWeight(weight) ? existing.source : undefined;
+  return normalizeState({ ...state, started: true, entries: [...state.entries, { date, weight, note: kept, source }] });
 }
 
 // A button's name for screen readers when its text shows a weight in stones,

@@ -97,6 +97,22 @@ export const schema = [
   `ALTER TABLE profiles
     ADD COLUMN IF NOT EXISTS consent_version text CHECK (char_length(consent_version) BETWEEN 1 AND 32),
     ADD COLUMN IF NOT EXISTS consented_at timestamptz`,
+  // Imports from a file (see merge-import in store.mjs), one row each, so one
+  // can be undone: its id, which the app makes, where it came from and when it
+  // was made. Each weigh-in an import added names it in weigh_ins.import_batch,
+  // until the weigh-in is saved again, which takes it out of the import.
+  // weigh_ins.source says where a weigh-in came from (see IMPORT_SOURCES in
+  // model.mjs); null means it was typed in Baseline.
+  `CREATE TABLE IF NOT EXISTS import_batches (
+    id text PRIMARY KEY CHECK (char_length(id) BETWEEN 1 AND 64),
+    user_id text NOT NULL,
+    source text NOT NULL CHECK (source ~ '^[a-z0-9][a-z0-9-]{0,31}$'),
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS import_batches_user_id ON import_batches (user_id)`,
+  `ALTER TABLE weigh_ins
+    ADD COLUMN IF NOT EXISTS import_batch text CHECK (char_length(import_batch) BETWEEN 1 AND 64),
+    ADD COLUMN IF NOT EXISTS source text CHECK (source ~ '^[a-z0-9][a-z0-9-]{0,31}$')`,
   // Runs first in the transaction of every change that saves data (see
   // needsConsent in ops.mjs), and fails it unless the account agreed to
   // `version`. FOR SHARE holds the profile row until the change commits, so a
@@ -130,7 +146,7 @@ export const schema = [
   DECLARE
     tab text;
   BEGIN
-    FOREACH tab IN ARRAY ARRAY['profiles', 'weigh_ins', 'waist_measurements', 'push_subscriptions'] LOOP
+    FOREACH tab IN ARRAY ARRAY['profiles', 'weigh_ins', 'waist_measurements', 'push_subscriptions', 'import_batches'] LOOP
       IF NOT EXISTS (SELECT 1 FROM pg_class WHERE oid = to_regclass(quote_ident(tab)) AND relrowsecurity) THEN
         EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', tab);
       END IF;
