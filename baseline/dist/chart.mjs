@@ -145,16 +145,116 @@ function dayMarks(days, x, floor, className) {
 // a little for a mouse, a fingertip's error for touch and pens.
 const reachOf = pointerType => pointerType === "mouse" ? 8 : 20;
 
-// Date labels along the bottom, from `start` to `end` (days).
-function dateTicks(fragment, start, end, x, width, height) {
-  const compact = width < 480;
-  const tickCount = Math.min(end - start + 1, width < 360 ? 3 : compact ? 4 : width < 680 ? 5 : 7);
-  for (let n = 0; n < tickCount; n++) {
-    const day = tickCount === 1 ? start : start + Math.round(n / (tickCount - 1) * (end - start));
-    const anchor = tickCount > 1 && n === 0 ? "start" : tickCount > 1 && n === tickCount - 1 ? "end" : "middle";
-    const label = prettyDate(dateOf(day), end - start > 365 ? "monthYear" : "short");
-    fragment.append(svg("text", { x: coord(x(day)), y: height - 6, "text-anchor": anchor }, label));
+// Days count from 1970-01-01, a Thursday. The day of the week of `day`, from 0
+// for Sunday to 6 for Saturday.
+export const weekdayOf = day => ((day + 4) % 7 + 7) % 7;
+const WEEKDAY_LETTERS = "SMTWTFS";
+// 1970-01-05, the first Monday, which thinned weekly dates count from.
+const FIRST_MONDAY = 4;
+
+// The weekends from `start` to `end` (days), as [first, last] day pairs: a
+// Saturday and its Sunday, or only one of them at either end.
+export function weekends(start, end) {
+  const spans = [];
+  for (let saturday = start - (weekdayOf(start) + 1) % 7; saturday <= end; saturday += 7) {
+    const first = Math.max(start, saturday);
+    const last = Math.min(end, saturday + 1);
+    if (first <= last) spans.push([first, last]);
   }
+  return spans;
+}
+
+// Spans up to this many days get their dates by week, and longer ones by month.
+const WEEK_DATES_DAYS = 62;
+// How many months apart the dates of a longer span can be: from every month,
+// through 6 and 12 (once a year), to once a decade.
+const MONTH_STEPS = [1, 2, 3, 6, 12, 24, 60, 120];
+
+// The dates along the bottom of a chart from `start` to `end` (days), at most
+// `maxTicks` of them, as { by, ticks: [{ day, label }] }. Up to two months go
+// `by` "weeks": Mondays, labelled "Nov 16". Longer spans go by "months": the
+// 1st, labelled "Nov", or "Jan 2027" for a January, or by "years": January 1,
+// labelled "2027". Thinned dates keep to the calendar, every other Monday
+// counted from a fixed one, or months that divide by the step (Jan, Apr, Jul
+// and Oct for every 3), so they stay put as the range moves day by day. A short
+// span without a Monday goes `by` "days", with its first and last days.
+export function calendarTicks(start, end, maxTicks) {
+  const most = Math.max(1, maxTicks);
+  if (end - start <= WEEK_DATES_DAYS) {
+    const mondays = [];
+    for (let day = start + (8 - weekdayOf(start)) % 7; day <= end; day += 7) mondays.push(day);
+    if (!mondays.length) {
+      return { by: "days", ticks: (end > start ? [start, end] : [start]).map(day => ({ day, label: prettyDate(dateOf(day)) })) };
+    }
+    let picked = mondays;
+    for (let every = 2; picked.length > most; every *= 2) {
+      picked = mondays.filter(day => (day - FIRST_MONDAY) / 7 % every === 0);
+      if (!picked.length) picked = mondays.slice(0, 1);
+    }
+    return { by: "weeks", ticks: picked.map(day => ({ day, label: prettyDate(dateOf(day)) })) };
+  }
+  // Each month by its count from year 0, so January is a multiple of 12.
+  const [year, month] = dateOf(start).split("-").map(Number);
+  const firsts = [];
+  for (let index = year * 12 + month - 1; ; index++) {
+    const date = Math.floor(index / 12) + "-" + String(index % 12 + 1).padStart(2, "0") + "-01";
+    const day = dayOf(date);
+    if (day > end) break;
+    if (day >= start) firsts.push({ index, day, date });
+  }
+  let step = MONTH_STEPS[0];
+  let picked = firsts;
+  for (step of MONTH_STEPS) {
+    picked = firsts.filter(first => first.index % step === 0);
+    if (picked.length && picked.length <= most) break;
+  }
+  if (!picked.length) picked = firsts.slice(0, 1);
+  const years = step >= 12;
+  return {
+    by: years ? "years" : "months",
+    ticks: picked.map(({ index, day, date }) => ({
+      day,
+      label: years ? date.slice(0, 4) : prettyDate(date, index % 12 === 0 ? "monthYear" : "monthShort")
+    }))
+  };
+}
+
+// How many dates fit along a plot `plotWidth` px wide: one every 64 px or so,
+// which clears the widest label, "Jan 2027", and no more than 8.
+const maxTicksFor = plotWidth => Math.min(8, Math.max(2, Math.floor(plotWidth / 64) + 1));
+
+// Date labels, centred under their days at `y` px but kept inside the chart's
+// `width`, with a faint gridline up through the plot from each. The first and
+// last days of a short span (`by` "days") get no gridline.
+function dateLabels(fragment, { by, ticks }, axes, width, y) {
+  const { x, ceiling, floor } = axes;
+  for (const { day, label } of ticks) {
+    const xx = x(day);
+    if (by !== "days") fragment.append(svg("line", { class: "grid-v", x1: coord(xx) + .5, x2: coord(xx) + .5, y1: ceiling - 8, y2: floor }));
+    // About 7 px a character at the labels' size.
+    const half = label.length * 3.6;
+    fragment.append(svg("text", { x: coord(Math.max(half, Math.min(width - half, xx))), y, "text-anchor": "middle" }, label));
+  }
+}
+
+// Weekends are shaded while each day is at least this many px wide.
+const WEEKEND_MIN_PX = 4;
+// Each day gets its weekday's initial, with the dates under them, on spans up
+// to this many days while each day is at least `LETTER_MIN_PX` px wide.
+const LETTER_DAYS = 21;
+const LETTER_MIN_PX = 12;
+// The lines from weigh-ins to the average show while weigh-ins are, at the
+// median, at least this many px apart.
+const STEM_MIN_PX = 5;
+
+// Whether there's room for a line from each weigh-in to the average: whether
+// the median gap between weigh-ins on `days` (in order) is `STEM_MIN_PX` px or
+// more, at `dayWidth` px a day. So daily weigh-ins get them on short ranges,
+// and weekly ones on longer ranges too.
+export function roomForStems(days, dayWidth) {
+  if (days.length < 2) return true;
+  const gaps = days.slice(1).map((day, i) => day - days[i]).sort((a, b) => a - b);
+  return gaps[Math.floor((gaps.length - 1) / 2)] * dayWidth >= STEM_MIN_PX;
 }
 
 // What both charts share: an SVG in a wrapper that redraws when it resizes, and
@@ -276,6 +376,7 @@ export class TrendChart extends Chart {
   constructor({ cover } = {}) {
     super({ wrap: "chart-wrap", canvas: "trend-chart", tooltip: "chart-tooltip", empty: "chart-empty", announce: "chart-announce", cover });
     this.noteKey = document.getElementById("legend-note");
+    this.weekendKey = document.getElementById("legend-weekend");
     this.noted = []; // The points with a note, which have a mark under the plot.
   }
 
@@ -311,6 +412,7 @@ export class TrendChart extends Chart {
     this.home = null;
     this.noted = points.filter(point => point.note);
     this.noteKey.hidden = !this.noted.length;
+    this.weekendKey.hidden = true;
     this.empty.hidden = points.length > 0;
     this.wrap.tabIndex = points.length ? 0 : -1;
     if (!points.length) {
@@ -345,12 +447,27 @@ export class TrendChart extends Chart {
     }
     const left = Math.max(compact ? 30 : 38, Math.max(...ticks.map(tick => textWidth(tick.label, 8, 3.5))) + 14);
     const right = width - (Math.max(textWidth(endLabel, 8.5), textWidth(goalLabel, 8.5)) + 18);
+    const dayWidth = (right - left) / Math.max(1, end - start);
+    // A short span gets a row of weekday initials over its dates, which takes
+    // a little more room under the plot.
+    const letters = end - start <= LETTER_DAYS && dayWidth >= LETTER_MIN_PX;
     const ceiling = 24;
-    const floor = height - 30;
+    const floor = height - (letters ? 48 : 30);
     const x = day => start === end ? (left + right) / 2 : left + (day - start) / (end - start) * (right - left);
     const y = kg => floor - (kg * scale - bottom) / (top - bottom) * (floor - ceiling);
     this.axes = { start, end, left, right, ceiling, floor, x, y };
     const fragment = document.createDocumentFragment();
+
+    // Weekends are a faint wash under everything else, from the middle of
+    // Friday to the middle of Monday, within the plot.
+    if (dayWidth >= WEEKEND_MIN_PX) {
+      for (const [first, last] of weekends(start, end)) {
+        const shadeStart = Math.max(left, x(first - .5));
+        const shadeEnd = Math.min(right, x(last + .5));
+        fragment.append(svg("rect", { class: "weekend", x: coord(shadeStart), y: ceiling - 8, width: coord(shadeEnd - shadeStart), height: floor - ceiling + 8 }));
+      }
+      this.weekendKey.hidden = false;
+    }
 
     // Stone labels name their own units.
     if (!stones) fragment.append(svg("text", { x: left - 12, y: 12, "text-anchor": "end" }, unit));
@@ -361,7 +478,13 @@ export class TrendChart extends Chart {
         svg("text", { x: left - 12, y: yy + 4, "text-anchor": "end" }, tick.label)
       );
     }
-    dateTicks(fragment, start, end, x, width, height);
+    const dates = calendarTicks(start, end, maxTicksFor(right - left));
+    dateLabels(fragment, dates, this.axes, width, height - 6);
+    if (letters) {
+      for (let day = start; day <= end; day++) {
+        fragment.append(svg("text", { class: "weekday", x: coord(x(day)), y: height - 26, "text-anchor": "middle" }, WEEKDAY_LETTERS[weekdayOf(day)]));
+      }
+    }
     fragment.append(...dayMarks(this.noted.map(p => p.day), x, floor, "note-mark"));
 
     // The forecast's likely range is a band under everything else, from a
@@ -386,8 +509,17 @@ export class TrendChart extends Chart {
       fragment.append(svg("line", { class: "goal", x1: left, x2: coord(right), y1: goalY, y2: goalY }));
     }
 
-    // Daily weigh-ins sit underneath; the average line is the figure.
-    const count = points.filter(p => p.weight !== null).length;
+    // Daily weigh-ins sit underneath; the average line is the figure. When
+    // there's room, a thin line joins each to that day's average, so how far
+    // a day strays from the average shows at a glance.
+    const readings = points.filter(p => p.weight !== null);
+    const count = readings.length;
+    if (roomForStems(readings.map(p => p.day), dayWidth)) {
+      for (const p of readings) {
+        const xx = coord(x(p.day));
+        fragment.append(svg("line", { class: "stem", x1: xx, x2: xx, y1: coord(y(p.average)), y2: coord(y(p.weight)) }));
+      }
+    }
     const radius = count > 160 ? 2.5 : compact ? 3.5 : 4;
     for (const p of points) {
       if (p.weight !== null) fragment.append(svg("circle", { class: "dot", cx: coord(x(p.day)), cy: coord(y(p.weight)), r: radius }));
@@ -575,7 +707,7 @@ export class BodyFatChart extends Chart {
         svg("text", { x: left - 12, y: yy + 4, "text-anchor": "end" }, label)
       );
     }
-    dateTicks(fragment, start, end, x, width, height);
+    dateLabels(fragment, calendarTicks(start, end, maxTicksFor(right - left)), this.axes, width, height - 6);
 
     if (this.points.length > 1) {
       fragment.append(svg("path", { class: "fat-line", d: this.points.map((p, i) => (i ? "L" : "M") + coord(x(p.day)) + " " + coord(y(p.bodyFat))).join(" ") }));

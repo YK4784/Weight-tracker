@@ -26,6 +26,8 @@
   --accent-thin: #6e81e1;
   --on-accent: #ffffff;
   --dot: #8a867d;
+  /* Weekends on the chart: ink at 3.5%, just darker than the paper. */
+  --weekend: rgb(23 24 27 / 3.5%);
   --danger: #b3261e;
   --on-danger: #ffffff;
   --shadow: 0 1px 2px rgb(23 24 27 / 6%), 0 10px 30px rgb(23 24 27 / 8%);
@@ -51,6 +53,7 @@
     --accent-thin: #4f5fa7;
     --on-accent: #0b0e26;
     --dot: #7d7a73;
+    --weekend: rgb(238 237 232 / 3.5%);
     --danger: #f2877e;
     --on-danger: #2a0a07;
     --shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 10px 30px rgb(0 0 0 / 35%);
@@ -333,11 +336,13 @@ body[data-weight-unit="st"] .hero:not(.is-empty) { font-size: clamp(3.5rem, 9vw 
 .trend-figures + .legend { margin-top: 20px; }
 .legend { display: flex; flex-wrap: wrap; gap: 6px 22px; margin-top: 6px; color: var(--ink-2); font-size: .9375rem; }
 .legend span { display: inline-flex; align-items: center; gap: 8px; }
-.key-line, .key-dot, .key-goal, .key-note, .key-forecast { display: inline-block; flex: none; }
+.key-line, .key-dot, .key-goal, .key-note, .key-forecast, .key-weekend { display: inline-block; flex: none; }
 .key-line { width: 18px; height: 2px; border-radius: 1px; background: var(--accent); }
 .key-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dot); }
 .key-goal { width: 18px; height: 1px; background: repeating-linear-gradient(90deg, var(--ink-2) 0 4px, transparent 4px 7px); }
 .key-note { width: 2px; height: 8px; background: var(--ink-3); }
+/* Two days' worth of weekend wash, edged so it shows at this size. */
+.key-weekend { width: 12px; height: 12px; border: 1px solid var(--rule); border-radius: 2px; background: var(--weekend); }
 /* The forecast: its dotted line across its band. */
 .key-forecast { width: 18px; height: 10px; border-radius: 2px; background: radial-gradient(circle, var(--accent) 1px, transparent 1.5px) 1px 50% / 5px 10px repeat-x, var(--band); }
 /* Shows and hides the forecast, at the end of the legend's line. */
@@ -347,7 +352,8 @@ body[data-weight-unit="st"] .hero:not(.is-empty) { font-size: clamp(3.5rem, 9vw 
 .chart-wrap { position: relative; height: clamp(240px, 28vw, 320px); margin-top: 18px; border-radius: 4px; touch-action: pan-y; touch-action: pan-y pinch-zoom; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
 :is(#trend-chart, #fat-chart) { position: absolute; inset: 0; display: block; width: 100%; height: 100%; overflow: visible; }
 :is(#trend-chart, #fat-chart) text { font-family: var(--font); font-size: 12.5px; fill: var(--ink-3); font-variant-numeric: tabular-nums; }
-:is(#trend-chart, #fat-chart) .grid { stroke: var(--rule); stroke-width: 1; }
+:is(#trend-chart, #fat-chart) :is(.grid, .grid-v) { stroke: var(--rule); stroke-width: 1; }
+#trend-chart .weekend { fill: var(--weekend); }
 #trend-chart .avg { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 #trend-chart .avg-single { fill: var(--accent); }
 /* Where the average rests on fewer than 4 weigh-ins, or holds after the last
@@ -355,6 +361,8 @@ body[data-weight-unit="st"] .hero:not(.is-empty) { font-size: clamp(3.5rem, 9vw 
 #trend-chart .avg-thin { fill: none; stroke: var(--accent-thin); stroke-width: 2; stroke-dasharray: 5 4; stroke-linejoin: round; }
 #trend-chart .avg-single.thin { fill: var(--accent-thin); }
 #trend-chart .dot { fill: var(--dot); stroke: var(--paper); stroke-width: 3; paint-order: stroke; }
+/* From each weigh-in to that day's average, under the dot. */
+#trend-chart .stem { stroke: var(--dot); stroke-width: 1.5; }
 #trend-chart .end-dot, #trend-chart .cursor-avg { fill: var(--accent); stroke: var(--paper); stroke-width: 4; paint-order: stroke; }
 #trend-chart .cursor-dot { fill: var(--ink-2); stroke: var(--paper); stroke-width: 4; paint-order: stroke; }
 :is(#trend-chart, #fat-chart) .end-label { fill: var(--ink); font-size: 14px; font-weight: 700; }

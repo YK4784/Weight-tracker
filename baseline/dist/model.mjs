@@ -37,6 +37,7 @@ export function prettyDate(date, kind = "short") {
       dayName: { weekday: "short" },
       day: { weekday: "long", month: "long", day: "numeric" },
       monthYear: { year: "numeric", month: "short" },
+      monthShort: { month: "short" },
       month: { year: "numeric", month: "long" },
       monthName: { month: "long" },
       long: { weekday: "long", year: "numeric", month: "long", day: "numeric" }

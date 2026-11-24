@@ -130,12 +130,16 @@ test("the log sheet saves from the keyboard, and the page can reach the safe are
   assert.match(section(page, "log-bar"), /id="log-bar-button"[^>]*>Log today’s weight</);
 });
 
-test("the charts leave vertical swipes to the page, and note marks have a key in the legend", async () => {
+test("the charts leave vertical swipes to the page, and note marks and weekends have a key in the legend", async () => {
   const css = await read("styles.css");
   const wrap = /^\.chart-wrap \{[^}]*\}/m.exec(css)[0];
   assert.match(wrap, /touch-action: pan-y;/, "a sideways drag scrubs, a vertical swipe scrolls");
   assert.match(css, /^#trend-chart \.note-mark \{ stroke: var\(--ink-3\);/m);
   assert.match(page, /<span id="legend-note" hidden><i class="key-note"><\/i>Note<\/span>/);
+  // chart.mjs shows the weekend key while it shades weekends, in both color schemes.
+  assert.match(page, /<span id="legend-weekend" hidden><i class="key-weekend"><\/i>Weekend<\/span>/);
+  assert.equal([...css.matchAll(/--weekend: rgb\(/g)].length, 2);
+  assert.match(css, /^#trend-chart \.weekend \{ fill: var\(--weekend\); \}/m);
   // The tooltips keep clear of the log bar, which must exist under that id.
   const app = await read("app.mjs");
   assert.equal([...app.matchAll(/Chart\(\{ cover: "log-bar" \}\)/g)].length, 2);

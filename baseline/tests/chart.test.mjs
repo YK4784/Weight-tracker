@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { lineParts, nearestIndex, rangeStart, separateLabel, stoneTick, yDomain } from "../dist/chart.mjs";
+import { calendarTicks, lineParts, nearestIndex, rangeStart, roomForStems, separateLabel, stoneTick, weekdayOf, weekends, yDomain } from "../dist/chart.mjs";
 import { THIN_COUNT, calculateTrend, dateOf, dayOf } from "../dist/model.mjs";
 
 const points = [{ average: 70, weight: 70.5 }, { average: 69.8, weight: null }, { average: 69.6, weight: 69.2 }];
@@ -122,4 +122,99 @@ test("a range that shows only the days after a weigh-in draws them thin, and one
   // Neighbouring pieces share a point, so the line stays joined.
   const parts = lineParts(calculateTrend(entries, dateOf(start + 8)).days);
   for (let i = 1; i < parts.length; i++) assert.equal(parts[i].points[0], parts[i - 1].points.at(-1));
+});
+
+// Dates as days, and back, for the calendar tests.
+const days = (...dates) => dates.map(dayOf);
+const datesOf = ticks => ticks.map(tick => dateOf(tick.day));
+const labelsOf = ticks => ticks.map(tick => tick.label);
+
+test("days of the week count from 1970-01-01, a Thursday", () => {
+  assert.equal(weekdayOf(0), 4);
+  assert.equal(weekdayOf(dayOf("2026-11-22")), 0, "a Sunday");
+  assert.equal(weekdayOf(dayOf("2026-11-24")), 2, "a Tuesday");
+  assert.equal(weekdayOf(dayOf("2026-11-28")), 6, "a Saturday");
+  assert.equal(weekdayOf(-1), 3, "before 1970 too");
+});
+
+test("weekends are each Saturday and Sunday, cut short at either end", () => {
+  const pairs = (start, end) => weekends(dayOf(start), dayOf(end)).map(pair => pair.map(dateOf));
+  // Wednesday to the Tuesday two weeks on.
+  assert.deepEqual(pairs("2026-11-18", "2026-12-01"), [["2026-11-21", "2026-11-22"], ["2026-11-28", "2026-11-29"]]);
+  assert.deepEqual(pairs("2026-11-22", "2026-11-28"), [["2026-11-22", "2026-11-22"], ["2026-11-28", "2026-11-28"]], "starts on a Sunday, ends on a Saturday");
+  assert.deepEqual(pairs("2026-11-23", "2026-11-27"), [], "Monday to Friday");
+  assert.deepEqual(pairs("2026-11-21", "2026-11-21"), [["2026-11-21", "2026-11-21"]], "one Saturday");
+});
+
+test("up to two months, the dates are Mondays", () => {
+  const [start, end] = days("2026-10-26", "2026-11-24");
+  const { by, ticks } = calendarTicks(start, end, 5);
+  assert.equal(by, "weeks");
+  assert.deepEqual(datesOf(ticks), ["2026-10-26", "2026-11-02", "2026-11-09", "2026-11-16", "2026-11-23"]);
+  assert.deepEqual(labelsOf(ticks), ["Oct 26", "Nov 2", "Nov 9", "Nov 16", "Nov 23"]);
+  assert.ok(ticks.every(tick => weekdayOf(tick.day) === 1));
+});
+
+test("thinned Mondays keep to the calendar, so they stay put as the range moves", () => {
+  for (let shift = 0; shift < 14; shift++) {
+    const start = dayOf("2026-10-26") + shift;
+    const { by, ticks } = calendarTicks(start, start + 43, 4);
+    assert.equal(by, "weeks");
+    assert.ok(ticks.length >= 2 && ticks.length <= 4, "shift " + shift);
+    for (const tick of ticks) {
+      assert.equal(weekdayOf(tick.day), 1);
+      // Every other Monday, counted from 1970-01-05.
+      assert.equal((tick.day - 4) / 7 % 2, 0, dateOf(tick.day));
+    }
+  }
+  // Too many for every other Monday: every fourth.
+  const [start, end] = days("2026-09-24", "2026-11-24");
+  const thin = calendarTicks(start, end, 3).ticks;
+  assert.ok(thin.length <= 3);
+  assert.ok(thin.slice(1).every((tick, i) => tick.day - thin[i].day === 28));
+});
+
+test("a short span without a Monday is labelled at its ends", () => {
+  const [tuesday, saturday] = days("2026-11-24", "2026-11-28");
+  assert.deepEqual(calendarTicks(tuesday, saturday, 5), { by: "days", ticks: [{ day: tuesday, label: "Nov 24" }, { day: saturday, label: "Nov 28" }] });
+  assert.deepEqual(calendarTicks(tuesday, tuesday, 5), { by: "days", ticks: [{ day: tuesday, label: "Nov 24" }] }, "one day");
+});
+
+test("longer spans are dated by month, with the year on each January", () => {
+  const [start, end] = days("2026-08-27", "2026-11-24");
+  const months = calendarTicks(start, end, 4);
+  assert.equal(months.by, "months");
+  assert.deepEqual(datesOf(months.ticks), ["2026-09-01", "2026-10-01", "2026-11-01"]);
+  assert.deepEqual(labelsOf(months.ticks), ["Sep", "Oct", "Nov"]);
+  const turn = calendarTicks(...days("2026-11-01", "2027-02-15"), 8);
+  assert.deepEqual(labelsOf(turn.ticks), ["Nov", "Dec", "Jan 2027", "Feb"], "a year boundary");
+  assert.equal(turn.ticks[0].day, dayOf("2026-11-01"), "a span that starts on the 1st includes it");
+});
+
+test("over years, months thin to every 2, 3 or 6, and then to years", () => {
+  const [start, end] = days("2024-03-10", "2027-03-09");
+  const every6 = calendarTicks(start, end, 8);
+  assert.equal(every6.by, "months");
+  assert.deepEqual(labelsOf(every6.ticks), ["Jul", "Jan 2025", "Jul", "Jan 2026", "Jul", "Jan 2027"]);
+  const every3 = calendarTicks(...days("2025-11-25", "2026-11-24"), 4);
+  assert.deepEqual(labelsOf(every3.ticks), ["Jan 2026", "Apr", "Jul", "Oct"]);
+  const yearly = calendarTicks(start, end, 4);
+  assert.equal(yearly.by, "years");
+  assert.deepEqual(labelsOf(yearly.ticks), ["2025", "2026", "2027"]);
+  assert.deepEqual(datesOf(yearly.ticks), ["2025-01-01", "2026-01-01", "2027-01-01"]);
+  const decade = calendarTicks(...days("2005-06-01", "2026-11-24"), 6);
+  assert.equal(decade.by, "years");
+  assert.deepEqual(labelsOf(decade.ticks), ["2010", "2015", "2020", "2025"]);
+});
+
+test("lines from weigh-ins to the average need their weigh-ins 5 px apart, at the median", () => {
+  const daily = Array.from({ length: 30 }, (_, i) => i);
+  assert.equal(roomForStems(daily, 8.6), true, "30 days on a phone");
+  assert.equal(roomForStems(daily, 5), true);
+  assert.equal(roomForStems(daily, 4.9), false, "too close");
+  assert.equal(roomForStems(daily.map(day => day * 7), 1), true, "weekly weigh-ins on a long range");
+  assert.equal(roomForStems([3], 0.5), true, "one weigh-in");
+  assert.equal(roomForStems([], 0.5), true);
+  // Mostly daily with a few long breaks: the breaks don't make room.
+  assert.equal(roomForStems([0, 1, 2, 3, 4, 30, 31, 32, 60], 3), false);
 });
