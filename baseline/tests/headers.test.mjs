@@ -35,7 +35,10 @@ test("the Content Security Policy lets in only the page's own code and Clerk's",
   assert.deepEqual(policy["script-src"], ["'self'", frontendApi, "https://challenges.cloudflare.com", "https://*.protect.clerk.com"],
     "change the host in vercel.json along with the key in config.mjs");
   assert.deepEqual(policy["connect-src"], ["'self'", frontendApi, "https://*.protect.clerk.com:*"]);
+  // The icons and the manifest's screenshots are the app's own images, and the
+  // manifest itself falls back to default-src.
   assert.deepEqual(policy["img-src"], ["'self'", "https://img.clerk.com", "data:"]);
+  assert.equal(policy["manifest-src"], undefined);
   assert.deepEqual(policy["style-src"], ["'self'", "'unsafe-inline'"], "Clerk adds its styles at run time");
   assert.deepEqual(policy["frame-src"], ["https://challenges.cloudflare.com", "https://*.protect.clerk.com"]);
   assert.deepEqual(policy["worker-src"], ["'self'", "blob:"]);

@@ -232,3 +232,64 @@ test("Import sits beside Download on Your data, reads files on the device, and a
   const code = app.slice(app.indexOf("// Import: weigh-ins from a file"), app.indexOf("let undoImportTarget"));
   assert.doesNotMatch(code, /innerHTML|insertAdjacentHTML|outerHTML/);
 });
+
+// A WebP's size in pixels, from its header: lossy ("VP8 "), lossless ("VP8L")
+// or extended ("VP8X", as Chromium writes one with a colour profile).
+function webpSize(bytes) {
+  assert.equal(bytes.toString("ascii", 0, 4), "RIFF");
+  assert.equal(bytes.toString("ascii", 8, 12), "WEBP");
+  const chunk = bytes.toString("ascii", 12, 16);
+  if (chunk === "VP8X") return [1 + bytes.readUIntLE(24, 3), 1 + bytes.readUIntLE(27, 3)];
+  if (chunk === "VP8 ") return [bytes.readUInt16LE(26) & 0x3fff, bytes.readUInt16LE(28) & 0x3fff];
+  if (chunk === "VP8L") {
+    const bits = bytes.readUInt32LE(21);
+    return [1 + (bits & 0x3fff), 1 + ((bits >> 14) & 0x3fff)];
+  }
+  throw new Error("Not a WebP image: " + chunk);
+}
+
+test("the manifest describes Baseline for an install dialog, with a screenshot for phones and one for computers", async () => {
+  const manifest = JSON.parse(await read("manifest.webmanifest"));
+  assert.equal(manifest.lang, "en");
+  assert.equal(manifest.dir, "ltr");
+  assert.deepEqual(manifest.categories, ["health", "fitness"]);
+  assert.equal(manifest.display, "standalone");
+  // The launch screen's colour can't follow dark mode yet, so it stays the light theme's.
+  assert.equal(manifest.background_color, "#f6f5f1");
+  assert.equal(manifest.background_color, /<meta name="theme-color" content="([^"]+)" media="\(prefers-color-scheme: light\)">/.exec(page)[1]);
+  assert.match(page, /stays the light paper in dark mode too/);
+  assert.deepEqual(manifest.screenshots.map(shot => shot.form_factor), ["narrow", "wide"]);
+  for (const shot of manifest.screenshots) {
+    assert.match(shot.src, /^screenshots\/[\w-]+\.webp$/);
+    assert.equal(shot.type, "image/webp");
+    assert.ok(shot.label.length > 20, "a label, which is the screenshot's alt text");
+    const bytes = await readFile(new URL(shot.src, dist));
+    const [width, height] = webpSize(bytes);
+    assert.equal(shot.sizes, width + "x" + height, shot.src);
+    // Chrome's rules for its richer install dialog: 320 to 3840 pixels a side,
+    // the long side at most 2.3 times the short one, tall for phones and wide for computers.
+    for (const side of [width, height]) assert.ok(side >= 320 && side <= 3840, shot.src);
+    assert.ok(Math.max(width, height) / Math.min(width, height) <= 2.3, shot.src);
+    assert.equal(shot.form_factor === "wide", width > height, shot.src);
+    assert.ok(bytes.length <= 150 * 1024, shot.src + " is " + Math.round(bytes.length / 1024) + " KB");
+  }
+});
+
+test("on an iPhone or iPad Home Screen, the app has its name and the ordinary status bar, and no launch images", () => {
+  assert.match(page, /<meta name="apple-mobile-web-app-title" content="Baseline">/);
+  assert.match(page, /<meta name="apple-mobile-web-app-status-bar-style" content="default">/);
+  assert.doesNotMatch(page, /apple-touch-startup-image"? href/);
+});
+
+test("the install hint is one quiet line above the account's, with Install and Not now", async () => {
+  const footer = page.slice(page.indexOf('<footer class="app-footer">'), page.indexOf("</footer>"));
+  assert.ok(footer.indexOf('id="install-hint"') < footer.indexOf('id="storage-status"'));
+  assert.match(section(page, "install-hint"), /^<p class="install-hint" id="install-hint" hidden><span id="install-hint-text"><\/span> <span class="install-hint-actions"><button class="text-button" type="button" id="install-hint-install">Install<\/button><button class="text-button" type="button" id="install-hint-later">Not now<\/button><\/span>$/);
+  const app = await read("app.mjs");
+  assert.ok(app.includes('"Install Baseline to log in one tap and get reminders."'));
+  assert.ok(app.includes('"Add Baseline to your Home Screen to log in one tap and get reminders: tap Share, then Add to Home Screen."'));
+  // Chromium's own offer is held back for the line's Install button.
+  assert.match(app, /addEventListener\("beforeinstallprompt", event => \{\n {2}event\.preventDefault\(\);\n {2}installPrompt = event;/);
+  const css = await read("styles.css");
+  assert.match(css, /^\.app-footer \{[^}]*color: var\(--ink-3\);/m);
+});

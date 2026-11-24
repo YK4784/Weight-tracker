@@ -287,3 +287,52 @@ test("clearing device data without a user removes only what belongs to nobody", 
   clearDeviceData(storage, null);
   assert.deepEqual([...storage.items.keys()], [storageKeyFor("user_a")]);
 });
+
+test("a #log link opened while signed out waits for sign-in in this tab, once", async () => {
+  const { LOG_LINK_KEY, forgetLogLink, keepLogLink, takeLogLink } = await import("../dist/account.mjs");
+  const session = new MemoryStorage();
+  assert.equal(takeLogLink(session), null);
+  keepLogLink(session, "#log?weight=84.9&note=after%20run");
+  assert.equal(session.getItem(LOG_LINK_KEY), "#log?weight=84.9&note=after%20run");
+  assert.equal(takeLogLink(session), "#log?weight=84.9&note=after%20run");
+  assert.equal(takeLogLink(session), null, "it fills the weigh-in once");
+  keepLogLink(session, "#log");
+  forgetLogLink(session);
+  assert.equal(takeLogLink(session), null, "signing out removes it");
+  // Anything else under the key is no link.
+  session.setItem(LOG_LINK_KEY, "#settings");
+  assert.equal(takeLogLink(session), null);
+  assert.equal(session.length, 0);
+});
+
+test("the install hint's first Not now hides it for 30 days, and the second for good", async () => {
+  const { INSTALL_HINT_KEY, INSTALL_HINT_PAUSE_DAYS, dismissInstallHint, installHintHidden } = await import("../dist/account.mjs");
+  assert.equal(INSTALL_HINT_PAUSE_DAYS, 30);
+  const day = 86_400_000;
+  const start = Date.UTC(2026, 10, 24, 9);
+  const storage = new MemoryStorage();
+  assert.equal(installHintHidden(storage, start), false);
+  dismissInstallHint(storage, start);
+  assert.equal(installHintHidden(storage, start), true);
+  assert.equal(installHintHidden(storage, start + 30 * day - 1), true);
+  assert.equal(installHintHidden(storage, start + 30 * day), false);
+  dismissInstallHint(storage, start + 31 * day);
+  assert.equal(installHintHidden(storage, start + 31 * day), true);
+  assert.equal(installHintHidden(storage, start + 3650 * day), true);
+  dismissInstallHint(storage, start + 3650 * day);
+  assert.deepEqual(JSON.parse(storage.getItem(INSTALL_HINT_KEY)), { count: 2, at: start + 3650 * day });
+  // A value that doesn't parse counts as no Not now.
+  for (const value of ["nonsense", "null", "{}", '{"count":-1,"at":1}', '{"count":1.5}', '[]']) {
+    assert.equal(installHintHidden(new MemoryStorage({ [INSTALL_HINT_KEY]: value }), start), false, value);
+  }
+  assert.equal(installHintHidden(new MemoryStorage({ [INSTALL_HINT_KEY]: '{"count":1}' }), start), false, "a Not now with no time has expired");
+  // Storage that can't be read can't keep a Not now, so the line stays away.
+  const blocked = { getItem() { throw new Error("SecurityError"); }, setItem() { throw new Error("SecurityError"); } };
+  assert.equal(installHintHidden(blocked, start), true);
+  // It isn't about the log, so a deletion leaves it.
+  const shared = new MemoryStorage();
+  dismissInstallHint(shared, start);
+  clearDeviceData(shared, "user_a");
+  clearLogCache(shared);
+  assert.equal(installHintHidden(shared, start + day), true);
+});

@@ -12,7 +12,9 @@ const shell = JSON.parse(/^const SHELL = (\[[^\]]*\]);$/m.exec(source)[1]);
 // Files in baseline/dist/ that the worker leaves out on purpose.
 const LEFT_OUT = {
   "sw.js": "the worker itself, which the browser fetches and updates on its own",
-  "fonts/OFL.txt": "the font's license, which the app never loads"
+  "fonts/OFL.txt": "the font's license, which the app never loads",
+  "screenshots/overview-narrow.webp": "a screenshot for the install dialog, which needs a connection anyway",
+  "screenshots/overview-wide.webp": "a screenshot for the install dialog, which needs a connection anyway"
 };
 
 test("the worker keeps every file in baseline/dist/, except the ones left out on purpose", async () => {
@@ -39,11 +41,12 @@ test("the cache is named with a version", () => {
 const ORIGIN = "https://baseline.test";
 const at = path => new URL(path, ORIGIN + "/").href;
 
-function startWorker({ network = () => Promise.reject(new TypeError("Failed to fetch")), windows = [] } = {}) {
+function startWorker({ network = () => Promise.reject(new TypeError("Failed to fetch")), windows = [], navigator = undefined, showNotification = null } = {}) {
   const listeners = {};
   const stores = new Map();
   const claimed = [];
   const opened = [];
+  const shown = [];
   class FakeCache {
     constructor() { this.entries = new Map(); }
     async add(request) {
@@ -59,6 +62,7 @@ function startWorker({ network = () => Promise.reject(new TypeError("Failed to f
     stores,
     claimed,
     opened,
+    shown,
     listeners,
     caches: {
       async open(name) {
@@ -72,7 +76,14 @@ function startWorker({ network = () => Promise.reject(new TypeError("Failed to f
   const context = {
     self: {
       location: new URL(ORIGIN + "/sw.js"),
-      registration: { scope: ORIGIN + "/", showNotification() {} },
+      registration: {
+        scope: ORIGIN + "/",
+        async showNotification(title, options) {
+          if (showNotification) await showNotification(title, options);
+          shown.push({ title, ...options });
+        }
+      },
+      navigator,
       clients: {
         claim: async () => { claimed.push(true); },
         matchAll: async options => options?.type === "window" ? windows : [],
@@ -273,4 +284,31 @@ test("the home-screen shortcut opens today's weigh-in, like a reminder", async (
     assert.ok(shortcut.name && shortcut.short_name.length <= 12);
     for (const icon of shortcut.icons) assert.ok(shell.includes(icon.src), icon.src);
   }
+});
+
+// A push as the browser delivers it, with the reminder's text as JSON.
+const push = (worker, data = { title: "Weigh-in reminder", body: "You haven’t logged a weigh-in today." }) =>
+  dispatch(worker, "push", { data: { json: () => data } });
+
+test("a reminder shows its notification, then marks the app's icon with a badge", async () => {
+  const calls = [];
+  const navigator = { setAppBadge: async count => { calls.push(["badge", count]); } };
+  const worker = startWorker({ navigator, showNotification: async () => { calls.push(["notification"]); } });
+  await push(worker);
+  assert.deepEqual(calls, [["notification"], ["badge", 1]]);
+  assert.deepEqual(worker.shown, [{ title: "Weigh-in reminder", body: "You haven’t logged a weigh-in today.", tag: "weigh-in", icon: "icons/icon-192.png" }]);
+});
+
+test("a reminder still shows where there are no badges, or where setting one fails", async () => {
+  // Chrome on Android has no setAppBadge, and older workers no navigator to ask.
+  for (const navigator of [undefined, {}, { setAppBadge: async () => { throw new DOMException("Not allowed", "NotAllowedError"); } }, { setAppBadge() { throw new TypeError("Illegal invocation"); } }]) {
+    const worker = startWorker({ navigator });
+    await push(worker);
+    assert.equal(worker.shown.length, 1);
+  }
+  // A notification that fails isn't hidden by the badge, and no badge is set without one.
+  const calls = [];
+  const failing = startWorker({ navigator: { setAppBadge: async () => { calls.push("badge"); } }, showNotification: async () => { throw new TypeError("No permission"); } });
+  await assert.rejects(push(failing), /No permission/);
+  assert.deepEqual(calls, []);
 });

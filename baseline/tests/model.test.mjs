@@ -1357,6 +1357,113 @@ test("the log sheet's heading names today with its weekday", async () => {
   assert.equal(todayHeading("2026-03-08"), "Today, Sun Mar 8");
 });
 
+test("a #log link gives the weigh-in's date, weight, unit and note, each optional", async () => {
+  const { parseLogLink } = await import("../dist/model.mjs");
+  const today = "2026-11-24";
+  assert.deepEqual(parseLogLink("#log?weight=84.9&unit=kg&date=2026-11-23&note=after%20run", today), { date: "2026-11-23", weight: 84.9, unit: "kg", note: "after run" });
+  // Every part is optional: a bare #log is today, with nothing to fill in.
+  assert.deepEqual(parseLogLink("#log", today), { date: today, weight: null, unit: null, note: null });
+  assert.deepEqual(parseLogLink("#log?", today), { date: today, weight: null, unit: null, note: null });
+  assert.deepEqual(parseLogLink("#log?weight=84.9", today), { date: today, weight: 84.9, unit: null, note: null });
+  assert.deepEqual(parseLogLink("#log?note=after+run&date=2026-11-01", today), { date: "2026-11-01", weight: null, unit: null, note: "after run" });
+  // Only #log itself: the app's views, Clerk's routes and look-alikes are other links.
+  for (const hash of ["", "#", "#overview", "#weight-log", "#logs", "#log-in", "#log/?weight=84.9", "#/factor-one", "#LOG", " #log", null, undefined, 84.9]) {
+    assert.equal(parseLogLink(hash, today), null, String(hash));
+  }
+});
+
+test("a #log link's date falls back to today when it's missing, invalid or after today", async () => {
+  const { parseLogLink } = await import("../dist/model.mjs");
+  const today = "2026-11-24";
+  const date = query => parseLogLink("#log?" + query, today).date;
+  assert.equal(date("date=2026-11-24"), today);
+  assert.equal(date("date=2025-02-28"), "2025-02-28");
+  for (const query of ["", "date=", "date=2026-11-25", "date=2027-01-01", "date=2026-02-30", "date=2026-13-01", "date=24/11/2026", "date=2026-11-24T08:00", "date=yesterday", "date=%20"]) {
+    assert.equal(date(query), today, query);
+  }
+  // The first of a repeated part counts, as URLSearchParams reads it.
+  assert.equal(date("date=2026-11-20&date=2026-11-21"), "2026-11-20");
+});
+
+test("a #log link's weight is a plain positive number, read with a point or a comma, in kg or lb", async () => {
+  const { parseLogLink } = await import("../dist/model.mjs");
+  const read = query => {
+    const link = parseLogLink("#log?" + query, "2026-11-24");
+    return [link.weight, link.unit];
+  };
+  assert.deepEqual(read("weight=84.9&unit=kg"), [84.9, "kg"]);
+  assert.deepEqual(read("weight=187.2&unit=lb"), [187.2, "lb"]);
+  assert.deepEqual(read("weight=187.2&unit=LBS"), [187.2, "lb"]);
+  assert.deepEqual(read("weight=%2084,9%20&unit=%20Kg"), [84.9, "kg"]);
+  assert.deepEqual(read("weight=85"), [85, null]);
+  assert.deepEqual(read("weight=84.123"), [84.123, null]);
+  assert.deepEqual(read("unit=kg"), [null, "kg"]);
+  // Anything else leaves the weight out, so the field isn't filled with a guess.
+  for (const weight of ["", "0", "0.0", "-84.9", "+84.9", "84.9kg", "84.9.1", "1,234.5", "1e2", "0x55", "Infinity", "NaN", "84. 9", ".5", "12345", "84,"]) {
+    assert.equal(read("weight=" + encodeURIComponent(weight))[0], null, weight);
+  }
+  // A unit Baseline can't read in makes the number meaningless, but an empty one is none.
+  assert.deepEqual(read("weight=13.5&unit=st"), [null, null]);
+  assert.deepEqual(read("weight=84.9&unit=stone"), [null, null]);
+  assert.deepEqual(read("weight=84.9&unit="), [84.9, null]);
+});
+
+test("a #log link's note is cleaned and cut to the note's length", async () => {
+  const { parseLogLink } = await import("../dist/model.mjs");
+  const note = text => parseLogLink("#log?note=" + encodeURIComponent(text), "2026-11-24").note;
+  assert.equal(note("  after\nrun\t "), "after run");
+  assert.equal(note("   "), null);
+  assert.equal(note("x".repeat(NOTE_MAX_LENGTH + 20)), "x".repeat(NOTE_MAX_LENGTH));
+  // Characters as the database counts them, so an emoji counts once.
+  assert.equal(note("🏃".repeat(NOTE_MAX_LENGTH + 1)), "🏃".repeat(NOTE_MAX_LENGTH));
+  assert.equal(note("=SUM(A1)"), "=SUM(A1)");
+  // A broken escape is read as it's written rather than failing.
+  assert.equal(parseLogLink("#log?note=50%25%zz", "2026-11-24").note, "50%%zz");
+});
+
+test("a #log link's weight is read in the user's unit when it has none, and left out when the field can't take it", async () => {
+  const { logLinkWeight } = await import("../dist/model.mjs");
+  // In kg for someone who shows kg, and in pounds for pounds and stones.
+  assert.equal(logLinkWeight({ weight: 84.9, unit: null }, "kg"), 84.9);
+  assert.equal(logLinkWeight({ weight: 187.2, unit: null }, "lb"), roundWeight(187.2 * KG_PER_LB));
+  assert.equal(logLinkWeight({ weight: 187.2, unit: null }, "st"), roundWeight(187.2 * KG_PER_LB));
+  // A unit in the link wins over the user's.
+  assert.equal(logLinkWeight({ weight: 84.9, unit: "kg" }, "lb"), 84.9);
+  assert.equal(logLinkWeight({ weight: 187.2, unit: "lb" }, "kg"), 84.91);
+  // Filled in, it shows as the link gave it: 187.2 lb, or 13 st 5.2 lb.
+  assert.equal(formatWeight(logLinkWeight({ weight: 187.2, unit: "lb" }, "lb"), "lb"), "187.2 lb");
+  assert.equal(formatWeight(logLinkWeight({ weight: 187.2, unit: "lb" }, "st"), "st"), "13 st 5.2 lb");
+  assert.equal(formatWeight(logLinkWeight({ weight: 84.9, unit: "kg" }, "st"), "st"), "13 st 5.2 lb");
+  // The field's range: 0.1 to 2,000 in the unit shown, and Baseline's 0.1 to 2,000 kg.
+  assert.equal(logLinkWeight({ weight: 2000, unit: "kg" }, "kg"), 2000);
+  assert.equal(logLinkWeight({ weight: 2000.01, unit: "kg" }, "kg"), null);
+  assert.equal(logLinkWeight({ weight: 2000, unit: "lb" }, "lb"), roundWeight(2000 * KG_PER_LB));
+  assert.equal(logLinkWeight({ weight: 1000, unit: "kg" }, "lb"), null, "2,204.6 lb is past the pounds field's 2,000");
+  assert.equal(logLinkWeight({ weight: 1000, unit: "kg" }, "st"), 1000, "157 st fits");
+  assert.equal(logLinkWeight({ weight: 0.1, unit: "kg" }, "kg"), 0.1);
+  assert.equal(logLinkWeight({ weight: 0.04, unit: "kg" }, "kg"), null);
+  assert.equal(logLinkWeight({ weight: 0.2, unit: "lb" }, "kg"), null, "0.09 kg is under what Baseline stores");
+  assert.equal(logLinkWeight({ weight: null, unit: "kg" }, "kg"), null);
+  assert.equal(logLinkWeight(null, "kg"), null);
+});
+
+test("the install hint waits for weigh-ins on 5 days, the first of them a week or more ago", async () => {
+  const { INSTALL_HINT_AGE, INSTALL_HINT_DAYS, installHintDue } = await import("../dist/model.mjs");
+  assert.equal(INSTALL_HINT_DAYS, 5);
+  assert.equal(INSTALL_HINT_AGE, 7);
+  const today = "2026-11-24";
+  const days = (...offsets) => offsets.map(offset => ({ date: dateOf(dayOf(today) - offset), weight: 84 }));
+  assert.equal(installHintDue([], today), false);
+  assert.equal(installHintDue(days(7, 3, 2, 1, 0), today), true);
+  assert.equal(installHintDue(days(30, 29, 28, 27, 26), today), true, "a break doesn't matter");
+  assert.equal(installHintDue(days(6, 3, 2, 1, 0), today), false, "the first is only 6 days ago");
+  assert.equal(installHintDue(days(9, 3, 2, 1), today), false, "4 days");
+  // Days, not weigh-ins: two on one date count once, and a date after today not yet.
+  assert.equal(installHintDue([...days(9, 3, 2, 1), ...days(1)], today), false);
+  assert.equal(installHintDue([...days(9, 3, 2, 1), { date: "2026-11-25", weight: 84 }], today), false);
+  assert.equal(installHintDue([...days(9, 3, 2, 1), { date: "2026-11-25", weight: 84 }], "2026-11-25"), true);
+});
+
 test("a new account's units come from the browser's region: pounds in the US, kilograms elsewhere", async () => {
   const { defaultUnits } = await import("../dist/model.mjs");
   assert.deepEqual(defaultUnits("en-US"), { weight: "lb", height: "ft" });

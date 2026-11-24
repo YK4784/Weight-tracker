@@ -10,6 +10,18 @@
   <title>Baseline</title>
   <link rel="icon" href="./mark.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+  <!-- Added to an iPhone or iPad Home Screen: the name under the icon, and
+       the ordinary status bar, which sits above the page rather than over it
+       as "black-translucent" would. There are no apple-touch-startup-image
+       launch screens: once someone has signed in, the copy of the log kept on
+       the device shows as soon as the page opens (see showCachedLog). -->
+  <meta name="apple-mobile-web-app-title" content="Baseline">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <!-- The manifest's background_color, which Android's launch screen uses,
+       stays the light paper in dark mode too: a manifest can't vary it by
+       colour scheme. Chrome's member for a dark one (color_scheme_dark, first
+       proposed as user_preferences) is still only an origin trial, with no
+       Android support (Chrome Platform Status, November 2026). -->
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="preload" href="./fonts/funnel-sans-latin.woff2" as="font" type="font/woff2" crossorigin>
   <!-- Clerk's Frontend API, where auth.mjs loads sign-in from. The host is
@@ -201,7 +213,7 @@
               <div class="input-frame" hidden><input id="entry-weight-lb" name="pounds" type="number" inputmode="decimal" placeholder="0.0" min="0" max="13.9" step="0.1" aria-label="Pounds"><span class="input-unit" aria-hidden="true">lb</span></div>
             </div>
             <div class="weigh-in-check" id="entry-check"><p class="check-text" id="entry-check-text" role="status"></p><div class="check-actions" id="entry-check-actions" role="group" aria-labelledby="entry-check-text" hidden></div></div>
-            <button class="button primary save-button" type="submit"><span id="save-label">Save entry</span></button>
+            <button class="button primary save-button" type="submit" id="entry-save"><span id="save-label">Save entry</span></button>
             <p id="entry-hint" class="form-hint"></p>
             <span class="sr-only" role="status" id="date-announce"></span>
           </form>
@@ -423,7 +435,7 @@
           <div class="data-row"><dt>Reminder devices</dt><dd>A push address for each device you turn reminders on from, in the same database, until you turn reminders off.</dd></div>
           <div class="data-row"><dt>Your agreement</dt><dd>Which version of the health data policy you agreed to, and when, in the same database.</dd></div>
           <div class="data-row"><dt>Your account</dt><dd>Your email address, your name and picture if you sign in with Google, and a record of your sign-ins, such as the browser and IP address. Kept by Clerk, which runs sign-in. None of your log goes to Clerk.</dd></div>
-          <div class="data-row"><dt>On this device</dt><dd>A copy of your log and any changes waiting to sync, so Baseline opens offline. Signing out removes them.</dd></div>
+          <div class="data-row"><dt>On this device</dt><dd>A copy of your log and any changes waiting to sync, so Baseline opens offline. Signing out removes them. A link that fills in a weigh-in waits in its tab until you sign in.</dd></div>
         </dl>
       </section>
 
@@ -539,6 +551,9 @@
 
     </div>
     <footer class="app-footer">
+      <!-- A quiet suggestion to install Baseline, on the overview of a log
+           that's a week old (see showInstallHint in app.mjs). -->
+      <p class="install-hint" id="install-hint" hidden><span id="install-hint-text"></span> <span class="install-hint-actions"><button class="text-button" type="button" id="install-hint-install">Install</button><button class="text-button" type="button" id="install-hint-later">Not now</button></span></p>
       <p class="storage-status" id="storage-status"></p>
       <p class="footer-links"><a href="#your-data" id="footer-data-link">Your data</a><a href="./health-data-privacy.html">Health data privacy policy</a></p>
     </footer>

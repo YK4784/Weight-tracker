@@ -513,6 +513,8 @@ a.small-button { display: inline-block; text-decoration: none; }
 .import-source { margin: 0; font-size: 1rem; font-weight: 700; }
 /* The account line and the links to Your data and the policy. */
 .app-footer { margin-top: 48px; color: var(--ink-3); font-size: .875rem; text-align: center; }
+.install-hint { max-width: 34rem; margin: 0 auto 8px; text-wrap: pretty; }
+.install-hint-actions { display: inline-flex; gap: 16px; margin-left: 8px; white-space: nowrap; }
 .footer-links { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 20px; }
 .storage-status:not([hidden]) + .footer-links { margin-top: 8px; }
 .footer-links a { color: var(--ink-2); text-underline-offset: 3px; }

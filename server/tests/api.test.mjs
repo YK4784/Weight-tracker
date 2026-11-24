@@ -485,7 +485,8 @@ test("a database error's message and detail never reach the log, nor the user or
   assert.equal(response.status, 500);
   assert.equal(lines.length, 1);
   assert.match(lines[0], /^\[[0-9a-f]{8}\] POST \/api\/log save-weight failed: NeonDbError 23514$/);
-  assert.doesNotMatch(lines[0], /Failing|weigh_ins|user_1|2001|80|holidays|constraint/);
+  // After the request's random id, which can itself contain "80".
+  assert.doesNotMatch(lines[0].replace(/^\[[0-9a-f]{8}\] /, ""), /Failing|weigh_ins|user_1|2001|80|holidays|constraint/);
   assert.doesNotMatch(await response.text(), /Failing|user_1|holidays|23514/);
 });
 

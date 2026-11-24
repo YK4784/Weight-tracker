@@ -14,7 +14,7 @@
 // files are stored changes. The new worker then fills a new cache and deletes
 // this one. Edits to a listed file need no bump, since each load with a
 // connection stores the new copy.
-const CACHE = "baseline-shell-v4";
+const CACHE = "baseline-shell-v5";
 
 // Every file the app needs to open, relative to this worker. npm test checks
 // that each file in baseline/dist/ is listed here or deliberately left out.
@@ -136,7 +136,11 @@ self.addEventListener("fetch", event => {
 });
 
 // Browsers expect every push to show a notification. One tag, so a reminder
-// replaces an earlier one instead of stacking up.
+// replaces an earlier one instead of stacking up. A reminder is sent only on a
+// day without a weigh-in, so it also marks the app's icon with a badge, where
+// the platform has them: installed on an iPhone or iPad (iOS 16.4 and later)
+// and on desktop Chrome and Edge, but not Chrome on Android. The app clears it
+// once the server has a weigh-in for today (see clearBadge in app.mjs).
 self.addEventListener("push", event => {
   let message = {};
   try { message = event.data?.json() ?? {}; } catch { /* Not JSON: show the usual text. */ }
@@ -144,8 +148,14 @@ self.addEventListener("push", event => {
     body: message.body || FALLBACK.body,
     tag: "weigh-in",
     icon: "icons/icon-192.png"
-  }));
+  }).then(setBadge));
 });
+
+// A platform without badges, or one that turns this one down, leaves the
+// reminder as it is.
+async function setBadge() {
+  try { await self.navigator?.setAppBadge?.(1); } catch { /* No badge, and nothing else changes. */ }
+}
 
 // The page a window shows, without its query string or hash.
 function pageOf(href) {

@@ -174,6 +174,61 @@ export function clearDeviceData(storage, userId) {
   }
 }
 
+// A #log link opened while signed out (see parseLogLink in model.mjs). The
+// sign-in page takes over the address, so the link waits in sessionStorage,
+// which this tab alone sees and which goes when it closes, and fills in the
+// weigh-in once, after sign-in. Signing out removes it.
+export const LOG_LINK_KEY = "baseline.log-link.v1";
+
+// Keeps the link, as its hash ("#log?weight=84.9"), until takeLogLink.
+export function keepLogLink(storage, hash) {
+  storage.setItem(LOG_LINK_KEY, hash);
+}
+
+// The link kept, which is removed as it's read, or null.
+export function takeLogLink(storage) {
+  const hash = storage.getItem(LOG_LINK_KEY);
+  if (hash === null) return null;
+  storage.removeItem(LOG_LINK_KEY);
+  return hash.startsWith("#log") ? hash : null;
+}
+
+export function forgetLogLink(storage) {
+  storage.removeItem(LOG_LINK_KEY);
+}
+
+// The quiet line that suggests installing Baseline. Its "Not now" is kept on
+// this device as { count, at }: the first hides the line for
+// INSTALL_HINT_PAUSE_DAYS, and the second for good. It says nothing about the
+// log, so signing out and deleting data leave it.
+export const INSTALL_HINT_KEY = "baseline.install-hint.v1";
+export const INSTALL_HINT_PAUSE_DAYS = 30;
+const DAY_MS = 86_400_000;
+
+// The record kept, with a value that doesn't parse counting as none. Throws
+// if storage can't be read.
+function installHintRecord(storage) {
+  const text = storage.getItem(INSTALL_HINT_KEY);
+  let record = null;
+  try { record = JSON.parse(text); } catch { /* Counts as no "Not now". */ }
+  const count = Number.isInteger(record?.count) && record.count > 0 ? record.count : 0;
+  return { count, at: Number.isFinite(record?.at) ? record.at : 0 };
+}
+
+// Whether "Not now" still holds at `now`. A device that can't read the
+// choice counts as having made it, so the line can't come back on every visit.
+export function installHintHidden(storage, now = Date.now()) {
+  let record;
+  try { record = installHintRecord(storage); } catch { return true; }
+  return record.count >= 2 || record.count === 1 && now < record.at + INSTALL_HINT_PAUSE_DAYS * DAY_MS;
+}
+
+// Records a "Not now" made at `now`.
+export function dismissInstallHint(storage, now = Date.now()) {
+  const { count } = installHintRecord(storage);
+  storage.setItem(INSTALL_HINT_KEY, JSON.stringify({ count: Math.min(count + 1, 2), at: now }));
+}
+
 // What Settings says before signing out while changes haven't synced, since
 // signing out removes them. Null when nothing is waiting.
 export function signOutWarning(count) {

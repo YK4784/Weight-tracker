@@ -1,6 +1,6 @@
-import { CM_PER_IN, CONSENT_VERSION, sourceName, sourcePhrase, FAST_LOSS_DAYS, FORECAST_MAX_DAYS, GOAL_MILESTONES, GOAL_RATE_CAP, KG_PER_LB, OVERALL_MIN_DAYS, QUEUEABLE_OPS, RATE_DAYS, RATE_MIN_ENTRIES, RATE_MIN_SPAN, SEXES, WINDOW_DAYS, applyOps, averageChanges, bmi, bodyFat, bodyFatChange, bodyFatHistory, calculateRate, changeTarget, calculateTrend, checkWeighIn, cleanNote, dateOf, dayOf, defaultUnits, fastGoalRate, fastLossCaution, forecastGoal, forecastReach, forecastTrend, formatAmount, formatRange, formatWaist, formatWeight, fromTenths, goalProgress, goalRateAllowed, goalRateLimit, groupByMonth, hasConsent, heightParts, inverseOf, localToday, logStatus, maxGoalRate, monthlyReports, normalizeGoal, normalizeState, oneDecimal, overallRate, positive, prettyDate, rateAsOf, recentRange, roundHeight, roundWaist, roundWeight, shiftDate, spokenHeight, spokenWeight, toTenths, todayHeading, todayLabel, validDate, validWaist, waistParts, waistTenths, weeklyTrendShown, weeklyTrendWords, weighInQuestion, weightParts } from "./model.mjs";
+import { CM_PER_IN, CONSENT_VERSION, sourceName, sourcePhrase, FAST_LOSS_DAYS, FORECAST_MAX_DAYS, GOAL_MILESTONES, GOAL_RATE_CAP, KG_PER_LB, OVERALL_MIN_DAYS, QUEUEABLE_OPS, RATE_DAYS, RATE_MIN_ENTRIES, RATE_MIN_SPAN, SEXES, WINDOW_DAYS, applyOps, averageChanges, bmi, bodyFat, bodyFatChange, bodyFatHistory, calculateRate, changeTarget, calculateTrend, checkWeighIn, cleanNote, dateOf, dayOf, defaultUnits, fastGoalRate, fastLossCaution, forecastGoal, forecastReach, forecastTrend, formatAmount, formatRange, formatWaist, formatWeight, fromTenths, goalProgress, goalRateAllowed, goalRateLimit, groupByMonth, hasConsent, heightParts, installHintDue, inverseOf, localToday, logLinkWeight, logStatus, maxGoalRate, monthlyReports, normalizeGoal, normalizeState, oneDecimal, overallRate, parseLogLink, positive, prettyDate, rateAsOf, recentRange, roundHeight, roundWaist, roundWeight, shiftDate, spokenHeight, spokenWeight, toTenths, todayHeading, todayLabel, validDate, validWaist, waistParts, waistTenths, weeklyTrendShown, weeklyTrendWords, weighInQuestion, weightParts } from "./model.mjs";
 import { BodyFatChart, TrendChart, rangeStart } from "./chart.mjs";
-import { claimLegacyLog, clearDeviceData, clearLogCache, fastLossHiddenKeyFor, hasLegacyLog, lastUser, readLogCache, readOutbox, signOutWarning, storageKeyFor, writeLogCache, writeOutbox } from "./account.mjs";
+import { claimLegacyLog, clearDeviceData, clearLogCache, dismissInstallHint, fastLossHiddenKeyFor, forgetLogLink, hasLegacyLog, installHintHidden, keepLogLink, lastUser, readLogCache, readOutbox, signOutWarning, storageKeyFor, takeLogLink, writeLogCache, writeOutbox } from "./account.mjs";
 import { csvFileName, exportJson, jsonFileName, weighInsCsv } from "./export.mjs";
 import { AuthSetupError, startClerk } from "./auth.mjs";
 import { PUSH_PUBLIC_KEY } from "./config.mjs";
@@ -509,7 +509,18 @@ function receive(log) {
   cachedAt = null;
   try { writeLogCache(localStorage, account.id, saved); } catch { /* Nothing is cached, so the next start shows the skeleton. */ }
   showLogStatus();
+  clearBadge();
   return saved;
+}
+
+// A reminder marks the app's icon with a badge (see sw.js). It goes once the
+// server has a weigh-in for today: on opening, after a save, and after a save
+// that waited on this device reaches the server. `saved` is the server's copy,
+// so a weigh-in still waiting doesn't count yet. Where there are no badges,
+// as in Chrome on Android, this does nothing.
+function clearBadge() {
+  if (!saved?.entries.some(entry => entry.date === today)) return;
+  try { navigator.clearAppBadge?.().catch(() => {}); } catch { /* No badges here. */ }
 }
 
 // When a cached copy was saved: "9:41 AM" today, or "Nov 21, 9:41 AM" before.
@@ -1233,6 +1244,7 @@ function showPage() {
   $("body-fat").hidden = !bodyFatShown;
   if (overview) drawChart();
   if (bodyFatShown) showBodyFat();
+  showInstallHint();
 }
 
 // A new account's overview: one screen that takes the first weigh-in, in a
@@ -1535,6 +1547,7 @@ function showCachedLog(cached) {
   cachedAt = cached.savedAt;
   cacheUpdating = true;
   showLog();
+  clearBadge();
 }
 
 async function openLog(user) {
@@ -1605,6 +1618,8 @@ async function refreshLog() {
 // shared device keeps no one's weights. `keepOutbox` keeps those changes when
 // nobody signed out and they exist nowhere else.
 function closeLog({ keepOutbox = false } = {}) {
+  // Signing out also removes a #log link that was waiting for sign-in.
+  if (account) forgetWaitingLink();
   forgetChanges();
   cancelImport();
   importResult = null;
@@ -1636,8 +1651,13 @@ function showSignedIn(user) {
 }
 
 function showSignedOut() {
+  const signingOut = account !== null;
   closeLog();
-  // Clerk's sign-in steps live in the hash ("#/factor-one"), so drop the app's own views from it.
+  // Clerk's sign-in steps live in the hash ("#/factor-one"), so drop the app's
+  // own views from it. A #log link opened while signed out waits for sign-in
+  // (see followLogLink). One still waiting when someone signs out, as from
+  // the consent step, goes with their log.
+  if (!signingOut && parseLogLink(location.hash, today)) keepWaitingLink(location.hash);
   if (location.hash && !location.hash.startsWith("#/")) history.replaceState(null, "", location.pathname + location.search);
   showAuth("sign-in");
   if (mounted === "sign-in") return;
@@ -1645,6 +1665,21 @@ function showSignedOut() {
   // Clerk styles the node it mounts into, so it gets a child of the centered wrapper.
   clerk.mountSignIn($("sign-in-card"), { withSignUp: true });
   mounted = "sign-in";
+}
+
+// A #log link opened while signed out, kept in this tab's sessionStorage until
+// sign-in (see keepLogLink in account.mjs). Where storage is blocked, the link
+// is lost, as before, and sign-in shows the overview.
+function keepWaitingLink(hash) {
+  try { keepLogLink(sessionStorage, hash); } catch { /* Lost: see above. */ }
+}
+
+function takeWaitingLink() {
+  try { return takeLogLink(sessionStorage); } catch { return null; }
+}
+
+function forgetWaitingLink() {
+  try { forgetLogLink(sessionStorage); } catch { /* Nothing was kept. */ }
 }
 
 // Shows the last user's cached log straight away, if this device has one,
@@ -1731,9 +1766,9 @@ function showSheetNote(shown) {
   $("sheet-add-note").hidden = shown;
 }
 
-// Opens the sheet with focus in the weight field. Called from a tap, the focus
-// is part of it, which iOS needs before it raises the keyboard.
-function openSheet() {
+// Opens the sheet with focus in the weight field, or on `focus`. Called from
+// a tap, the focus is part of it, which iOS needs before it raises the keyboard.
+function openSheet(focus = "sheet-weight") {
   if (!state || $("main").hidden || document.querySelector("dialog[open]:not(#log-sheet)")) return;
   syncDay();
   const sheet = $("log-sheet");
@@ -1743,7 +1778,7 @@ function openSheet() {
     window.visualViewport?.addEventListener("scroll", fitSheet);
     sheet.showModal();
   }
-  $("sheet-weight").focus();
+  $(focus).focus();
 }
 
 // Keeps the sheet's bottom at the bottom of the visible part of the screen,
@@ -1769,20 +1804,78 @@ function fitSheet() {
 }
 
 // Today's weigh-in, from a reminder, the home-screen shortcut or a #log link:
-// the sheet on phones, and the log form on wider screens.
-function openLogEntry() {
-  if (phoneLayout.matches && !wantsFirstRun()) openSheet();
-  else focusEntry();
+// the sheet on phones, and the log form on wider screens. A link with values,
+// such as "#log?weight=84.9" (see parseLogLink in model.mjs), fills them in
+// and puts focus on Save, but never saves: Save still asks about a weigh-in
+// that looks mistyped (see saveChecked). The sheet is for today, so a link to
+// another date opens the form on phones too. The form has no note field, so
+// a link's note fills in only the sheet. A new account's first weigh-in comes
+// from the first-run screen, in the unit it picks, so a link fills nothing in there.
+function openLogEntry(hash = "#log") {
+  if (wantsFirstRun()) {
+    focusEntry();
+    return;
+  }
+  syncDay();
+  const link = /^#log\?./.test(hash) ? parseLogLink(hash, today) : null;
+  if (phoneLayout.matches && (!link || link.date === today)) {
+    if (document.querySelector("dialog[open]:not(#log-sheet)")) return;
+    openSheet(link && fillSheet(link) ? "sheet-save" : "sheet-weight");
+  } else {
+    focusEntry(link && fillEntryForm(link) ? "entry-save" : "entry-weight");
+  }
 }
 
-// Opening Baseline at #log asks for today's weigh-in. #log isn't a view, so the
-// overview shows, and once the log is on the page the address goes back to
-// the overview and the weigh-in opens. While sign-in loads or the consent step
-// shows, the hash waits. Signed out, Clerk's sign-in takes over the hash.
+// Fills the sheet from a link: the weight (see logLinkWeight), in place of
+// anything typed or today's weigh-in, and the note, opened. A weight the field
+// can't take, or none, leaves it as it was. Returns whether there was a weight.
+function fillSheet(link) {
+  const kg = logLinkWeight(link, unit());
+  if (kg === null && !link.note) return false;
+  sheetAutoFill = true;
+  syncSheet();
+  closeCheck("sheet");
+  if (kg !== null) writeWeight("sheet-weight", kg);
+  if (link.note) {
+    $("sheet-note").value = link.note;
+    showSheetNote(true);
+  }
+  // As if typed, so the log on screen changing doesn't refill the sheet.
+  sheetAutoFill = false;
+  sheetEdits++;
+  return kg !== null;
+}
+
+// Fills the log form from a link: its date and, if it can take it, its weight.
+// Returns whether there was a weight.
+function fillEntryForm(link) {
+  const kg = logLinkWeight(link, unit());
+  $("entry-date").value = link.date;
+  autoFill = true;
+  dateChanged();
+  if (kg === null) return false;
+  writeWeight("entry-weight", kg);
+  autoFill = false;
+  entryEdits++;
+  syncEntryForm();
+  return true;
+}
+
+// Opening Baseline at #log asks for today's weigh-in, and a link can fill it
+// in: "#log?weight=84.9&unit=kg&date=2026-11-23&note=after%20run". #log isn't
+// a view, so the overview shows, and once the log is on the page the address
+// goes back to the overview, so a reload doesn't fill it in again, and the
+// weigh-in opens. While sign-in loads or the consent step shows, the hash
+// waits. Signed out, the sign-in page takes over the hash, so the link waits
+// in this tab's sessionStorage instead (see showSignedOut) and opens once,
+// after sign-in.
 function followLogLink() {
-  if (location.hash !== "#log" || !state || $("main").hidden) return;
-  history.replaceState(null, "", location.pathname + location.search + "#overview");
-  openLogEntry();
+  if (!state || $("main").hidden) return;
+  const waiting = takeWaitingLink();
+  const linked = parseLogLink(location.hash, today) ? location.hash : null;
+  if (!linked && !waiting) return;
+  if (linked) history.replaceState(null, "", location.pathname + location.search + "#overview");
+  openLogEntry(linked ?? waiting);
 }
 
 // Weight inputs: a main input in kg, pounds or stones, and a pounds input
@@ -2122,6 +2215,45 @@ function reminderAccess() {
 
 // An iPhone or iPad, including an iPad that reports itself as a Mac.
 const appleTouch = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+
+// Installing Baseline puts it a tap away on the Home Screen, and on iPhone and
+// iPad it's what lets reminders reach it. Once the log is a habit (see
+// installHintDue in model.mjs), one quiet line on the overview suggests it,
+// above the line about the account. Chromium browsers offer their own install
+// dialog through beforeinstallprompt, which the line's Install button opens.
+// Safari on iPhone and iPad has no such event, so the line says how to add
+// Baseline from the Share menu. Other browsers get no line, and the installed
+// app never does. "Not now" hides it for 30 days, then for good (see
+// installHintHidden in account.mjs).
+let installPrompt = null; // Chromium's beforeinstallprompt event, kept for Install. It can prompt once.
+let installHintClosed = false; // The line was turned down in this page, which holds even if storage couldn't keep it.
+
+const installedApp = () => navigator.standalone === true || matchMedia("(display-mode: standalone)").matches;
+
+// Safari on an iPhone or iPad, whose Share menu has Add to Home Screen. Other
+// browsers there name themselves in the user agent, and apps that show pages
+// in a view of their own leave out "Safari".
+const appleSafari = () => appleTouch() && /\bSafari\//.test(navigator.userAgent) &&
+  !/\b(CriOS|FxiOS|EdgiOS|OPiOS|OPT|GSA|YaBrowser|DuckDuckGo|Brave)\//.test(navigator.userAgent);
+
+function showInstallHint() {
+  const kind = installPrompt ? "install" : appleSafari() ? "home-screen" : null;
+  let shown = kind !== null && !installHintClosed && !installedApp() && state !== null && document.body.dataset.view === "overview" && installHintDue(state.entries, today);
+  if (shown) {
+    try { shown = !installHintHidden(localStorage); } catch { shown = false; /* Storage is blocked, so a Not now couldn't be kept. */ }
+  }
+  $("install-hint").hidden = !shown;
+  if (!shown) return;
+  $("install-hint-text").textContent = kind === "install" ? "Install Baseline to log in one tap and get reminders."
+    : "Add Baseline to your Home Screen to log in one tap and get reminders: tap Share, then Add to Home Screen.";
+  $("install-hint-install").hidden = kind !== "install";
+}
+
+// "Not now": the line goes from this page, and from this device for 30 days or for good.
+function turnDownInstall() {
+  installHintClosed = true;
+  try { dismissInstallHint(localStorage); } catch { /* Kept only in this page. */ }
+}
 
 const blockedText = "Notifications are blocked for Baseline in this browser. Allow them in its site settings, then try again.";
 
@@ -3436,6 +3568,39 @@ window.addEventListener("hashchange", () => {
   window.scrollTo({ top: 0, behavior: "auto" });
   // The home-screen shortcut can reach an open window as a new hash.
   followLogLink();
+});
+// The browser would show its own install offer, such as Chrome's bar on
+// Android. The quiet line takes its place, once the log is a habit.
+window.addEventListener("beforeinstallprompt", event => {
+  event.preventDefault();
+  installPrompt = event;
+  showInstallHint();
+});
+window.addEventListener("appinstalled", () => {
+  installPrompt = null;
+  showInstallHint();
+});
+$("install-hint-install").addEventListener("click", async () => {
+  const prompt = installPrompt;
+  if (!prompt) return;
+  // The event prompts only once, so the line has nothing more to offer.
+  installPrompt = null;
+  showInstallHint();
+  $("main").focus({ preventScroll: true });
+  let choice = null;
+  try {
+    await prompt.prompt();
+    choice = await prompt.userChoice;
+  } catch (error) {
+    console.error(error);
+  }
+  // Turning down the browser's own dialog counts as Not now.
+  if (choice?.outcome === "dismissed") turnDownInstall();
+});
+$("install-hint-later").addEventListener("click", () => {
+  turnDownInstall();
+  showInstallHint();
+  $("main").focus({ preventScroll: true });
 });
 // A tapped reminder asks an open window for today's weigh-in (see sw.js).
 // While the log isn't on the page yet, #log waits for it (see followLogLink).

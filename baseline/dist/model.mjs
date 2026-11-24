@@ -490,6 +490,63 @@ export function todayHeading(today) {
   return "Today, " + prettyDate(today, "dayName") + " " + prettyDate(today);
 }
 
+// A link that opens today's weigh-in, filled in: "#log", or with any of
+// "?weight=84.9&unit=kg&date=2026-11-23&note=after%20run". It never saves
+// anything: the app fills the fields and waits for Save. Returns
+// { date, weight, unit, note }, or null for any other hash.
+// - `weight` is the number as the link gives it, with a point or a comma, or
+//   null. An unknown unit leaves it out, since it can't be read.
+// - `unit` is "kg", "lb" or null for none ("lbs" counts as "lb"). Without one,
+//   logLinkWeight reads the number in the unit the user shows.
+// - `date` is the link's date, or today for a missing or invalid date or one after today.
+// - `note` is cleaned (see cleanNote) and cut to NOTE_MAX_LENGTH characters, or null.
+export function parseLogLink(hash, today) {
+  const match = /^#log(?:\?([^]*))?$/.exec(typeof hash === "string" ? hash : "");
+  if (!match) return null;
+  const query = new URLSearchParams(match[1] ?? "");
+  const named = query.get("unit")?.trim().toLowerCase() || null;
+  const unit = named === "kg" ? "kg" : named === "lb" || named === "lbs" ? "lb" : null;
+  const text = query.get("weight")?.trim() ?? "";
+  const number = /^\d{1,4}(?:[.,]\d{1,8})?$/.test(text) ? Number(text.replace(",", ".")) : NaN;
+  const given = query.get("date");
+  return {
+    date: validDate(given) && given <= today ? given : today,
+    weight: positive(number) && (unit || !named) ? number : null,
+    unit,
+    note: shortNote(query.get("note"))
+  };
+}
+
+// The highest number a weight field takes, in the unit it shows (see the max
+// of each weight input in index.html).
+const WEIGHT_FIELD_MAX = 2000;
+
+// The weight a #log link fills in, in kg to 0.01, for a user who shows
+// weights in `shown` ("kg", "lb" or "st"). A number without a unit is read in
+// kg by someone who shows kg, and in pounds by someone who shows pounds or
+// stones. Null when the link has no weight, or when the weight is outside what
+// the field takes once it's shown in that unit (0.1 to 2,000) or what Baseline
+// stores (0.1 to 2,000 kg), so the field is left as it was.
+export function logLinkWeight(link, shown = "kg") {
+  if (!positive(link?.weight)) return null;
+  const unit = link.unit ?? (shown === "kg" ? "kg" : "lb");
+  const kg = roundWeight(unit === "kg" ? link.weight : link.weight * KG_PER_LB);
+  const inField = shown === "kg" ? kg : shown === "lb" ? kg / KG_PER_LB : kg / KG_PER_LB / 14;
+  return validWeight(kg) && toTenths(kg, shown) >= 1 && inField <= WEIGHT_FIELD_MAX ? kg : null;
+}
+
+// The quiet line that suggests installing Baseline (see showInstallHint in
+// app.mjs) waits until the log is a habit: weigh-ins on INSTALL_HINT_DAYS
+// different days, the first of them INSTALL_HINT_AGE or more days before
+// today. Weigh-ins dated after today don't count until their day.
+export const INSTALL_HINT_DAYS = 5;
+export const INSTALL_HINT_AGE = 7;
+
+export function installHintDue(entries, today) {
+  const dates = [...new Set(entries.filter(entry => entry.date <= today).map(entry => entry.date))].sort();
+  return dates.length >= INSTALL_HINT_DAYS && dayOf(today) - dayOf(dates[0]) >= INSTALL_HINT_AGE;
+}
+
 // What a weigh-in is checked against before it's saved (see checkWeighIn):
 // the 14-day average on its date, from the weigh-ins in the 13 days before
 // it, or, without two of those, the nearest weigh-in before the date. The
