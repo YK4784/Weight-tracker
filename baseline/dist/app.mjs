@@ -1,4 +1,4 @@
-import { CM_PER_IN, CONSENT_VERSION, FAST_LOSS_DAYS, FORECAST_MAX_DAYS, GOAL_MILESTONES, GOAL_RATE_CAP, KG_PER_LB, OVERALL_MIN_DAYS, QUEUEABLE_OPS, RATE_DAYS, RATE_MIN_ENTRIES, RATE_MIN_SPAN, SEXES, WINDOW_DAYS, applyOps, averageChanges, bmi, bodyFat, bodyFatChange, bodyFatHistory, calculateRate, changeTarget, calculateTrend, checkWeighIn, cleanNote, dateOf, dayOf, defaultUnits, fastGoalRate, fastLossCaution, forecastGoal, forecastReach, forecastTrend, formatAmount, formatRange, formatWaist, formatWeight, fromTenths, goalProgress, goalRateAllowed, goalRateLimit, groupByMonth, hasConsent, heightParts, inverseOf, localToday, logStatus, maxGoalRate, monthlyReports, normalizeGoal, normalizeState, oneDecimal, overallRate, positive, prettyDate, rateAsOf, recentRange, roundHeight, roundWaist, roundWeight, shiftDate, spokenHeight, spokenWeight, toTenths, todayHeading, todayLabel, validDate, validWaist, waistParts, waistTenths, weeklyTrendShown, weighInQuestion, weightParts } from "./model.mjs";
+import { CM_PER_IN, CONSENT_VERSION, FAST_LOSS_DAYS, FORECAST_MAX_DAYS, GOAL_MILESTONES, GOAL_RATE_CAP, KG_PER_LB, OVERALL_MIN_DAYS, QUEUEABLE_OPS, RATE_DAYS, RATE_MIN_ENTRIES, RATE_MIN_SPAN, SEXES, WINDOW_DAYS, applyOps, averageChanges, bmi, bodyFat, bodyFatChange, bodyFatHistory, calculateRate, changeTarget, calculateTrend, checkWeighIn, cleanNote, dateOf, dayOf, defaultUnits, fastGoalRate, fastLossCaution, forecastGoal, forecastReach, forecastTrend, formatAmount, formatRange, formatWaist, formatWeight, fromTenths, goalProgress, goalRateAllowed, goalRateLimit, groupByMonth, hasConsent, heightParts, inverseOf, localToday, logStatus, maxGoalRate, monthlyReports, normalizeGoal, normalizeState, oneDecimal, overallRate, positive, prettyDate, rateAsOf, recentRange, roundHeight, roundWaist, roundWeight, shiftDate, spokenHeight, spokenWeight, toTenths, todayHeading, todayLabel, validDate, validWaist, waistParts, waistTenths, weeklyTrendShown, weeklyTrendWords, weighInQuestion, weightParts } from "./model.mjs";
 import { BodyFatChart, TrendChart, rangeStart } from "./chart.mjs";
 import { claimLegacyLog, clearDeviceData, clearLogCache, fastLossHiddenKeyFor, hasLegacyLog, lastUser, readLogCache, readOutbox, signOutWarning, storageKeyFor, writeLogCache, writeOutbox } from "./account.mjs";
 import { csvFileName, exportJson, jsonFileName, weighInsCsv } from "./export.mjs";
@@ -810,13 +810,15 @@ function showForecast() {
   for (const input of $("rate-choice").querySelectorAll("input")) input.checked = input.value === source;
 
   setRate("rate-committed", goal.rate ? signedRate(sign * goal.rate) : "Not set", !goal.rate);
-  setRate("rate-current", !weeklyRate ? "Not yet" : weeklyRate.clear ? signedRate(weeklyRate.perWeek) : "No clear change", !weeklyRate?.clear);
+  // The weekly trend forecasts only while it's moving, in either direction.
+  const moving = weeklyRate?.state === "moving";
+  setRate("rate-current", !weeklyRate ? "Not yet" : moving ? signedRate(weeklyRate.perWeek) : weeklyRate.state === "steady" ? "Steady" : "Not clear yet", !moving);
   $("rate-overall-name").textContent = "Since " + shortDate(goal.startDate);
   setRate("rate-overall", overall === null ? "Not yet" : overall ? signedRate(overall) : "No change", !overall);
 
   const lead = $("forecast-lead");
   const away = "away from your goal, so there’s no date to forecast.";
-  const perWeek = { committed: goal.rate && sign * goal.rate, current: weeklyRate?.clear ? weeklyRate.perWeek : null, overall }[source];
+  const perWeek = { committed: goal.rate && sign * goal.rate, current: moving ? weeklyRate.perWeek : null, overall }[source];
   const rows = forecastGoal(progress, perWeek, status.lastDate, today);
   $("forecast-table").hidden = !rows || rows.length < 2;
   if (!rows) {
@@ -829,7 +831,8 @@ function showForecast() {
       lead.replaceChildren(button, " to forecast from the pace you’re aiming for.");
     } else if (source === "current") {
       lead.textContent = !weeklyRate ? trendPending()
-        : !weeklyRate.clear ? "Your weight shows no clear change over the last " + RATE_DAYS / 7 + " weeks, so there’s no date to forecast."
+        : weeklyRate.state === "unclear" ? "Your weekly trend isn’t clear yet, so there’s no date to forecast."
+        : weeklyRate.state === "steady" ? "Your weight is steady, so there’s no date to forecast."
         : "Your weight is going " + (weeklyRate.perWeek > 0 ? "up" : "down") + " over the last " + RATE_DAYS / 7 + " weeks, " + away;
     } else {
       lead.textContent = overall === null ? "Your rate since you started shows from " + shortDate(dateOf(dayOf(goal.startDate) + OVERALL_MIN_DAYS)) + "."
@@ -852,6 +855,12 @@ function showForecast() {
     '<td class="num">' + weightCell(row.weight) + '</td><td class="num">' + expected(row) + "</td></tr>").join("");
 }
 
+// The change in the average that sits beside the weekly trend under it.
+const HERO_CHANGE_DAYS = 30;
+
+// The line under the average: the weekly trend in words (weeklyTrendWords in
+// model.mjs), bold when it's moving or steady but not while it isn't clear yet,
+// with the 30-day change after it.
 function showRate() {
   const line = $("rate-detail");
   line.hidden = status.kind === "empty";
@@ -860,12 +869,15 @@ function showRate() {
     line.textContent = trendPending();
     return;
   }
-  const strong = document.createElement("strong");
-  strong.textContent = !weeklyRate.clear ? "No clear change"
-    : (weeklyRate.perWeek < 0 ? "Down " : "Up ") + amount(weeklyRate.perWeek) + " a week";
-  // Like the average above it, the trend is as of the last weigh-in.
+  const { lead, rest } = weeklyTrendWords(weeklyRate, unit());
+  // Then the 30-day change in the average, the figure from the Trend section.
+  // Like the average above it and the trend, it runs to the last weigh-in, and
+  // says so when that isn't today.
+  const month = averageChanges(trend, unit()).find(change => change.days === HERO_CHANGE_DAYS);
   const since = asOf();
-  line.replaceChildren(strong, since ? " over the " + RATE_DAYS / 7 + " weeks to " + shortDate(since) : " over the last " + RATE_DAYS / 7 + " weeks");
+  const change = !month ? "" : " · " + signedAmount(month.change) + (since ? " in the " + HERO_CHANGE_DAYS + " days to " + shortDate(since) : " in " + HERO_CHANGE_DAYS + " days");
+  if (lead) writeLine(line, lead, rest + change);
+  else line.replaceChildren(rest + change);
 }
 
 function signedAmount(kg) {
@@ -878,7 +890,8 @@ function daysAgo(days) {
 
 // One label and value in a row of figures, styled like the facts. A null
 // value shows a quiet dash, read out as `missing`. A `quiet` value is a word
-// rather than a figure, such as "No clear change".
+// rather than a figure, such as "Steady", or a figure that isn't clear yet.
+// `value` can be a node, for words only screen readers hear.
 function figure(label, value, note = "", missing = "", quiet = false) {
   const item = document.createElement("div");
   item.className = "fact";
@@ -890,7 +903,7 @@ function figure(label, value, note = "", missing = "", quiet = false) {
   if (value === null) {
     number.innerHTML = '<span aria-hidden="true">—</span><span class="sr-only"></span>';
     number.lastChild.textContent = missing;
-  } else number.textContent = value;
+  } else number.replaceChildren(value);
   const detail = document.createElement("dd");
   detail.append(number);
   if (note) {
@@ -944,13 +957,22 @@ function syncEntryForm() {
 }
 
 // The weekly trend as it stood on a row's date (see showRate). Phones head the
-// column "Per week" and drop the "/wk".
+// column "Per week" and drop the "/wk". A trend that isn't clear yet is a
+// quiet "~−0.2", which #trend-note explains, and screen readers hear as "Not
+// clear yet, about −0.2".
 function rateCell(rate) {
   if (!rate) return '<span class="dash" aria-hidden="true">—</span><span class="sr-only">Not enough weigh-ins</span>';
-  if (!rate.clear) return '<span class="rate-cell unclear">No clear change</span>';
+  if (rate.state === "steady") return '<span class="rate-cell">Steady</span>';
   const [number, name] = amount(rate.perWeek).split(" ");
-  return '<span class="rate-cell">' + (rate.perWeek < 0 ? "−" : "+") + number + '</span><span class="table-unit">' + name + '<span class="long-label">/wk</span></span>';
+  const shown = rateSign(rate.perWeek) + number;
+  return (rate.state === "moving" ? '<span class="rate-cell">' + shown : '<span class="rate-cell unclear">' + UNCLEAR_MARK + shown) +
+    '</span><span class="table-unit">' + name + '<span class="long-label">/wk</span></span>';
 }
+
+const rateSign = perWeek => perWeek < 0 ? "−" : perWeek > 0 ? "+" : "";
+
+// Marks a weekly trend that isn't clear yet in the tables.
+const UNCLEAR_MARK = '<span class="unclear-mark" aria-hidden="true">~</span><span class="sr-only">Not clear yet, about </span>';
 
 const escapeHtml = text => text.replace(/[&<>"']/g, char => "&#" + char.charCodeAt(0) + ";");
 
@@ -971,7 +993,7 @@ function entryRows(point) {
   const row = '<tr data-edit="' + point.date + '"' + (point.note ? ' class="has-note"' : "") + ">" + dateCell(point.date) +
     '<td class="num entry-weight">' + weightCell(point.weight) + "</td>" +
     '<td class="num">' + weightCell(point.average) + "</td>" +
-    '<td class="num">' + rateCell(calculateRate(state.entries, point.date, unit())) + "</td>" +
+    '<td class="num">' + rateCell(point.rate) + "</td>" +
     '<td class="row-action"><button type="button" class="icon-button" data-edit="' + point.date + '" aria-label="Edit weigh-in for ' + date + '">' + icon("pencil") + "</button></td></tr>";
   return point.note ? row + '<tr class="note-row" data-edit="' + point.date + '"><td colspan="5"><span class="sr-only">Note: </span>' + escapeHtml(point.note) + "</td></tr>" : row;
 }
@@ -984,7 +1006,10 @@ function showTable(isLog) {
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   page = Math.max(0, Math.min(page, pages - 1));
   const offset = isLog ? page * PAGE_SIZE : 0;
-  const rows = readings.slice(Math.max(0, total - offset - (isLog ? PAGE_SIZE : 5)), total - offset).reverse();
+  const rows = readings.slice(Math.max(0, total - offset - (isLog ? PAGE_SIZE : 5)), total - offset).reverse()
+    .map(point => ({ ...point, rate: calculateRate(state.entries, point.date, unit()) }));
+  // The note on "~" shows while a row shown has one.
+  $("trend-note").hidden = !rows.some(point => point.rate?.state === "unclear");
   $("entries-title").textContent = isLog ? "All entries" : "Recent entries";
   $("view-log").hidden = isLog || !total;
   $("action-heading").hidden = !total;
@@ -1048,9 +1073,21 @@ function showWaistRows() {
   more.setAttribute("aria-expanded", String(allWaists));
 }
 
-// A clear weekly trend as a signed figure: "−0.4 kg/wk".
+// A weekly trend as a signed figure: "−0.4 kg/wk".
 function signedRateAmount(perWeek) {
-  return (perWeek < 0 ? "−" : "+") + amount(perWeek) + "/wk";
+  return rateSign(perWeek) + amount(perWeek) + "/wk";
+}
+
+// A month's weekly trend among its figures: a moving one as a figure, a steady
+// one in words, and one that isn't clear yet as a quiet "~−0.2 kg/wk", as in
+// the log (see rateCell).
+function monthRate(rate) {
+  if (rate.state === "moving") return signedRateAmount(rate.perWeek);
+  if (rate.state === "steady") return "Steady";
+  const value = document.createElement("span");
+  value.innerHTML = UNCLEAR_MARK;
+  value.append(signedRateAmount(rate.perWeek));
+  return value;
 }
 
 // The milestones a month's average first reached: "Reached milestones 3 to 5
@@ -1105,7 +1142,7 @@ function monthItem(report) {
       figure("Start average", weight(start.average), start.date === dateOf(dayOf(report.first) - 1) ? "" : prettyDate(start.date)),
       figure("End average", weight(end.average), end.date === report.through ? "" : prettyDate(end.date)),
       figure("Change", change === null ? null : signedAmount(change), "", "Not enough weigh-ins"),
-      figure("Weekly trend", !rate ? null : rate.clear ? signedRateAmount(rate.perWeek) : "No clear change", "", "Not enough weigh-ins", rate && !rate.clear),
+      figure("Weekly trend", rate && monthRate(rate), "", "Not enough weigh-ins", Boolean(rate) && rate.state !== "moving"),
       figure("Lowest weigh-in", weight(low.weight), prettyDate(low.date))
     );
     body.append(figures);
@@ -1285,13 +1322,14 @@ function showTrendForecast(forecast, announce) {
   } else {
     const last = forecast.points.at(-1);
     const strong = document.createElement("strong");
-    if (forecast.clear) {
+    // In the same three states as the line under the average, from the same trend.
+    if (forecast.state === "moving") {
       strong.textContent = weight(last.average) + " on " + shortDate(last.date);
       words.replaceChildren("If your average keeps going " + (forecast.perWeek < 0 ? "down " : "up ") + amount(forecast.perWeek) + " a week, it would be about ", strong,
         ", likely " + formatRange(last.low, last.high, unit()) + "." + (forecast.perWeek < 0 && earlyLoss() ? " Early weeks often include water loss, so the pace may slow." : ""));
     } else {
       strong.textContent = formatRange(last.low, last.high, unit());
-      words.replaceChildren("Your weight shows no clear change over the last " + RATE_DAYS / 7 + " weeks, so on " + shortDate(last.date) + " your average would likely be ", strong, ".");
+      words.replaceChildren((forecast.state === "steady" ? "Your weight is steady" : "Your weekly trend isn’t clear yet") + ", so on " + shortDate(last.date) + " your average would likely be ", strong, ".");
     }
   }
   if (announce) $("chart-announce").textContent = words.textContent;

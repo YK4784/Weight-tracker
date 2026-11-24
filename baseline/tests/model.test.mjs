@@ -3,7 +3,7 @@ import test from "node:test";
 import { CM_PER_IN, FORECAST_MAX_DAYS, KG_PER_LB, NOTE_MAX_LENGTH, averageChanges, bodyFat, bodyFatChange, bodyFatHistory, changeTarget, formatWaist, roundWaist, saveWaist, spokenWaist, validWaist, waistParts, formatAmount, formatWeight, fromTenths, heightParts, normalizeUnits, toTenths, weightParts, bmi, calculateRate, calculateTrend, cleanNote, dateOf, dayOf, fastGoalRate, fastLossCaution, forecastGoal, goalProgress, goalRateAllowed, goalRateLimit, groupByMonth, maxGoalRate, monthlyReports, normalizeGoal, normalizeReminder, validTimeZone, normalizeState, noteLength, overallRate, recentRange, saveWeight, shiftDate, validDate } from "../dist/model.mjs";
 import { PREFERENCE_KEYS, QUEUEABLE_OPS, applyOp, applyOps, normalizePreferences, preferencesChange, validPreference } from "../dist/model.mjs";
 import { CONSENT_VERSION, hasConsent, normalizeConsent, roundWeight } from "../dist/model.mjs";
-import { FORECAST_CHART_MAX_DAYS, FORECAST_NOISE_CORRELATION, forecastReach, forecastTrend, formatRange, spokenRange, tQuantile } from "../dist/model.mjs";
+import { FORECAST_CHART_MAX_DAYS, NOISE_CORRELATION, RATE_INTERVAL_ERRORS, RATE_STEADY_BAND, weeklyTrendWords, forecastReach, forecastTrend, formatRange, spokenRange, tQuantile } from "../dist/model.mjs";
 import { asOfDate, rateAsOf } from "../dist/model.mjs";
 
 const first = dayOf("2026-03-01");
@@ -135,11 +135,16 @@ test("empty and future-only logs have no current average", () => {
 
 const daily = (days, weightOf) => Array.from({ length: days }, (_, i) => entry(i, weightOf(i)));
 
+// A weekly trend that's moving, with its likely range, from calculateRate.
+const moving = (perWeek, low, high, count = 21) => ({ perWeek, low, high, state: "moving", clear: true, count });
+
 test("the weekly rate is the slope of the last 21 days of weigh-ins", () => {
   const log = daily(21, i => 80 - i / 10);
-  assert.deepEqual(calculateRate(log, log.at(-1).date), { perWeek: -0.7, clear: true, count: 21 });
+  // On an exact line, the range comes from the least noise assumed.
+  assert.deepEqual(calculateRate(log, log.at(-1).date), moving(-0.7, -0.8, -0.6));
+  // 0.35 kg a week shows as 0.4, and its range as 0.3 to 0.4.
   const gaining = daily(21, i => 60 + i / 20);
-  assert.deepEqual(calculateRate(gaining, gaining.at(-1).date), { perWeek: 0.4, clear: true, count: 21 });
+  assert.deepEqual(calculateRate(gaining, gaining.at(-1).date), moving(0.4, 0.3, 0.4));
 });
 
 test("the weekly rate ignores weigh-ins older than 21 days or after today", () => {
@@ -152,7 +157,7 @@ test("the weekly rate ignores weigh-ins older than 21 days or after today", () =
 test("the weekly rate uses real dates when weigh-ins are spread out", () => {
   const log = daily(21, i => 80 - i / 7).filter((_, i) => i % 3 === 0 || i === 20);
   assert.equal(log.length, 8);
-  assert.deepEqual(calculateRate(log, log.at(-1).date), { perWeek: -1, clear: true, count: 8 });
+  assert.deepEqual(calculateRate(log, log.at(-1).date), moving(-1, -1.1, -0.9, 8));
 });
 
 test("the weekly rate waits for 8 weigh-ins over at least 2 weeks", () => {
@@ -167,13 +172,15 @@ test("the weekly rate waits for 8 weigh-ins over at least 2 weeks", () => {
   assert.equal(calculateRate([], dateOf(first)), null);
 });
 
-test("scale noise around a flat weight is not a clear change", () => {
+test("scale noise around a flat weight is not moving", () => {
   const noisy = daily(21, i => 75 + (i % 2 ? .6 : -.6));
-  assert.equal(calculateRate(noisy, noisy.at(-1).date).clear, false);
+  assert.deepEqual(calculateRate(noisy, noisy.at(-1).date), { perWeek: 0, low: -0.5, high: 0.5, state: "unclear", clear: false, count: 21 });
+  // A weight that hardly moves, typed exactly, is steady.
+  const steady = { perWeek: 0, low: -0.1, high: 0.1, state: "steady", clear: false, count: 21 };
   const flat = daily(21, () => 75);
-  assert.deepEqual(calculateRate(flat, flat.at(-1).date), { perWeek: 0, clear: false, count: 21 });
+  assert.deepEqual(calculateRate(flat, flat.at(-1).date), steady);
   const tiny = daily(21, i => 75 - i / 500);
-  assert.deepEqual(calculateRate(tiny, tiny.at(-1).date), { perWeek: 0, clear: false, count: 21 });
+  assert.deepEqual(calculateRate(tiny, tiny.at(-1).date), steady);
 });
 
 const goalOf = (startWeight, weight, milestones = 10, rate = null) => ({ weight, startDate: "2026-11-01", startWeight, rate, milestones });
@@ -258,6 +265,10 @@ test("the fast loss caution needs three weeks of clearly faster loss than the ca
   assert.equal(fastLossCaution(falling(35, 60, 1.0), fastGoal(60), dateOf(first + 34)), true, "the cap for 60 kg is 0.9 kg");
   assert.equal(fastLossCaution(falling(35, 60, 0.9), fastGoal(60), dateOf(first + 34)), false);
   assert.equal(fastLossCaution(log, null, dateOf(first + 34)), false);
+  // As fast on the whole, but with swings too large to tell it apart from them.
+  const swinging = log.map((item, i) => ({ ...item, weight: roundWeight(item.weight + (i % 2 ? 3 : -3)) }));
+  assert.deepEqual([calculateRate(swinging, dateOf(first + 34)).perWeek, calculateRate(swinging, dateOf(first + 34)).state], [-2.1, "unclear"]);
+  assert.equal(fastLossCaution(swinging, fastGoal(100), dateOf(first + 34)), false, "a trend that isn't clear yet");
 });
 
 test("the fast loss caution ignores the goal's first two weeks", () => {
@@ -432,9 +443,8 @@ test("the trend forecast carries the weekly trend on from today's average", () =
   const log = daily(30, i => 80 - i / 10);
   const today = log.at(-1).date;
   const forecast = forecastTrend(log, today, 14);
-  const rate = calculateRate(log, today);
-  assert.equal(forecast.perWeek, rate.perWeek);
-  assert.equal(forecast.clear, rate.clear);
+  const { from, average, points, ...rate } = forecast;
+  assert.deepEqual(rate, calculateRate(log, today), "the same weekly trend, in the same state, as the overview");
   assert.equal(forecast.average, calculateTrend(log, today).current.average);
   assert.equal(forecast.points.length, 14);
   forecast.points.forEach((point, i) => {
@@ -466,7 +476,7 @@ test("the trend forecast starts from the last weigh-in, on its day", () => {
   const later = forecastTrend(log, dateOf(first + 34), 14);
   assert.equal(later.from, last);
   assert.equal(later.average, calculateTrend(log, last).current.average);
-  assert.deepEqual([later.perWeek, later.clear], [onTheDay.perWeek, onTheDay.clear]);
+  assert.deepEqual([later.perWeek, later.state], [onTheDay.perWeek, onTheDay.state]);
   assert.equal(later.points.length, 19, "from the day after the weigh-in through 14 days after today");
   assert.equal(later.points[0].day, dayOf(last) + 1);
   assert.equal(later.points.at(-1).date, dateOf(first + 48));
@@ -497,7 +507,7 @@ function seeded(seed) {
 const normal = random => Math.sqrt(-2 * Math.log(1 - random())) * Math.cos(2 * Math.PI * random());
 // Weigh-ins on the days `weighs` picks, losing `perWeek` kg a week, with noise
 // of SD `sd` kg that's correlated by `correlation` from one day to the next.
-function noisyLog(random, { days, perWeek = -0.5, sd = 0.45, correlation = FORECAST_NOISE_CORRELATION, weighs = () => true }) {
+function noisyLog(random, { days, perWeek = -0.5, sd = 0.45, correlation = NOISE_CORRELATION, weighs = () => true }) {
   const log = [];
   let noise = normal(random) * sd;
   for (let i = 0; i < days; i++) {
@@ -549,6 +559,132 @@ test("the trend forecast's band holds the average 8 times in 10 when the trend h
       const share = inside[ahead] / trials;
       assert.ok(share > .72 && share < .88, ahead + " days ahead: " + share);
     }
+  }
+});
+
+// The textbook standard error of a weekly trend's slope, in kg a day, which
+// takes each day's noise as new.
+function textbookError(log, throughDate) {
+  const end = dayOf(throughDate);
+  const points = log.map(item => [dayOf(item.date) - end, item.weight]).filter(([x]) => x > -21 && x <= 0);
+  const mean = (values) => values.reduce((sum, value) => sum + value, 0) / values.length;
+  const meanX = mean(points.map(([x]) => x));
+  const meanY = mean(points.map(([, y]) => y));
+  const sxx = points.reduce((sum, [x]) => sum + (x - meanX) ** 2, 0);
+  const slope = points.reduce((sum, [x, y]) => sum + (x - meanX) * (y - meanY), 0) / sxx;
+  const residuals = points.reduce((sum, [x, y]) => sum + (y - meanY - slope * (x - meanX)) ** 2, 0);
+  return Math.sqrt(residuals / (points.length - 2) / sxx);
+}
+
+// Daily weigh-ins with about 1 day in 8 skipped, losing `perWeek` kg a week,
+// with noise of SD 0.6 kg that's correlated by 0.45 from one day to the next.
+const skippingLog = (random, days, perWeek) => noisyLog(random, { days, perWeek, sd: .6, correlation: .45, weighs: () => random() >= 1 / 8 });
+
+test("the weekly trend's likely range holds its estimate, rounded like it, in every unit", () => {
+  const random = seeded(5);
+  const states = new Set();
+  for (let trial = 0; trial < 100; trial++) {
+    const log = skippingLog(random, 21, (random() - .5) * 2);
+    for (const unit of ["kg", "lb", "st"]) {
+      const rate = calculateRate(log, dateOf(first + 20), unit);
+      states.add(rate.state);
+      assert.ok(rate.low <= rate.perWeek && rate.perWeek <= rate.high, JSON.stringify(rate));
+      for (const value of [rate.perWeek, rate.low, rate.high]) assert.equal(fromTenths(toTenths(value, unit), unit), value, "0.1 of " + unit);
+      assert.equal(rate.clear, rate.state === "moving");
+      // A moving trend's range is all on its side of zero, and an unclear
+      // one's reaches over it, both before rounding: an end can show as 0.0.
+      if (rate.state === "moving") assert.ok(rate.perWeek < 0 ? rate.high <= 0 : rate.low >= 0, JSON.stringify(rate));
+      else assert.ok(rate.state === "unclear" && rate.low <= 0 && rate.high >= 0, JSON.stringify(rate));
+    }
+  }
+  assert.deepEqual([...states].sort(), ["moving", "unclear"]);
+});
+
+test("the weekly trend is steady only when its whole range is within 0.15 kg a week", () => {
+  assert.equal(RATE_STEADY_BAND, .15);
+  // On exact lines, the range is the slope give or take about 0.07 kg a week.
+  const state = perWeek => calculateRate(daily(21, i => 80 + perWeek / 7 * i), dateOf(first + 20)).state;
+  assert.deepEqual([0, -0.05, 0.05, -0.07, 0.07].map(state), Array(5).fill("steady"));
+  assert.equal(state(-0.1), "moving", "a range from about 0.03 to 0.17 kg a week down is moving");
+  // A range that's within 0.15 either way but not all on one side of zero.
+  const swings = daily(21, i => 75 + (i % 2 ? .05 : -.05));
+  assert.deepEqual(calculateRate(swings, dateOf(first + 20)), { perWeek: 0, low: -0.1, high: 0.1, state: "steady", clear: false, count: 21 });
+  // Wider swings leave it unclear.
+  assert.equal(calculateRate(daily(21, i => 75 + (i % 2 ? .3 : -.3)), dateOf(first + 20)).state, "unclear");
+});
+
+test("the weekly trend's range allows for one day's swing carrying into the next", () => {
+  // With noise as correlated as Baseline assumes, the range is about 1.5
+  // times as wide as the textbook one for daily weigh-ins, and near it for
+  // weigh-ins 3 days apart, which are nearly unrelated. Large noise keeps the
+  // rounding to 0.1 kg small beside the range.
+  assert.equal(RATE_INTERVAL_ERRORS, 2);
+  const random = seeded(13);
+  const ratios = weighs => Array.from({ length: 50 }, () => {
+    const log = noisyLog(random, { days: 21, perWeek: 0, sd: 3, weighs });
+    const rate = calculateRate(log, dateOf(first + 20));
+    return (rate.high - rate.low) / 2 / (RATE_INTERVAL_ERRORS * 7 * textbookError(log, dateOf(first + 20)));
+  });
+  // Measured: 1.48 to 1.55 daily, and 1.03 to 1.13 three days apart.
+  for (const ratio of ratios(() => true)) assert.ok(ratio > 1.4 && ratio < 1.65, "daily: " + ratio);
+  for (const ratio of ratios(i => i % 3 === 0 || i === 20)) assert.ok(ratio > .95 && ratio < 1.2, "every third day: " + ratio);
+});
+
+test("a flat weight with noise seldom reads as moving", () => {
+  // 400 three-week logs. Measured: moving in 7.75% of flat logs, and in 45%
+  // of logs losing 0.4 kg a week and 90% losing 0.75. The textbook standard
+  // error with 2.5 of them, before H1, read 14%, 57% and 94% as clear.
+  const random = seeded(21);
+  const share = perWeek => Array.from({ length: 400 }, () => calculateRate(skippingLog(random, 21, perWeek), dateOf(first + 20)))
+    .filter(rate => rate.state === "moving").length / 400;
+  assert.ok(share(0) < .1, "flat: " + share(0));
+  assert.ok(share(-0.75) > .85);
+  // Never steady, since 21 days of noise like this can't pin a trend down to 0.15 kg a week.
+  assert.ok(Array.from({ length: 100 }, () => calculateRate(skippingLog(random, 21, 0), dateOf(first + 20))).every(rate => rate.state !== "steady"));
+});
+
+test("a slow, noisy loss reads as down on nearly every day", () => {
+  // 40 logs of 100 days losing 0.4 kg a week. Measured on the 3,466 days
+  // with a weekly trend: 92.4% read "Down", moving or not clear yet, none
+  // steady, and 3 moving up. Only 44% are moving: a 0.4 kg loss needs more
+  // than three weeks to show clearly. The rule before H1 read 46% of these
+  // days as "No clear change".
+  const random = seeded(2026);
+  let days = 0;
+  let down = 0;
+  let wrong = 0;
+  for (let trial = 0; trial < 40; trial++) {
+    const log = skippingLog(random, 100, -0.4);
+    for (let day = 0; day < 100; day++) {
+      const rate = calculateRate(log, dateOf(first + day));
+      if (!rate) continue;
+      days++;
+      const { lead, rest } = weeklyTrendWords(rate);
+      if (rate.perWeek < 0 && rate.state !== "steady" && (lead ?? rest).startsWith("Down")) down++;
+      if (rate.state === "steady" || rate.state === "moving" && rate.perWeek > 0) wrong++;
+    }
+  }
+  assert.ok(days > 3000);
+  assert.ok(down / days >= .9, "down: " + down / days);
+  assert.ok(wrong / days < .01, "steady or moving up: " + wrong / days);
+});
+
+test("the weekly trend in words, in its three states", () => {
+  const rate = (perWeek, low, high, state, unit = "kg") => ({ perWeek: fromTenths(perWeek, unit), low: fromTenths(low, unit), high: fromTenths(high, unit), state });
+  const words = (unit, ...args) => weeklyTrendWords(rate(...args, unit), unit);
+  assert.deepEqual(words("kg", -3, -5, -1, "moving"), { lead: "Down about 0.3 kg a week", rest: " · likely 0.1 to 0.5" });
+  assert.deepEqual(words("kg", 4, 2, 7, "moving"), { lead: "Up about 0.4 kg a week", rest: " · likely 0.2 to 0.7" });
+  assert.deepEqual(words("kg", -3, -5, 0, "moving"), { lead: "Down about 0.3 kg a week", rest: " · likely 0.0 to 0.5" }, "a near end that rounds to zero");
+  assert.deepEqual(words("kg", 0, -1, 1, "steady"), { lead: "Steady", rest: " · within 0.1 kg a week either way" });
+  assert.deepEqual(words("kg", 0, -1, 2, "steady"), { lead: "Steady", rest: " · within 0.2 kg a week either way" }, "the larger end");
+  assert.deepEqual(words("kg", -2, -6, 2, "unclear"), { lead: null, rest: "Down about 0.2 kg a week · a few more weigh-ins will tell" });
+  assert.deepEqual(words("kg", 1, -3, 5, "unclear"), { lead: null, rest: "Up about 0.1 kg a week · a few more weigh-ins will tell" });
+  assert.deepEqual(words("kg", 0, -4, 4, "unclear"), { lead: null, rest: "Little change so far · a few more weigh-ins will tell" });
+  // Pounds for stones too.
+  for (const unit of ["lb", "st"]) {
+    assert.deepEqual(words(unit, -7, -11, -2, "moving"), { lead: "Down about 0.7 lb a week", rest: " · likely 0.2 to 1.1" });
+    assert.deepEqual(words(unit, 0, -2, 3, "steady"), { lead: "Steady", rest: " · within 0.3 lb a week either way" });
+    assert.deepEqual(words(unit, -4, -12, 4, "unclear"), { lead: null, rest: "Down about 0.4 lb a week · a few more weigh-ins will tell" });
   }
 });
 
@@ -696,7 +832,7 @@ test("a tie goes to the most recent weigh-in, and the range needs two weigh-ins"
 
 test("the weekly trend for an earlier row uses only the weigh-ins up to that date", () => {
   const log = [...daily(21, i => 80 - i / 10), ...daily(31, i => 70 + i).slice(21)];
-  assert.deepEqual(calculateRate(log, dateOf(first + 20)), { perWeek: -0.7, clear: true, count: 21 });
+  assert.deepEqual(calculateRate(log, dateOf(first + 20)), moving(-0.7, -0.8, -0.6));
   assert.equal(calculateRate(log, dateOf(first + 12)), null);
 });
 
@@ -838,7 +974,7 @@ test("each month runs from the average as it began to the average on its last da
   assert.deepEqual(november.end, { date: "2026-11-22", average: 64.9 });
   assert.deepEqual(reports.map(report => report.change), [-4.4, -6.2, -4.5]);
   assert.equal(reports.reduce((sum, report) => sum + report.change, 0).toFixed(1), (64.9 - 80).toFixed(1), "the changes add up");
-  assert.deepEqual(reports.map(report => report.rate), Array(3).fill({ perWeek: -1.4, clear: true, count: 21 }));
+  assert.deepEqual(reports.map(report => report.rate), Array(3).fill(moving(-1.4, -1.5, -1.3)));
   assert.deepEqual(september.low, { date: "2026-09-30", weight: 74.2 });
   assert.deepEqual(reports.map(report => report.milestones), [[], [], []], "no goal, no milestones");
 });

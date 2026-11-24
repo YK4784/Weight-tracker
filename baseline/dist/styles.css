@@ -402,6 +402,9 @@ th:last-child, td:last-child { padding-right: 0; }
 .entry-weight { font-weight: 700; }
 .table-unit { margin-left: 3px; color: var(--ink-3); font-size: .875rem; }
 .rate-cell { color: var(--ink-2); }
+.rate-cell.unclear { color: var(--ink-3); }
+/* A little room after "~", which a minus sign beside it reads as a second "~". */
+.unclear-mark { margin-right: .12em; }
 .dash { color: var(--ink-3); }
 .row-action { width: 48px; text-align: right; }
 /* A tap anywhere on a row edits it, as its pencil does (see rowTarget in app.mjs). */
@@ -430,7 +433,7 @@ tbody:first-of-type .month-row th { padding-top: 20px; }
 .month-detail { margin-top: 2px; color: var(--ink-3); font-size: .875rem; text-wrap: balance; }
 .month-figures { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px 24px; }
 .month-figures .fact-value { font-size: 1.125rem; }
-/* Words such as "No clear change" stay quieter than the figures. */
+/* Words such as "Steady", and a weekly trend that isn't clear yet, stay quieter than the figures. */
 .month-figures .fact-value.is-empty { font-size: 1rem; }
 .month-figures + .month-note { margin-top: 14px; }
 .month-note { color: var(--ink-2); text-wrap: pretty; }
