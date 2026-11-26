@@ -95,18 +95,18 @@ test("the line is thin until its average rests on 4 weigh-ins", () => {
   assert.equal(THIN_COUNT, 4);
   // Daily weigh-ins: days 0–2 have 1–3 of them, so the line into day 3 is the last thin piece.
   assert.deepEqual(partsFor([0, 1, 2, 3, 4, 5, 6, 7, 8, 9], 9), [[true, 0, 3], [false, 3, 9]]);
-  // Weekly weigh-ins never have more than 2 in 14 days.
+  // Weekly weigh-ins never have more than 2 in 10 days.
   assert.deepEqual(partsFor([0, 7, 14, 21, 28], 28), [[true, 0, 28]]);
   // As older weigh-ins leave the window, a sparse log can thin out again: day
-  // 16's average has days 3, 9 and 16. Days 10–15 hold day 9's, from 5.
+  // 16's average has days 9 and 16. Days 10–15 hold day 9's, from 5.
   assert.deepEqual(partsFor([0, 1, 2, 3, 9, 16], 16), [[true, 0, 3], [false, 3, 15], [true, 15, 16]]);
 });
 
-test("after a run's last weigh-in, the line is thin and holds, and a gap of 14 days breaks it", () => {
+test("after a run's last weigh-in, the line is thin and holds, and a gap of 10 days breaks it", () => {
   // Daily to day 9, then three days without one: thin from day 9.
   assert.deepEqual(partsFor([0, 1, 2, 3, 4, 5, 6, 7, 8, 9], 12), [[true, 0, 3], [false, 3, 9], [true, 9, 12]]);
-  // Days 10–22 hold day 9's average, day 23 has none, and a new run starts on day 30.
-  assert.deepEqual(partsFor([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 30, 31, 32, 33, 34], 34), [[true, 0, 3], [false, 3, 9], [true, 9, 22], [true, 30, 33], [false, 33, 34]]);
+  // Days 10–18 hold day 9's average, day 19 has none, and a new run starts on day 30.
+  assert.deepEqual(partsFor([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 30, 31, 32, 33, 34], 34), [[true, 0, 3], [false, 3, 9], [true, 9, 18], [true, 30, 33], [false, 33, 34]]);
   // Days without a weigh-in inside a run aren't after its last one.
   assert.deepEqual(partsFor([0, 1, 2, 3, 4, 5, 9, 10], 10), [[true, 0, 3], [false, 3, 10]]);
 });

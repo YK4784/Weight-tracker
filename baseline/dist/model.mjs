@@ -1,4 +1,4 @@
-export const WINDOW_DAYS = 14;
+export const WINDOW_DAYS = 10;
 const DAY_MS = 86_400_000;
 const decimal = new Intl.NumberFormat("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const dateFormats = new Map();
@@ -549,7 +549,7 @@ export function installHintDue(entries, today) {
 }
 
 // What a weigh-in is checked against before it's saved (see checkWeighIn):
-// the 14-day average on its date, from the weigh-ins in the 13 days before
+// the 10-day average on its date, from the weigh-ins in the 9 days before
 // it, or, without two of those, the nearest weigh-in before the date. The
 // date's own weigh-in, which a save replaces, and later ones don't count.
 // `age` is how many days before the date the latest of them was. `last` says
@@ -594,7 +594,7 @@ function typedNumber(kg, unit) {
 }
 
 // Checks a weigh-in before it's saved, for a slip that would skew the
-// average for two weeks. `weight` is in kg, as it would be saved, and `unit`
+// average for 10 days. `weight` is in kg, as it would be saved, and `unit`
 // is the unit it was typed in. Returns null when it's within reach of its
 // reference (see weighInReference), or when there's nothing recent enough to
 // check against. Otherwise returns { reason, suggestion, reference, change }:
@@ -643,7 +643,7 @@ export function weighInQuestion(check, weight, unit, today) {
   const shown = (kg, as = unit) => formatWeight(kg, as);
   const save = (prefix, kg, as = unit) => ({ label: prefix + shown(kg, as), spoken: spokenLabel(prefix + shown(kg, as), kg, as), weight: kg, unit: as === unit ? null : as });
   const against = reference.kind === "average"
-    ? "your 14-day average" + (reference.date === today ? "" : " on " + dateIn(reference.date, today)) + " (" + shown(reference.weight) + ")"
+    ? "your 10-day average" + (reference.date === today ? "" : " on " + dateIn(reference.date, today)) + " (" + shown(reference.weight) + ")"
     : (reference.last ? "your last weigh-in" : "your previous weigh-in") + " (" + shown(reference.weight) + " on " + dateIn(reference.date, today) + ")";
   const percent = Math.round(Math.abs(check.change) * 100);
   const away = "That’s " + percent + "% " + (check.change > 0 ? "above " : "below ") + against + ".";
@@ -760,10 +760,10 @@ export function inverseOf(change, before) {
 // in chart.mjs): an average of two or three readings still swings with them.
 export const THIN_COUNT = 4;
 
-// The 14-day average for each day from the first weigh-in through
+// The 10-day average for each day from the first weigh-in through
 // `throughDate`. The input is a normalized log (one entry per date, ascending).
 // - On a day with a weigh-in, the average is the mean of the weigh-ins that day
-//   and on the 13 days before it.
+//   and on the 9 days before it.
 // - A day without a weigh-in keeps the average of the last weigh-in before it,
 //   as of that weigh-in (`asOf`, its date). So the figures stay put until the
 //   next weigh-in, rather than drifting toward the last few readings as older
@@ -807,7 +807,7 @@ export function calculateTrend(entries, throughDate) {
   return { days, readings, current: last?.day === end ? last : null };
 }
 
-// The date of the weigh-in whose 14-day average stands for `throughDate` (see
+// The date of the weigh-in whose 10-day average stands for `throughDate` (see
 // calculateTrend): the last weigh-in on or before it, while that is less than
 // WINDOW_DAYS days earlier. Null when there's none.
 export function asOfDate(entries, throughDate) {
@@ -829,13 +829,13 @@ export function groupByMonth(rows) {
 
 export const CHANGE_WINDOWS = [7, 30, 90];
 
-// How much the 14-day average has changed over each of CHANGE_WINDOWS days, and
+// How much the 10-day average has changed over each of CHANGE_WINDOWS days, and
 // since the first weigh-in (`days` null), in kg, using averages rounded to the
 // 0.1 of `unit` shown on screen. `trend` comes from calculateTrend through today.
 // Like the average itself, the changes are as of the last weigh-in: each runs
 // back from its date (`trend.current.asOf`), so they hold still until the next
 // weigh-in. A window is left out when there is no average exactly that many
-// days before: the log is shorter than the window, or a gap of more than 14
+// days before: the log is shorter than the window, or a gap of more than 10
 // days leaves that day without one. The change since the first weigh-in needs
 // the log to go back further than the longest window shown, and further than a
 // week, so it never repeats another figure. Empty without an average today.
@@ -856,7 +856,7 @@ export function averageChanges(trend, unit = "kg") {
 }
 
 // The highest and lowest weigh-ins in the WINDOW_DAYS days through `throughDate`
-// (the same days as the 14-day average on that date), with how many days before
+// (the same days as the 10-day average on that date), with how many days before
 // it each was. A tie goes to the most recent. Null with fewer than two weigh-ins
 // in those days.
 export function recentRange(entries, throughDate) {
@@ -990,9 +990,9 @@ export function calculateRate(entries, throughDate, unit = "kg") {
 }
 
 // The weekly trend that stands for `throughDate`: calculateRate as of the
-// weigh-in whose 14-day average does (see asOfDate). Like the average, it holds
+// weigh-in whose 10-day average does (see asOfDate). Like the average, it holds
 // still between weigh-ins, rather than changing as the 21 days move past older
-// weigh-ins with no new one. Null without a weigh-in in the 14 days through
+// weigh-ins with no new one. Null without a weigh-in in the 10 days through
 // `throughDate`, or without a weekly trend on that weigh-in's date.
 export function rateAsOf(entries, throughDate, unit = "kg") {
   const date = asOfDate(entries, throughDate);
@@ -1022,10 +1022,10 @@ export function weeklyTrendWords(rate, unit = "kg") {
   return { lead: null, rest: (rate.perWeek ? way : "Little change so far") + " · a few more weigh-ins will tell" };
 }
 
-// The trend forecast on the chart: where the 14-day average is heading if the
+// The trend forecast on the chart: where the 10-day average is heading if the
 // weekly trend holds.
 //
-// The line starts at the 14-day average on the last weigh-in, on that day, and
+// The line starts at the 10-day average on the last weigh-in, on that day, and
 // moves by the weekly trend as of that weigh-in, as shown: the same figures as
 // at the top of the overview and in the goal forecast. Starting from the last
 // weigh-in rather than today means a few days without one move the forecast's
@@ -1072,10 +1072,10 @@ export function forecastReach(span) {
 // `throughDate`, and at most FORECAST_CHART_MAX_DAYS after the weigh-in.
 // Returns the weekly trend as of the weigh-in (see rateAsOf and calculateRate)
 // for `unit`, the same object the overview shows, with three more fields: the
-// weigh-in's date `from`, the 14-day `average` on it that the forecast starts
+// weigh-in's date `from`, the 10-day `average` on it that the forecast starts
 // from, and `points`, a point { day, date, average, low, high } for each day
 // after it, in kg, with the likely range from `low` to `high`. Null without a
-// weekly trend as of a weigh-in in the 14 days through `throughDate`. The
+// weekly trend as of a weigh-in in the 10 days through `throughDate`. The
 // input is a normalized log (one entry per date, ascending).
 export function forecastTrend(entries, throughDate, days, unit = "kg") {
   const from = asOfDate(entries, throughDate);
@@ -1085,7 +1085,7 @@ export function forecastTrend(entries, throughDate, days, unit = "kg") {
   const { points, meanX, sxx } = line;
   const end = dayOf(from);
   const length = Math.min(dayOf(throughDate) + days - end, FORECAST_CHART_MAX_DAYS);
-  // The weigh-ins in the last weigh-in's 14-day average. Summed in hundredths,
+  // The weigh-ins in the last weigh-in's 10-day average. Summed in hundredths,
   // as calculateTrend does.
   const recent = points.filter(([x]) => x > -WINDOW_DAYS);
   const average = recent.reduce((sum, [, y]) => sum + Math.round(y * 100), 0) / (recent.length * 100);
@@ -1097,7 +1097,7 @@ export function forecastTrend(entries, throughDate, days, unit = "kg") {
   const forecast = [];
   for (let ahead = 1; ahead <= length; ahead++) {
     // The forecast misses by the noise in the average `ahead` days after the
-    // weigh-in, taken to have weigh-ins on the same days of its 14 as the
+    // weigh-in, taken to have weigh-ins on the same days of its 10 as the
     // weigh-in's, less the noise in the weigh-in's average, less `ahead` times
     // the error in the slope.
     // Each is a weighted sum of the noise on single days.
@@ -1135,10 +1135,10 @@ export function weeklyTrendShown(entries, throughDate) {
 // What the overview has to show on `today`:
 // - "empty": no weigh-ins through today.
 // - "lapsed": weigh-ins, but none in the WINDOW_DAYS days through today, so
-//   there's no 14-day average today.
+//   there's no 10-day average today.
 // - "active": a weigh-in in those days, and so an average today.
 // `lastDate` is the last weigh-in's date, `daysAgo` how many days before today
-// it was, and `lastAverage` the 14-day average in kg on that date; all three
+// it was, and `lastAverage` the 10-day average in kg on that date; all three
 // are null for an empty log. While the log is active, today's average is the
 // same one, as of `lastDate` (see calculateTrend). Weigh-ins dated after today, which a device in a
 // time zone ahead can save, don't count until their day comes, as in
@@ -1162,7 +1162,7 @@ function weeklyTenths(perDay, unit) {
   return Math.round(perDay * (7 * TENTHS_PER_KG[unit])) / TENTHS_PER_KG[unit] || 0;
 }
 
-// Progress toward a goal, measured with the 14-day average rounded to the 0.1 of
+// Progress toward a goal, measured with the 10-day average rounded to the 0.1 of
 // `unit` shown on screen. Works in whole tenths of that unit so every comparison
 // is exact, and returns kg. Milestone k of n targets start − k × (start − goal) / n,
 // and the last is the goal itself. A milestone is never smaller than 0.1 of the
@@ -1206,7 +1206,7 @@ export function goalProgress(goal, average, unit = "kg") {
 
 export const OVERALL_MIN_DAYS = 14;
 
-// The 14-day average's change since the goal's start, in kg a week, rounded to
+// The 10-day average's change since the goal's start, in kg a week, rounded to
 // the 0.1 of `unit` shown, like the weekly trend. `average` is the average on
 // `throughDate`, which for the current average is its last weigh-in's date, so
 // days without a weigh-in don't slow it. Waits OVERALL_MIN_DAYS after the start
@@ -1223,7 +1223,7 @@ export const FAST_LOSS_AFTER_DAYS = 14;
 
 // Whether the weight has come down faster than a loss goal's cap
 // (maxGoalRate) for a while: on each of the FAST_LOSS_DAYS days up to the last
-// weigh-in in the 14 days through `today`, the weekly trend that stood for the
+// weigh-in in the 10 days through `today`, the weekly trend that stood for the
 // day (rateAsOf) was moving down (see calculateRate) faster than the cap. Like
 // the figures, it's as of the last weigh-in, so days without one don't change
 // it. The first of
@@ -1258,7 +1258,7 @@ function monthAfter(month) {
   return dateOf(dayOf(lastOfMonth(month)) + 1).slice(0, 7);
 }
 
-// The day the 14-day average, as shown, first reached each milestone of `goal`,
+// The day the 10-day average, as shown, first reached each milestone of `goal`,
 // counting from the goal's start date, as a Map from milestone index to day.
 // The average changes only on days with a weigh-in (see calculateTrend), so
 // that's always a weigh-in's day. Each milestone is listed once, even if the
@@ -1280,9 +1280,9 @@ function milestoneDays(trend, goal, unit) {
 // newest first. The month in progress is `partial` and runs through today.
 // Averages are as of a weigh-in (see calculateTrend), and `date` with each is
 // that weigh-in's date.
-// - `start` is the 14-day average as the month began, on the last day of the
+// - `start` is the 10-day average as the month began, on the last day of the
 //   month before, so each month picks up where the one before it ended. That's
-//   the average on the last weigh-in up to that day, if it came in the 14 days
+//   the average on the last weigh-in up to that day, if it came in the 10 days
 //   up to it. Otherwise it is the average on the month's first weigh-in.
 // - `end` is the average on the month's last weigh-in, which is the average on
 //   its last day, so the month's end doesn't drift after its last weigh-in.
@@ -1331,7 +1331,7 @@ export function monthlyReports(entries, today, unit = "kg", goal = null) {
 
 export const FORECAST_MAX_DAYS = 5 * 365;
 
-// When the 14-day average would reach each milestone still ahead if it kept
+// When the 10-day average would reach each milestone still ahead if it kept
 // changing by `perWeek` kg a week from `progress.current`, its value on
 // `fromDate`: the last weigh-in, which the average is as of. `days` counts from
 // `today`, and is 0 for a milestone the line would already have reached.
@@ -1348,8 +1348,8 @@ export function forecastGoal(progress, perWeek, fromDate, today = fromDate) {
 }
 
 // Body fat at each waist measurement through `today`, oldest first. The weight
-// is the 14-day average on the day of the measurement, so one heavy or light
-// day moves the estimate little, and a later weigh-in in those 14 days updates
+// is the 10-day average on the day of the measurement, so one heavy or light
+// day moves the estimate little, and a later weigh-in in those 10 days updates
 // it. On a day without a weigh-in, that's the average as of the last one (see
 // calculateTrend). `weight` is null without an average that day; `bodyFat` is
 // null then, or without a sex, or outside the formula's range (see bodyFat).

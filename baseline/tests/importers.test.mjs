@@ -227,6 +227,12 @@ test("Baseline's CSV export imports into an empty log as the same weigh-ins and 
     // The CSV doesn't say where each weigh-in came from, so they take the import's source.
     assert.deepEqual(roundTrip(result.rows, normalizeState({})).entries, log.entries.map(entry => ({ ...entry, source: "baseline" })), unit);
   }
+  // An export from when the average covered 14 days names its last column for that.
+  const older = weighInsCsv(log, "lb").replace("average_10d_kg", "average_14d_kg");
+  assert.ok(older.includes("average_14d_kg"));
+  const file = await readImportFiles([new File([older], "baseline-weigh-ins-2026-11-20.csv")]);
+  assert.equal(file.source, "baseline");
+  assert.deepEqual(roundTrip(resolve(file).rows, normalizeState({})).entries, log.entries.map(entry => ({ ...entry, source: "baseline" })));
 });
 
 // Sends rows as the app does (importParts, then parseOp as the server checks

@@ -9,8 +9,8 @@ import { asOfDate, rateAsOf } from "../dist/model.mjs";
 const first = dayOf("2026-03-01");
 const entry = (index, weight) => ({ date: dateOf(first + index), weight });
 
-test("the first 14 days use only the weights posted so far", () => {
-  const readings = Array.from({ length: 14 }, (_, i) => entry(i, 70 + i));
+test("the first 10 days use only the weights posted so far", () => {
+  const readings = Array.from({ length: 10 }, (_, i) => entry(i, 70 + i));
   const result = calculateTrend(readings, readings.at(-1).date);
   result.readings.forEach((point, index) => {
     assert.equal(point.average, 70 + index / 2);
@@ -18,55 +18,56 @@ test("the first 14 days use only the weights posted so far", () => {
   });
 });
 
-test("day 15 excludes day one, including across a daylight-saving boundary", () => {
-  const readings = Array.from({ length: 15 }, (_, i) => entry(i, 70 + i));
+test("day 11 excludes day one, including across a daylight-saving boundary", () => {
+  const readings = Array.from({ length: 11 }, (_, i) => entry(i, 70 + i));
   const { current } = calculateTrend(readings, readings.at(-1).date);
-  assert.equal(current.count, 14);
-  assert.equal(current.average, 77.5);
+  assert.equal(current.count, 10);
+  assert.equal(current.average, 75.5);
 });
 
 test("a day without a weigh-in keeps the last weigh-in's average, and expired windows create a line break", () => {
   const dates = [entry(0, 82), entry(4, 78), entry(20, 75)];
   const { days, current } = calculateTrend(dates, dates.at(-1).date);
   assert.deepEqual(days.slice(0, 4).map(d => d.average), [82, 82, 82, 82]);
-  assert.equal(days.find(d => d.day === first + 13).average, 80);
-  // Day 0 has left day 14's window, but day 14 has no weigh-in, so it keeps day 4's average.
-  assert.deepEqual(days.find(d => d.day === first + 14), { day: first + 14, date: dateOf(first + 14), weight: null, note: null, average: 80, count: 2, asOf: dateOf(first + 4) });
-  assert.equal(days.find(d => d.day === first + 17).average, 80, "13 days after the weigh-in");
-  assert.equal(days.find(d => d.day === first + 18), undefined, "14 days after it, the window no longer reaches it");
+  assert.equal(days.find(d => d.day === first + 9).average, 80);
+  // Day 0 has left day 10's window, but day 10 has no weigh-in, so it keeps day 4's average.
+  assert.deepEqual(days.find(d => d.day === first + 10), { day: first + 10, date: dateOf(first + 10), weight: null, note: null, average: 80, count: 2, asOf: dateOf(first + 4) });
+  assert.equal(days.find(d => d.day === first + 13).average, 80, "9 days after the weigh-in");
+  assert.equal(days.find(d => d.day === first + 14), undefined, "10 days after it, the window no longer reaches it");
   assert.equal(current.average, 75);
   assert.equal(current.count, 1);
   assert.equal(current.asOf, current.date);
-  assert.equal(calculateTrend(dates, dateOf(first + 34)).current, null);
+  assert.equal(calculateTrend(dates, dateOf(first + 29)).current.average, 75);
+  assert.equal(calculateTrend(dates, dateOf(first + 30)).current, null);
 });
 
 test("after the weigh-ins stop, the average holds at the last one's instead of drifting", () => {
   // Down 0.1 kg a day for 30 days, then nothing. The mean of the weigh-ins left
   // in each later day's window would fall toward the last few readings with no
-  // new data: 0.65 kg lower by day 42, when only day 29's reading is left.
+  // new data: 0.45 kg lower by day 38, when only day 29's reading is left.
   const log = daily(30, i => 90 - i / 10);
   const windowMean = day => {
-    const inWindow = log.filter(e => dayOf(e.date) > day - 14 && dayOf(e.date) <= day);
+    const inWindow = log.filter(e => dayOf(e.date) > day - 10 && dayOf(e.date) <= day);
     return inWindow.reduce((sum, e) => sum + e.weight, 0) / inWindow.length;
   };
   const last = calculateTrend(log, dateOf(first + 29)).current;
-  assert.ok(Math.abs(last.average - 87.75) < 1e-9);
-  assert.ok(Math.abs(windowMean(first + 42) - (last.average - 0.65)) < 1e-9, "the window's own mean drifts");
-  for (let day = first + 30; day <= first + 42; day++) {
+  assert.ok(Math.abs(last.average - 87.55) < 1e-9);
+  assert.ok(Math.abs(windowMean(first + 38) - (last.average - 0.45)) < 1e-9, "the window's own mean drifts");
+  for (let day = first + 30; day <= first + 38; day++) {
     const { current } = calculateTrend(log, dateOf(day));
     assert.equal(current.average, last.average, dateOf(day));
     assert.equal(current.count, last.count);
     assert.equal(current.asOf, last.date);
     assert.equal(current.weight, null);
   }
-  assert.equal(calculateTrend(log, dateOf(first + 43)).current, null);
+  assert.equal(calculateTrend(log, dateOf(first + 39)).current, null);
   // The same with noisy weigh-ins on random days.
   const random = seeded(3);
   for (let trial = 0; trial < 20; trial++) {
     const noisy = noisyLog(random, { days: 40, weighs: () => random() < .6 });
     const stop = noisy.at(-1);
     const held = calculateTrend(noisy, stop.date).current;
-    for (let after = 1; after < 14; after++) {
+    for (let after = 1; after < 10; after++) {
       assert.deepEqual(calculateTrend(noisy, dateOf(dayOf(stop.date) + after)).current, { ...held, day: held.day + after, date: dateOf(held.day + after), weight: null, note: null });
     }
   }
@@ -90,12 +91,12 @@ test("the daily average matches a direct calendar-window calculation on the last
   const { days } = calculateTrend(readings, dateOf(first + 104));
   const byDay = new Map(days.map(p => [p.day, p]));
   for (let day = first; day <= first + 104; day++) {
-    const inWindow = readings.filter(e => dayOf(e.date) >= day - 13 && dayOf(e.date) <= day);
+    const inWindow = readings.filter(e => dayOf(e.date) >= day - 9 && dayOf(e.date) <= day);
     if (!inWindow.length) assert.equal(byDay.get(day), undefined);
     else {
       // The window of the last weigh-in up to the day, which may be the day itself.
       const asOf = dayOf(inWindow.at(-1).date);
-      const used = readings.filter(e => dayOf(e.date) >= asOf - 13 && dayOf(e.date) <= asOf);
+      const used = readings.filter(e => dayOf(e.date) >= asOf - 9 && dayOf(e.date) <= asOf);
       const expected = used.reduce((sum, item) => sum + Math.round(item.weight * 10), 0) / (10 * used.length);
       assert.equal(byDay.get(day).average, expected);
       assert.equal(byDay.get(day).count, used.length);
@@ -289,12 +290,12 @@ test("the fast loss caution needs every one of the 21 days, and a loss goal", ()
   assert.equal(fastLossCaution(falling(35, 100, 2.1), fastGoal(100, 100), dateOf(first + 34)), false, "staying at a weight");
 });
 
-test("the fast loss caution is as of the last weigh-in, so a break doesn't change it until 14 days", () => {
+test("the fast loss caution is as of the last weigh-in, so a break doesn't change it until 10 days", () => {
   const log = falling(41, 100, 2.1);
-  // Ten days after the last weigh-in, the trend through today would have run out.
-  assert.equal(calculateRate(log, dateOf(first + 50)), null);
-  for (let day = 40; day <= 53; day++) assert.equal(fastLossCaution(log, fastGoal(100), dateOf(first + day)), true, "day " + day);
-  assert.equal(fastLossCaution(log, fastGoal(100), dateOf(first + 54)), false, "14 days after it");
+  // Eight days after the last weigh-in, the trend through today would have run out.
+  assert.equal(calculateRate(log, dateOf(first + 48)), null);
+  for (let day = 40; day <= 49; day++) assert.equal(fastLossCaution(log, fastGoal(100), dateOf(first + day)), true, "day " + day);
+  assert.equal(fastLossCaution(log, fastGoal(100), dateOf(first + 50)), false, "10 days after it");
   // A week's break inside the 21 days: on day 37 the trend through that day
   // would have run out, but the trend as of day 29's weigh-in still stood.
   const paused = falling(46, 100, 2.1).filter((_, i) => i < 30 || i >= 38);
@@ -483,10 +484,10 @@ test("the trend forecast starts from the last weigh-in, on its day", () => {
   assert.deepEqual(later.points.slice(0, 14), onTheDay.points);
   // Today's point is already 5 days out, so the band has width.
   assert.ok(later.points[4].high - later.points[4].low > later.points[0].high - later.points[0].low);
-  // At most 12 weeks after the weigh-in, and none once it's 14 days old.
-  assert.equal(forecastTrend(log, dateOf(first + 40), 84).points.length, FORECAST_CHART_MAX_DAYS);
-  assert.equal(forecastTrend(log, dateOf(first + 42), 14).from, last);
-  assert.equal(forecastTrend(log, dateOf(first + 43), 14), null);
+  // At most 12 weeks after the weigh-in, and none once it's 10 days old.
+  assert.equal(forecastTrend(log, dateOf(first + 37), 84).points.length, FORECAST_CHART_MAX_DAYS);
+  assert.equal(forecastTrend(log, dateOf(first + 38), 14).from, last);
+  assert.equal(forecastTrend(log, dateOf(first + 39), 14), null);
 });
 
 test("the trend forecast ignores weigh-ins after today", () => {
@@ -539,7 +540,7 @@ test("the trend forecast's band widens with each day, and with noisier or fewer 
 
 test("the trend forecast's band holds the average 8 times in 10 when the trend holds", () => {
   // Daily weigh-ins and three a week, with noise as correlated as assumed.
-  // The real 14-day average 14 and 42 days after the last weigh-in lands
+  // The real 10-day average 14 and 42 days after the last weigh-in lands
   // inside the band about 80% of the time. With three a week, day 20 is a
   // Sunday, so the forecast starts from Friday's weigh-in, on day 18.
   for (const weighs of [() => true, i => i % 7 % 2 === 0 && i % 7 < 5]) {
@@ -726,7 +727,7 @@ test("the average's change over 7, 30 and 90 days and since the first weigh-in",
     { days: 7, change: -1.4 },
     { days: 30, change: -6 },
     { days: 90, change: -18 },
-    { days: null, change: -22.5 }
+    { days: null, change: -22.9 }
   ]);
   assert.deepEqual(changesOf(daily(40, i => 60 + i / 10)).map(item => item.days), [7, 30, null]);
 });
@@ -741,8 +742,8 @@ test("a change waits until the log reaches back that far, and all time never rep
   assert.deepEqual(changesOf(daily(91, () => 70)), [{ days: 7, change: 0 }, { days: 30, change: 0 }, { days: 90, change: 0 }]);
 });
 
-test("a gap of more than 14 days hides a change that would start inside it", () => {
-  // Weigh-ins on days 0–19 and 45–70: days 33–44 have no average, so 30 days before day 70 has none.
+test("a gap of more than 10 days hides a change that would start inside it", () => {
+  // Weigh-ins on days 0–19 and 45–70: days 29–44 have no average, so 30 days before day 70 has none.
   const log = daily(71, i => 80 - i / 10).filter((_, i) => i < 20 || i >= 45);
   assert.deepEqual(changesOf(log).map(item => item.days), [7, null]);
   // When no window is left, all time still shows once the log is over a week old.
@@ -755,13 +756,14 @@ test("changes use the averages as shown, and need an average today", () => {
   const trend = { days: [{ day: 0, average: 69.96 }, { day: 7, average: 70.04 }], current: { day: 7, average: 70.04, asOf: dateOf(7) } };
   assert.deepEqual(averageChanges(trend), [{ days: 7, change: 0 }]);
   const log = daily(30, () => 70);
-  assert.deepEqual(changesOf(log, dateOf(first + 43)), []);
+  assert.deepEqual(changesOf(log, dateOf(first + 38)).map(item => item.days), [7, null]);
+  assert.deepEqual(changesOf(log, dateOf(first + 39)), []);
   assert.deepEqual(changesOf([], dateOf(first)), []);
 });
 
 test("on days without a weigh-in, every figure is as of the last weigh-in", () => {
   // Daily weigh-ins on days 0–59 (Mar 1 – Apr 29), losing about 0.7 kg a week
-  // with some noise, then a break of up to 13 days.
+  // with some noise, then a break of up to 9 days.
   const log = daily(60, i => roundWeight(95 - i / 10 + Math.sin(i * 2.3) * .4));
   const last = dateOf(first + 59);
   const goal = { weight: 85, startDate: dateOf(first), startWeight: 95, rate: null, milestones: 10 };
@@ -779,7 +781,7 @@ test("on days without a weigh-in, every figure is as of the last weigh-in", () =
       overall: overallRate(goal, trend.current.average, trend.current.asOf),
       // The month in progress becomes a past one, so leave out where it runs to.
       months: monthlyReports(log, today, "kg", goal).filter(report => report.count).map(({ partial, through, ...report }) => report),
-      // The same 14 days as the average.
+      // The same 10 days as the average.
       range,
       forecast: forecastTrend(log, today, 7).points.slice(0, 7),
       // From May 4 the second waist's estimate uses the average as of Apr 29.
@@ -790,7 +792,7 @@ test("on days without a weigh-in, every figure is as of the last weigh-in", () =
   assert.equal(onTheDay.asOf, last);
   assert.deepEqual(onTheDay.changes.map(change => change.days), [7, 30, null]);
   assert.ok(onTheDay.rate.clear && onTheDay.progress.completed > 0 && onTheDay.months.some(month => month.milestones.length));
-  for (let after = 1; after <= 13; after++) {
+  for (let after = 1; after <= 9; after++) {
     const today = dateOf(first + 59 + after);
     const later = figures(today);
     if (after < 5) assert.deepEqual(later, onTheDay, today);
@@ -798,23 +800,23 @@ test("on days without a weigh-in, every figure is as of the last weigh-in", () =
     if (after >= 5) assert.equal(later.fat[1], onTheDay.average, "the waist on May 4 uses the average as of Apr 29");
   }
   // The weekly trend through today would have run out as its 21 days passed the weigh-ins.
-  assert.equal(calculateRate(log, dateOf(first + 72)), null);
-  // 14 days after the last weigh-in, there's no average, trend or forecast.
-  const lapsed = dateOf(first + 73);
+  assert.equal(calculateRate(log, dateOf(first + 68)), null);
+  // 10 days after the last weigh-in, there's no average, trend or forecast.
+  const lapsed = dateOf(first + 69);
   assert.equal(calculateTrend(log, lapsed).current, null);
   assert.equal(rateAsOf(log, lapsed), null);
   assert.equal(forecastTrend(log, lapsed, 7), null);
   assert.equal(asOfDate(log, lapsed), null);
-  assert.equal(asOfDate(log, dateOf(first + 72)), last);
+  assert.equal(asOfDate(log, dateOf(first + 68)), last);
   assert.equal(asOfDate([], last), null);
 });
 
-test("the recent high and low come from the same 14 days as the average", () => {
-  // Day 19 is today, so the window runs from day 6. Days 0, 4 and 20 fall outside it.
-  const weights = [80, 75, 75, 75, 79, 75, 70, 74, 76, 75, 75, 75, 75, 77, 75, 73, 75, 75, 75, 74, 90];
+test("the recent high and low come from the same 10 days as the average", () => {
+  // Day 19 is today, so the window runs from day 10. Days 0, 9 and 20 fall outside it.
+  const weights = [80, 75, 75, 75, 75, 75, 75, 75, 75, 69, 70, 74, 76, 77, 75, 73, 75, 75, 75, 74, 90];
   assert.deepEqual(recentRange(weights.map((weight, i) => entry(i, weight)), dateOf(first + 19)), {
     high: { date: dateOf(first + 13), weight: 77, daysAgo: 6 },
-    low: { date: dateOf(first + 6), weight: 70, daysAgo: 13 }
+    low: { date: dateOf(first + 10), weight: 70, daysAgo: 9 }
   });
 });
 
@@ -826,7 +828,7 @@ test("a tie goes to the most recent weigh-in, and the range needs two weigh-ins"
   const flat = recentRange([entry(0, 72), entry(1, 72)], dateOf(first + 1));
   assert.deepEqual([flat.high.daysAgo, flat.low.daysAgo], [0, 0]);
   assert.equal(recentRange([entry(0, 72)], dateOf(first)), null);
-  assert.equal(recentRange([entry(0, 72), entry(1, 73)], dateOf(first + 14)), null);
+  assert.equal(recentRange([entry(0, 72), entry(1, 73)], dateOf(first + 10)), null);
   assert.equal(recentRange([], dateOf(first)), null);
 });
 
@@ -953,11 +955,11 @@ test("rates and changes round to 0.1 of the unit shown", () => {
   assert.equal(formatAmount(changes[0].change, "st"), "0.5 lb");
   const goal = { weight: lb(150), startDate: entries[0].date, startWeight: lb(160), rate: null, milestones: 10 };
   const trend = calculateTrend(entries, end);
-  assert.equal(formatAmount(overallRate(goal, trend.current.average, end, "lb"), "lb"), "0.3 lb", "the average trails the weight");
+  assert.equal(formatAmount(overallRate(goal, trend.current.average, end, "lb"), "lb"), "0.4 lb", "the average trails the weight");
 });
 
 // Daily weigh-ins from 1 Sep 2026, down 0.2 kg a day. Once the window is full
-// the average on day d is 80 − d / 5 + 1.3.
+// the average on day d is 80 − d / 5 + 0.9.
 const autumn = Array.from({ length: 83 }, (_, i) => ({ date: dateOf(dayOf("2026-09-01") + i), weight: 80 - i / 5 }));
 
 test("each month runs from the average as it began to the average on its last day", () => {
@@ -969,11 +971,11 @@ test("each month runs from the average as it began to the average on its last da
   ]);
   const [november, october, september] = reports;
   assert.deepEqual(september.start, { date: "2026-09-01", average: 80 }, "the first month starts at its first weigh-in");
-  assert.deepEqual(october.start, { date: "2026-09-30", average: 75.5 }, "later months start where the one before ended");
+  assert.deepEqual(october.start, { date: "2026-09-30", average: 75.1 }, "later months start where the one before ended");
   assert.equal(october.start.average, september.end.average);
-  assert.deepEqual(november.end, { date: "2026-11-22", average: 64.9 });
-  assert.deepEqual(reports.map(report => report.change), [-4.4, -6.2, -4.5]);
-  assert.equal(reports.reduce((sum, report) => sum + report.change, 0).toFixed(1), (64.9 - 80).toFixed(1), "the changes add up");
+  assert.deepEqual(november.end, { date: "2026-11-22", average: 64.5 });
+  assert.deepEqual(reports.map(report => report.change), [-4.4, -6.2, -4.9]);
+  assert.equal(reports.reduce((sum, report) => sum + report.change, 0).toFixed(1), (64.5 - 80).toFixed(1), "the changes add up");
   assert.deepEqual(reports.map(report => report.rate), Array(3).fill(moving(-1.4, -1.5, -1.3)));
   assert.deepEqual(september.low, { date: "2026-09-30", weight: 74.2 });
   assert.deepEqual(reports.map(report => report.milestones), [[], [], []], "no goal, no milestones");
@@ -1111,17 +1113,17 @@ test("saving a waist replaces that date's measurement and sets the formula", () 
   assert.throws(() => saveWaist(state, "2026-11-02", 5, "male"));
 });
 
-test("each waist's estimate uses the 14-day average on its date", () => {
-  const entries = [entry(0, 90), entry(1, 92), entry(10, 88), entry(30, 85)];
+test("each waist's estimate uses the 10-day average on its date", () => {
+  const entries = [entry(0, 90), entry(1, 92), entry(10, 89), entry(30, 85)];
   const waists = [{ date: dateOf(first + 1), waist: 100 }, { date: dateOf(first + 10), waist: 98 }, { date: dateOf(first + 27), waist: 97 }, { date: dateOf(first + 40), waist: 96 }];
   const history = bodyFatHistory(entries, waists, "male", dateOf(first + 35));
   assert.equal(history.length, 3, "a measurement after today is left out");
   assert.equal(history[0].weight, 91, "the average of days 0 and 1");
   assert.equal(history[0].bodyFat, bodyFat(91, 100, "male"));
-  assert.equal(history[1].weight, 90, "days 0, 1 and 10");
-  assert.equal(history[2].weight, null, "no weigh-ins in the 14 days up to day 27");
-  // Day 15 has no weigh-in, so it uses the average as of day 10, though day 0 has left its window.
-  assert.equal(bodyFatHistory(entries, [{ date: dateOf(first + 15), waist: 100 }], "male", dateOf(first + 35))[0].weight, 90);
+  assert.equal(history[1].weight, 90.5, "days 1 and 10, since day 0 has left the window");
+  assert.equal(history[2].weight, null, "no weigh-ins in the 10 days up to day 27");
+  // Day 15 has no weigh-in, so it uses the average as of day 10, though day 1 has left its window.
+  assert.equal(bodyFatHistory(entries, [{ date: dateOf(first + 15), waist: 100 }], "male", dateOf(first + 35))[0].weight, 90.5);
   assert.equal(history[2].bodyFat, null);
   assert.equal(bodyFatHistory(entries, waists, null, dateOf(first + 35))[0].bodyFat, null, "no estimate without a sex");
   assert.deepEqual(bodyFatHistory(entries, [], "male", dateOf(first + 35)), []);
@@ -1571,20 +1573,21 @@ test("a gap widens the check by a point a week, and after 180 days there's no ch
   assert.equal(ask(181, 220), null);
 });
 
-test("the reference is the 14-day average before the date, or the nearest weigh-in before it", async () => {
+test("the reference is the 10-day average before the date, or the nearest weigh-in before it", async () => {
   const { checkWeighIn, weighInReference } = await import("../dist/model.mjs");
   // A first weigh-in has nothing to check against, nor one dated before every other.
   assert.equal(checkWeighIn({ weight: 190, date: "2026-11-23", entries: [], unit: "kg" }), null);
   assert.equal(checkWeighIn({ weight: 190, date: "2026-11-01", entries: checkLog(["2026-11-22", 85]), unit: "kg" }), null);
-  // Two or more weigh-ins in the 13 days before: their average. Older ones don't count.
-  const entries = checkLog(["2026-11-01", 60], ["2026-11-10", 84], ["2026-11-20", 86], ["2026-11-22", 85]);
+  // Two or more weigh-ins in the 9 days before: their average. Older ones don't count.
+  const entries = checkLog(["2026-11-01", 60], ["2026-11-13", 60], ["2026-11-14", 84], ["2026-11-20", 86], ["2026-11-22", 85]);
   assert.deepEqual(weighInReference(entries, "2026-11-23"), { kind: "average", weight: 85, date: "2026-11-23", age: 1, last: true });
   // The date's own weigh-in, which a save replaces, doesn't count, nor do later ones.
   const editing = [...entries, { date: "2026-11-23", weight: 190, note: null }, { date: "2026-11-25", weight: 70, note: null }];
   assert.deepEqual(weighInReference(editing, "2026-11-23"), { kind: "average", weight: 85, date: "2026-11-23", age: 1, last: false });
   assert.equal(checkWeighIn({ weight: 190, date: "2026-11-23", entries: editing, unit: "kg" }).reason, "unit");
   // With only one weigh-in in those days, it's that weigh-in.
-  assert.deepEqual(weighInReference(entries, "2026-11-16"), { kind: "weigh-in", weight: 84, date: "2026-11-10", age: 6, last: false });
+  assert.deepEqual(weighInReference(entries, "2026-11-11"), { kind: "weigh-in", weight: 60, date: "2026-11-01", age: 10, last: false });
+  assert.deepEqual(weighInReference(entries, "2026-11-14"), { kind: "weigh-in", weight: 60, date: "2026-11-13", age: 1, last: false });
   // With none, the nearest before, however old, and its age widens the check.
   assert.deepEqual(weighInReference(checkLog(["2026-09-01", 90], ["2026-11-23", 80]), "2026-11-20"), { kind: "weigh-in", weight: 90, date: "2026-09-01", age: 80, last: false });
   // Nothing to check without a weight or a date.
@@ -1622,29 +1625,29 @@ test("the question under the weight field names the reference and what each butt
   assert.deepEqual(kilos.choices.map(choice => [choice.label, choice.unit]), [["Save as 85.0 kg", "kg"], ["Save 85.0 lb", null]]);
   // An average, today or on an earlier date, and a weigh-in before a later one.
   const daily = checkLog(["2026-11-20", 85], ["2026-11-22", 84.8]);
-  assert.equal(ask(79, "kg", daily).text, "That’s 7% below your 14-day average (84.9 kg). Save it anyway?");
-  assert.equal(ask(79, "kg", [...daily, ...checkLog(["2026-11-23", 85])], "2026-11-23").text, "That’s 7% below your 14-day average (84.9 kg). Save it anyway?");
+  assert.equal(ask(79, "kg", daily).text, "That’s 7% below your 10-day average (84.9 kg). Save it anyway?");
+  assert.equal(ask(79, "kg", [...daily, ...checkLog(["2026-11-23", 85])], "2026-11-23").text, "That’s 7% below your 10-day average (84.9 kg). Save it anyway?");
   const backdated = checkLog(["2026-11-01", 85], ["2026-11-03", 85], ["2026-11-23", 84]);
-  assert.equal(ask(79, "kg", backdated, "2026-11-05").text, "That’s 7% below your 14-day average on Nov 5 (85.0 kg). Save it anyway?");
+  assert.equal(ask(79, "kg", backdated, "2026-11-05").text, "That’s 7% below your 10-day average on Nov 5 (85.0 kg). Save it anyway?");
   assert.equal(ask(79, "kg", checkLog(["2026-11-01", 85], ["2026-11-23", 84]), "2026-11-05").text, "That’s 7% below your previous weigh-in (85.0 kg on Nov 1). Save it anyway?");
   // A date in another year shows its year.
   assert.equal(ask(79, "kg", checkLog(["2025-12-30", 85]), "2026-01-02").text.includes("(85.0 kg on Dec 30, 2025)"), true);
 });
 
-test("the overview's state: an empty log, one with a weigh-in in the last 14 days, and one back after a break", async () => {
+test("the overview's state: an empty log, one with a weigh-in in the last 10 days, and one back after a break", async () => {
   const { logStatus } = await import("../dist/model.mjs");
   const today = "2026-11-23";
   const log = (...items) => items.map(([date, weight]) => ({ date, weight, note: null }));
   assert.deepEqual(logStatus([], today), { kind: "empty", lastDate: null, daysAgo: null, lastAverage: null });
-  // A weigh-in today, or 13 days ago, keeps the log active.
+  // A weigh-in today, or 9 days ago, keeps the log active.
   assert.deepEqual(logStatus(log(["2026-11-20", 85], ["2026-11-23", 84]), today), { kind: "active", lastDate: "2026-11-23", daysAgo: 0, lastAverage: 84.5 });
-  assert.deepEqual(logStatus(log(["2026-11-10", 85]), today), { kind: "active", lastDate: "2026-11-10", daysAgo: 13, lastAverage: 85 });
-  // Exactly 14 days ago is outside the 14 days through today, which have no average.
-  const fortnight = log(["2026-11-01", 86], ["2026-11-09", 85]);
-  assert.deepEqual(logStatus(fortnight, today), { kind: "lapsed", lastDate: "2026-11-09", daysAgo: 14, lastAverage: 85.5 });
-  assert.equal(calculateTrend(fortnight, today).current, null);
-  // 23 days: the average is the one on the last weigh-in's date, from the 14 days up to it.
-  const lapsed = log(["2026-10-10", 90], ["2026-10-20", 87], ["2026-10-25", 86.4], ["2026-10-31", 86]);
+  assert.deepEqual(logStatus(log(["2026-11-14", 85]), today), { kind: "active", lastDate: "2026-11-14", daysAgo: 9, lastAverage: 85 });
+  // Exactly 10 days ago is outside the 10 days through today, which have no average.
+  const tenDays = log(["2026-11-04", 86], ["2026-11-13", 85]);
+  assert.deepEqual(logStatus(tenDays, today), { kind: "lapsed", lastDate: "2026-11-13", daysAgo: 10, lastAverage: 85.5 });
+  assert.equal(calculateTrend(tenDays, today).current, null);
+  // 23 days: the average is the one on the last weigh-in's date, from the 10 days up to it.
+  const lapsed = log(["2026-10-10", 90], ["2026-10-21", 80], ["2026-10-22", 87], ["2026-10-25", 86.4], ["2026-10-31", 86]);
   assert.deepEqual(logStatus(lapsed, today), { kind: "lapsed", lastDate: "2026-10-31", daysAgo: 23, lastAverage: (8700 + 8640 + 8600) / 300 });
   // Weigh-ins dated after today don't count until their day comes.
   assert.deepEqual(logStatus(log(["2026-11-24", 85]), today), { kind: "empty", lastDate: null, daysAgo: null, lastAverage: null });

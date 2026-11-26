@@ -21,18 +21,18 @@ function field(value) {
 }
 
 const kg = value => value.toFixed(2);
-// The 14-day average to 0.01 kg. It's rounded from the exact sum of the weights
+// The 10-day average to 0.01 kg. It's rounded from the exact sum of the weights
 // as stored, in hundredths, so a mean that ends in half a hundredth rounds up.
 const averageKg = point => kg(Math.round(Math.round(point.average * point.count * 100) / point.count) / 100);
 
 // Every weigh-in, oldest first: the date, the weight in kg as stored (to 0.01
-// kg), the weight as Baseline shows it in `unit`, the note, and the 14-day
+// kg), the weight as Baseline shows it in `unit`, the note, and the 10-day
 // average on that date in kg (to 0.01 kg). It starts with a UTF-8 byte order
 // mark and ends lines with CRLF, so Excel reads accents and emoji in notes.
 export function weighInsCsv(state, unit = "kg") {
   const { entries } = normalizeState(state);
   const readings = entries.length ? calculateTrend(entries, entries.at(-1).date).readings : [];
-  const rows = [["date", "weight_kg", "weight", "note", "average_14d_kg"]];
+  const rows = [["date", "weight_kg", "weight", "note", "average_10d_kg"]];
   for (const reading of readings) {
     const note = reading.note && FORMULA_START.test(reading.note) ? "'" + reading.note : reading.note;
     rows.push([reading.date, kg(reading.weight), formatWeight(reading.weight, unit), note, averageKg(reading)]);

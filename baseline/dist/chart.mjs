@@ -72,7 +72,7 @@ export function rangeStart(trend, range, today) {
   return range === "all" ? firstDay : Math.max(firstDay, end - Number(range) + 1);
 }
 
-// The pieces to draw the 14-day average's line in, from its points in order of
+// The pieces to draw the 10-day average's line in, from its points in order of
 // day (see calculateTrend in model.mjs). A day without an average breaks the
 // line, so each run of days is drawn on its own. Within a run, the line is thin
 // (dashed and lighter) between days whose average rests on fewer than
@@ -578,8 +578,8 @@ export class TrendChart extends Chart {
       this.home = nearestIndex(this.points, today);
     }
     const final = ahead.at(-1);
-    this.canvas.setAttribute("aria-label", "Daily weights and 14-day moving averages, " + prettyDate(dateOf(start), "full") + " through " + prettyDate(this.today, "full") + "." +
-      (reading ? " Last weigh-in " + prettyDate(reading.date, "full") + ", with a 14-day average of " + spokenWeight(reading.average, unit) + "." : "") +
+    this.canvas.setAttribute("aria-label", "Daily weights and 10-day moving averages, " + prettyDate(dateOf(start), "full") + " through " + prettyDate(this.today, "full") + "." +
+      (reading ? " Last weigh-in " + prettyDate(reading.date, "full") + ", with a 10-day average of " + spokenWeight(reading.average, unit) + "." : "") +
       (parts.some(part => part.thin) ? " The line is dashed where it rests on fewer than " + THIN_COUNT + " weigh-ins, or holds the last weigh-in’s average after it." : "") +
       (final ? " Forecast through " + prettyDate(final.date, "full") + " if your weekly trend holds: about " + spokenWeight(final.average, unit) + ", likely " + spokenRange(final.low, final.high, unit) + "." : "") +
       (goal === null ? "" : " Goal " + spokenWeight(goal, unit) + ".") +
@@ -618,7 +618,7 @@ export class TrendChart extends Chart {
         '<div class="tip-detail">Likely ' + formatRange(point.low, point.high, this.unit) + "</div>";
       this.placeTooltip(xx, y(point.average));
       if (announce) {
-        this.announce.textContent = heading + ". Forecast 14-day average " + spokenWeight(point.average, this.unit) + ", likely " + spokenRange(point.low, point.high, this.unit) + ".";
+        this.announce.textContent = heading + ". Forecast 10-day average " + spokenWeight(point.average, this.unit) + ", likely " + spokenRange(point.low, point.high, this.unit) + ".";
       }
       return;
     }
@@ -630,7 +630,7 @@ export class TrendChart extends Chart {
     // A day without a weigh-in keeps the last weigh-in's average (see calculateTrend).
     const asOf = point.weight === null ? dateBeside(point.asOf, point.date) : null;
     this.tooltip.innerHTML = "<strong>" + heading + "</strong>" +
-      '<div class="tip-row"><i class="key-line"></i><b>' + mean + "</b>14-day average</div>" +
+      '<div class="tip-row"><i class="key-line"></i><b>' + mean + "</b>10-day average</div>" +
       '<div class="tip-row"><i class="key-dot"></i>' + (daily ? "<b>" + daily + "</b>weigh-in" : "No weigh-in · average as of " + asOf) + "</div>";
     if (point.note) {
       const note = document.createElement("p");
@@ -641,7 +641,7 @@ export class TrendChart extends Chart {
     this.placeTooltip(xx, y(point.average));
     if (announce) {
       const weighIn = point.weight === null ? "No weigh-in, average as of " + asOf + "." : "Weigh-in " + spokenWeight(point.weight, this.unit) + ".";
-      this.announce.textContent = heading + ". 14-day average " + spokenWeight(point.average, this.unit) + ". " + weighIn + (point.note ? " Note: " + point.note : "");
+      this.announce.textContent = heading + ". 10-day average " + spokenWeight(point.average, this.unit) + ". " + weighIn + (point.note ? " Note: " + point.note : "");
     }
   }
 }
@@ -674,7 +674,7 @@ export class BodyFatChart extends Chart {
     this.empty.hidden = this.points.length > 0;
     this.wrap.tabIndex = this.points.length ? 0 : -1;
     if (!this.points.length) {
-      this.empty.textContent = "Your body fat shows here once a waist measurement has a weigh-in in the 14 days up to it.";
+      this.empty.textContent = "Your body fat shows here once a waist measurement has a weigh-in in the 10 days up to it.";
       this.canvas.setAttribute("aria-label", this.empty.textContent);
       return;
     }
@@ -749,11 +749,11 @@ export class BodyFatChart extends Chart {
     this.tooltip.innerHTML = "<strong>" + heading + "</strong>" +
       '<div class="tip-row"><b>' + oneDecimal(point.bodyFat) + "%</b>body fat</div>" +
       '<div class="tip-row"><b>' + formatWaist(point.waist, lengthUnit) + "</b>waist</div>" +
-      '<div class="tip-row"><b>' + formatWeight(point.weight, this.units.weight) + "</b>14-day average</div>";
+      '<div class="tip-row"><b>' + formatWeight(point.weight, this.units.weight) + "</b>10-day average</div>";
     this.placeTooltip(xx, y(point.bodyFat));
     if (announce) {
       this.announce.textContent = heading + ". Body fat " + oneDecimal(point.bodyFat) + " percent. Waist " + spokenWaist(point.waist, lengthUnit) +
-        ". 14-day average " + spokenWeight(point.weight, this.units.weight) + ".";
+        ". 10-day average " + spokenWeight(point.weight, this.units.weight) + ".";
     }
   }
 }

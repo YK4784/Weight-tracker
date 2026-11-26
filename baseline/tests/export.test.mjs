@@ -41,14 +41,14 @@ function parseCsv(text) {
 
 test("the weigh-ins CSV has a header, a BOM and CRLF line ends", () => {
   const csv = weighInsCsv(log(), "lb");
-  assert.ok(csv.startsWith("\uFEFFdate,weight_kg,weight,note,average_14d_kg\r\n"));
+  assert.ok(csv.startsWith("\uFEFFdate,weight_kg,weight,note,average_10d_kg\r\n"));
   assert.ok(csv.endsWith("\r\n"));
   assert.doesNotMatch(csv.replaceAll("\r\n", ""), /[\r\n]/, "no bare line breaks");
 });
 
-test("each weigh-in is a row, oldest first, with its weight as stored and as shown and its 14-day average", () => {
+test("each weigh-in is a row, oldest first, with its weight as stored and as shown and its 10-day average", () => {
   const [header, ...rows] = parseCsv(weighInsCsv(log(), "lb").slice(1));
-  assert.deepEqual(header, ["date", "weight_kg", "weight", "note", "average_14d_kg"]);
+  assert.deepEqual(header, ["date", "weight_kg", "weight", "note", "average_10d_kg"]);
   assert.deepEqual(rows.map(row => row[0]), ["2026-11-01", "2026-11-02", "2026-11-03"]);
   assert.deepEqual(rows[0], ["2026-11-01", "85.00", "187.4 lb", "", "85.00"]);
   assert.deepEqual(rows[1].slice(0, 3), ["2026-11-02", "84.91", "187.2 lb"]);
@@ -57,11 +57,11 @@ test("each weigh-in is a row, oldest first, with its weight as stored and as sho
   assert.equal(rows.every(row => row.length === 5), true);
 });
 
-test("the CSV's average is the 14-day mean on each weigh-in's own date, with a row only for weigh-ins", () => {
+test("the CSV's average is the 10-day mean on each weigh-in's own date, with a row only for weigh-ins", () => {
   // Days without a weigh-in keep the last one's average on screen, but they have no row here.
-  const gappy = normalizeState({ entries: [{ date: "2026-11-01", weight: 85 }, { date: "2026-11-10", weight: 84 }, { date: "2026-11-20", weight: 82 }] });
+  const gappy = normalizeState({ entries: [{ date: "2026-11-01", weight: 85 }, { date: "2026-11-10", weight: 84 }, { date: "2026-11-19", weight: 82 }] });
   const rows = parseCsv(weighInsCsv(gappy).slice(1)).slice(1);
-  assert.deepEqual(rows.map(row => [row[0], row[4]]), [["2026-11-01", "85.00"], ["2026-11-10", "84.50"], ["2026-11-20", "83.00"]], "Nov 1 has left Nov 20's window");
+  assert.deepEqual(rows.map(row => [row[0], row[4]]), [["2026-11-01", "85.00"], ["2026-11-10", "84.50"], ["2026-11-19", "83.00"]], "Nov 1 has left Nov 19's window");
 });
 
 test("the shown weight follows the unit, including stones and pounds", () => {
@@ -99,8 +99,8 @@ test("weights of 1,000 kg or more, which show with a comma, stay in one field", 
 });
 
 test("an empty log gives only the header", () => {
-  assert.equal(weighInsCsv(normalizeState({})), "\uFEFFdate,weight_kg,weight,note,average_14d_kg\r\n");
-  assert.equal(weighInsCsv(null), "\uFEFFdate,weight_kg,weight,note,average_14d_kg\r\n");
+  assert.equal(weighInsCsv(normalizeState({})), "\uFEFFdate,weight_kg,weight,note,average_10d_kg\r\n");
+  assert.equal(weighInsCsv(null), "\uFEFFdate,weight_kg,weight,note,average_10d_kg\r\n");
 });
 
 test("the JSON export holds the whole log, in metric units, under a named format", () => {

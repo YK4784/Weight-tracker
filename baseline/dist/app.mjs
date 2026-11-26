@@ -611,7 +611,7 @@ const asOf = () => status.kind !== "empty" && status.lastDate !== today ? status
 // in model.mjs, and data-status on #main for the styles):
 // - An empty log has "Log your first weigh-in" and a line on the average, with
 //   no facts. showPage and showBodyFat leave out the rest of the overview.
-// - After a break of 14 days or more, the hero keeps the last average in grey,
+// - After a break of 10 days or more, the hero keeps the last average in grey,
 //   says when it was, and invites the next weigh-in, which ends the state.
 // - Otherwise, the average as of the last weigh-in, with its date when that
 //   isn't today. It's the same figure as after a break, which only greys it
@@ -622,7 +622,7 @@ function showMetrics() {
   const height = state.height;
   const { kind } = status;
   $("main").dataset.status = kind;
-  $("avg-title").textContent = kind === "empty" ? "Log your first weigh-in" : kind === "lapsed" ? "Last 14-day average" : "14-day average";
+  $("avg-title").textContent = kind === "empty" ? "Log your first weigh-in" : kind === "lapsed" ? "Last 10-day average" : "10-day average";
   $("hero").hidden = kind === "empty";
   showHero(status.lastAverage);
   const count = trend.current?.count ?? 0;
@@ -852,8 +852,8 @@ function showForecast() {
         : "Your weight is going " + (weeklyRate.perWeek > 0 ? "up" : "down") + " over the last " + RATE_DAYS / 7 + " weeks, " + away;
     } else {
       lead.textContent = overall === null ? "Your rate since you started shows from " + shortDate(dateOf(dayOf(goal.startDate) + OVERALL_MIN_DAYS)) + "."
-        : !overall ? "Your 14-day average hasn’t changed since " + shortDate(goal.startDate) + ", so there’s no date to forecast."
-        : "Your 14-day average is " + (overall > 0 ? "higher" : "lower") + " than when you started, " + away;
+        : !overall ? "Your 10-day average hasn’t changed since " + shortDate(goal.startDate) + ", so there’s no date to forecast."
+        : "Your 10-day average is " + (overall > 0 ? "higher" : "lower") + " than when you started, " + away;
     }
     return;
   }
@@ -934,7 +934,7 @@ function figure(label, value, note = "", missing = "", quiet = false) {
 }
 
 // Changes in the average and the recent high and low, above the chart. They
-// need a weigh-in in the last 14 days, like the average itself, and like it
+// need a weigh-in in the last 10 days, like the average itself, and like it
 // they're as of the last weigh-in, with a line that says so when that isn't
 // today. An empty log has no Trend section at all, rather than an empty chart.
 function showFigures() {
@@ -949,7 +949,7 @@ function showFigures() {
   $("figures-as-of").hidden = !since;
   $("figures-as-of").textContent = since ? "As of " + shortDate(since) + ", your last weigh-in." : "";
   const recent = recentRange(state.entries, status.lastDate);
-  // The 14 days end on the last weigh-in, so with an earlier one, "16 days ago"
+  // The 10 days end on the last weigh-in, so with an earlier one, "16 days ago"
   // would read as outside them: the date says when instead.
   const when = entry => since ? shortDate(entry.date) : daysAgo(entry.daysAgo);
   $("range-figures").hidden = !recent;
@@ -1056,9 +1056,9 @@ function showBodyFat() {
   $("fat-note").hidden = invite;
   const lead = $("fat-lead");
   lead.hidden = invite || estimates.length > 0;
-  lead.textContent = !fat.length ? "Measure your waist now and then and log it here. Baseline estimates your body fat from it and your 14-day average."
+  lead.textContent = !fat.length ? "Measure your waist now and then and log it here. Baseline estimates your body fat from it and your 10-day average."
     : !state.sex ? "Choose a formula in Log waist to see your body fat."
-    : "Your body fat shows once a waist measurement has a weigh-in in the 14 days up to it.";
+    : "Your body fat shows once a waist measurement has a weigh-in in the 10 days up to it.";
   $("fat-figures").hidden = !latest;
   $("fat-chart-wrap").hidden = !latest;
   if (latest) {
@@ -1081,7 +1081,7 @@ function showWaistRows() {
   $("waist-table-wrap").hidden = !rows.length;
   $("waist-rows").innerHTML = shown.map(point => '<tr data-waist-edit="' + point.date + '">' + dateCell(point.date) +
     '<td class="num">' + waistParts(point.waist, state.units.height).map(([number, name]) => number + '<span class="table-unit">' + name + "</span>").join("") + "</td>" +
-    '<td class="num">' + (point.weight === null ? dashCell("No weigh-ins in the 14 days up to it") : weightCell(point.weight)) + "</td>" +
+    '<td class="num">' + (point.weight === null ? dashCell("No weigh-ins in the 10 days up to it") : weightCell(point.weight)) + "</td>" +
     '<td class="num fat-cell">' + (point.bodyFat === null ? dashCell("No estimate") : percent(point.bodyFat)) + "</td>" +
     '<td class="row-action"><button type="button" class="icon-button" data-waist-edit="' + point.date + '" aria-label="Edit waist measurement for ' + prettyDate(point.date, "full") + '">' + icon("pencil") + "</button></td></tr>").join("");
   const more = $("waist-more");
@@ -2049,7 +2049,7 @@ function showGoalForm(confirming = false) {
   $("goal-confirm").hidden = !confirming;
 }
 
-// The start weight defaults to the 14-day average on the start date.
+// The start weight defaults to the 10-day average on the start date.
 function fillStartWeight() {
   const date = $("goal-start-date").value;
   const average = validDate(date) ? calculateTrend(state.entries, date).current?.average : undefined;
@@ -2060,8 +2060,8 @@ function showStartHint() {
   const date = $("goal-start-date").value;
   const filled = $("goal-start-weight").value !== "";
   $("goal-start-hint").hidden = startWeightFrom !== "average" || !validDate(date);
-  $("goal-start-hint").textContent = !filled ? "No weigh-ins in the 14 days up to " + shortDate(date) + ", so enter your weight then."
-    : "Your 14-day average on " + shortDate(date) + ".";
+  $("goal-start-hint").textContent = !filled ? "No weigh-ins in the 10 days up to " + shortDate(date) + ", so enter your weight then."
+    : "Your 10-day average on " + shortDate(date) + ".";
 }
 
 function readGoal() {
@@ -2157,10 +2157,10 @@ function previewFat() {
   const estimate = bodyFat(average, size, sex);
   $("waist-fat").textContent = estimate === null ? "—" : percent(estimate);
   $("waist-hint").textContent = !validDate(date) ? ""
-    : !Number.isFinite(average) ? "No weigh-ins in the 14 days up to " + shortDate(date) + ". Your body fat shows once there is one."
+    : !Number.isFinite(average) ? "No weigh-ins in the 10 days up to " + shortDate(date) + ". Your body fat shows once there is one."
     : !sex ? "Choose the formula to see your body fat."
     : validWaist(size) && estimate === null ? "That waist is outside what the formula covers. Check that it’s in " + (fieldUnits.height === "cm" ? "centimeters." : "inches.")
-    : "Uses your 14-day average on " + shortDate(date) + ", " + weight(average) + ".";
+    : "Uses your 10-day average on " + shortDate(date) + ", " + weight(average) + ".";
 }
 
 // Reminders are push notifications (see sw.js and server/reminders.mjs). The

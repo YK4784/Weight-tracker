@@ -169,8 +169,11 @@ const cell = (record, index) => index >= 0 ? (record[index] ?? "").trim() : "";
 // Baseline's own CSV export (weighInsCsv in export.mjs). Its `weight` column
 // shows the weight in the user's unit, so weight_kg is the one read. A note
 // that starts with =, +, - or @ was written with an apostrophe in front, so a
-// spreadsheet doesn't run it as a formula; the apostrophe comes off.
-const BASELINE_CSV = ["date", "weight kg", "weight", "note", "average 14d kg"];
+// spreadsheet doesn't run it as a formula; the apostrophe comes off. The last
+// column was average_14d_kg while the average covered 14 days, and files
+// exported then still import.
+const BASELINE_CSV = ["date", "weight kg", "weight", "note", "average 10d kg"];
+const BASELINE_CSV_14D = [...BASELINE_CSV.slice(0, 4), "average 14d kg"];
 const unformula = note => /^'[=+\-@]/.test(note) ? note.slice(1) : note;
 
 // TrendWeight's downloads, written by apps/web/src/lib/download/csv-export.ts
@@ -204,7 +207,7 @@ export function readCsv(text) {
   let note = text => text;
   let skip = () => false;
   let skippedWhy = "";
-  if (same(names, BASELINE_CSV)) {
+  if (same(names, BASELINE_CSV) || same(names, BASELINE_CSV_14D)) {
     source = "baseline";
     columns.weight = 1;
     unit = "kg";

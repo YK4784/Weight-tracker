@@ -1,7 +1,7 @@
 {
   "name": "Baseline",
   "short_name": "Baseline",
-  "description": "A daily weight log with a 14-day moving average.",
+  "description": "A daily weight log with a 10-day moving average.",
   "id": "./",
   "start_url": "./",
   "scope": "./",
@@ -17,8 +17,8 @@
     { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ],
   "screenshots": [
-    { "src": "screenshots/overview-narrow.webp", "sizes": "780x1688", "type": "image/webp", "form_factor": "narrow", "label": "The overview on a phone: the 14-day average, the weekly trend and progress toward a goal" },
-    { "src": "screenshots/overview-wide.webp", "sizes": "1440x900", "type": "image/webp", "form_factor": "wide", "label": "The overview on a computer: the 14-day average, progress toward a goal, the log form and the forecast" }
+    { "src": "screenshots/overview-narrow.webp", "sizes": "780x1688", "type": "image/webp", "form_factor": "narrow", "label": "The overview on a phone: the 10-day average, the weekly trend and progress toward a goal" },
+    { "src": "screenshots/overview-wide.webp", "sizes": "1440x900", "type": "image/webp", "form_factor": "wide", "label": "The overview on a computer: the 10-day average, progress toward a goal, the log form and the forecast" }
   ],
   "shortcuts": [
     { "name": "Log today’s weight", "short_name": "Log weight", "url": "./#log", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" }] }

@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="light dark">
   <meta name="theme-color" content="#f6f5f1" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#121315" media="(prefers-color-scheme: dark)">
-  <meta name="description" content="Keep a daily weight log, follow your 14-day moving average, track progress toward a goal weight, review each month, and calculate your BMI and body fat with Baseline.">
+  <meta name="description" content="Keep a daily weight log, follow your 10-day moving average, track progress toward a goal weight, review each month, and calculate your BMI and body fat with Baseline.">
   <title>Baseline</title>
   <link rel="icon" href="./mark.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
@@ -131,7 +131,7 @@
   </main>
 
   <!-- data-status is logStatus's kind (see showMetrics in app.mjs): "active",
-       "lapsed" (no weigh-in in the last 14 days) or "empty" (no weigh-ins). -->
+       "lapsed" (no weigh-in in the last 10 days) or "empty" (no weigh-ins). -->
   <main class="wrap page" id="main" tabindex="-1" data-status="active" hidden>
     <div class="page-heading">
       <div>
@@ -150,7 +150,7 @@
          (see showFirstRun in app.mjs). It comes after the consent step. The
          page heading reads "Your first weigh-in". -->
     <section class="first-run" id="first-run" aria-labelledby="page-title" hidden>
-      <p class="first-run-lead" id="first-run-lead">Your weight swings by a kilo or more from day to day, so Baseline shows the average of your last 14 days.</p>
+      <p class="first-run-lead" id="first-run-lead">Your weight swings by a kilo or more from day to day, so Baseline shows the average of your last 10 days.</p>
       <form id="first-run-form">
         <fieldset class="choice-group unit-choice">
           <legend class="field-label">Unit</legend>
@@ -173,7 +173,7 @@
     <div id="overview-view">
       <div class="top">
         <section class="summary" aria-labelledby="avg-title">
-          <h2 class="eyebrow" id="avg-title">14-day average</h2>
+          <h2 class="eyebrow" id="avg-title">10-day average</h2>
           <p class="hero is-empty" id="hero">—</p>
           <p class="hero-note" id="avg-detail"></p>
           <p class="hero-rate" id="rate-detail" hidden></p>
@@ -240,7 +240,7 @@
                 <tbody id="forecast-rows"></tbody>
               </table>
             </div>
-            <p class="note">Forecasts assume your 14-day average keeps changing at the chosen rate.</p>
+            <p class="note">Forecasts assume your 10-day average keeps changing at the chosen rate.</p>
           </div>
         </div>
       </section>
@@ -261,7 +261,7 @@
           <p class="figures-pending" id="change-pending" hidden>Your 7-day change shows once your log is a week old.</p>
           <dl class="figures" id="range-figures"></dl>
         </div>
-        <div class="legend"><span><i class="key-line"></i>14-day average</span><span><i class="key-dot"></i>Daily weigh-in</span><span id="legend-forecast" hidden><i class="key-forecast"></i>Forecast</span><span id="legend-goal" hidden><i class="key-goal"></i>Goal</span><span id="legend-note" hidden><i class="key-note"></i>Note</span><span id="legend-weekend" hidden><i class="key-weekend"></i>Weekend</span><button class="text-button forecast-toggle" type="button" id="forecast-toggle" aria-controls="chart-wrap trend-forecast">Show forecast</button></div>
+        <div class="legend"><span><i class="key-line"></i>10-day average</span><span><i class="key-dot"></i>Daily weigh-in</span><span id="legend-forecast" hidden><i class="key-forecast"></i>Forecast</span><span id="legend-goal" hidden><i class="key-goal"></i>Goal</span><span id="legend-note" hidden><i class="key-note"></i>Note</span><span id="legend-weekend" hidden><i class="key-weekend"></i>Weekend</span><button class="text-button forecast-toggle" type="button" id="forecast-toggle" aria-controls="chart-wrap trend-forecast">Show forecast</button></div>
         <div class="chart-wrap" id="chart-wrap" tabindex="0" role="group" aria-label="Weight trend chart. Use the left and right arrow keys to inspect days.">
           <svg id="trend-chart" role="img" aria-label="Weight trend"></svg>
           <div class="chart-tooltip" id="chart-tooltip" hidden></div>
@@ -270,9 +270,9 @@
         <span class="sr-only" role="status" id="chart-announce"></span>
         <div id="trend-forecast" hidden>
           <p class="forecast-words" id="forecast-words"></p>
-          <p class="note" id="forecast-method">The forecast carries on your weekly trend from the 14-day average on your last weigh-in. The shaded band is the likely range: if the trend holds, the average lands inside it 8 times in 10, given how much your weigh-ins swing from day to day. It can’t foresee a change in what you eat or do, and it looks at most 12 weeks ahead, because weight change usually slows over months.</p>
+          <p class="note" id="forecast-method">The forecast carries on your weekly trend from the 10-day average on your last weigh-in. The shaded band is the likely range: if the trend holds, the average lands inside it 8 times in 10, given how much your weigh-ins swing from day to day. It can’t foresee a change in what you eat or do, and it looks at most 12 weeks ahead, because weight change usually slows over months.</p>
         </div>
-        <p class="note">On a day with a weigh-in, the line averages the weigh-ins from that day and the 13 days before it. A day without one keeps the last weigh-in’s average, for up to 13 days, so the line holds flat when weigh-ins stop. It’s dashed there, and where an average rests on fewer than 4 weigh-ins. When there’s room, a thin line joins each weigh-in to that day’s average, to show how far the day strayed from it. Each change compares the average on your last weigh-in with the one 7, 30 or 90 days before it, or with your first weigh-in for all time.</p>
+        <p class="note">On a day with a weigh-in, the line averages the weigh-ins from that day and the 9 days before it. A day without one keeps the last weigh-in’s average, for up to 9 days, so the line holds flat when weigh-ins stop. It’s dashed there, and where an average rests on fewer than 4 weigh-ins. When there’s room, a thin line joins each weigh-in to that day’s average, to show how far the day strayed from it. Each change compares the average on your last weigh-in with the one 7, 30 or 90 days before it, or with your first weigh-in for all time.</p>
       </section>
     </div>
 
@@ -283,7 +283,7 @@
       </div>
       <div class="table-wrap">
         <table id="entry-table">
-          <thead><tr><th scope="col">Date</th><th scope="col" class="num">Weight</th><th scope="col" class="num"><span class="long-label">14-day average</span><span class="short-label">14-day avg.</span></th><th scope="col" class="num"><span class="long-label">Weekly trend</span><span class="short-label">Per week</span></th><th scope="col" class="row-action" id="action-heading" hidden><span class="sr-only">Edit entry</span></th></tr></thead>
+          <thead><tr><th scope="col">Date</th><th scope="col" class="num">Weight</th><th scope="col" class="num"><span class="long-label">10-day average</span><span class="short-label">10-day avg.</span></th><th scope="col" class="num"><span class="long-label">Weekly trend</span><span class="short-label">Per week</span></th><th scope="col" class="row-action" id="action-heading" hidden><span class="sr-only">Edit entry</span></th></tr></thead>
         </table>
       </div>
       <p id="table-empty" class="table-empty" hidden>Your entries will appear here after your first weigh-in.</p>
@@ -295,7 +295,7 @@
       <h2 class="sr-only" id="months-title">Monthly summary</h2>
       <ol class="month-list" id="month-list"></ol>
       <p class="table-empty" id="months-empty" hidden>Your monthly summary will appear here after your first weigh-in.</p>
-      <p class="note" id="months-note">Each month starts with the 14-day average as it began and ends with the average on its last weigh-in, so it picks up where the month before ended. When an average comes from a weigh-in on another day, as when a month’s last weigh-in comes before its last day or the log starts partway through a month, a date shows which day. The weekly trend is as it stood on the month’s last weigh-in, and milestones show in the month your average first reached them. ~ marks a weekly trend that isn’t clear yet: the weigh-ins so far can’t tell it apart from day-to-day swings.</p>
+      <p class="note" id="months-note">Each month starts with the 10-day average as it began and ends with the average on its last weigh-in, so it picks up where the month before ended. When an average comes from a weigh-in on another day, as when a month’s last weigh-in comes before its last day or the log starts partway through a month, a date shows which day. The weekly trend is as it stood on the month’s last weigh-in, and milestones show in the month your average first reached them. ~ marks a weekly trend that isn’t clear yet: the weigh-ins so far can’t tell it apart from day-to-day swings.</p>
     </section>
 
     <section class="body-fat" id="body-fat" aria-labelledby="fat-title">
@@ -315,12 +315,12 @@
       <span class="sr-only" role="status" id="fat-announce"></span>
       <div class="table-wrap" id="waist-table-wrap" hidden>
         <table id="waist-table">
-          <thead><tr><th scope="col">Date</th><th scope="col" class="num">Waist</th><th scope="col" class="num"><span class="long-label">14-day average</span><span class="short-label">14-day avg.</span></th><th scope="col" class="num">Body fat</th><th scope="col" class="row-action"><span class="sr-only">Edit measurement</span></th></tr></thead>
+          <thead><tr><th scope="col">Date</th><th scope="col" class="num">Waist</th><th scope="col" class="num"><span class="long-label">10-day average</span><span class="short-label">10-day avg.</span></th><th scope="col" class="num">Body fat</th><th scope="col" class="row-action"><span class="sr-only">Edit measurement</span></th></tr></thead>
           <tbody id="waist-rows"></tbody>
         </table>
       </div>
       <button class="small-button waist-more" type="button" id="waist-more" aria-controls="waist-table" aria-expanded="false" hidden>Show all</button>
-      <p class="note" id="fat-note">An estimate from the U.S. Army’s one-site tape formula, using your waist at the navel and your 14-day average on the day you measured. A tape estimate can be several points off a lab scan, so it’s most useful for following your own trend.</p>
+      <p class="note" id="fat-note">An estimate from the U.S. Army’s one-site tape formula, using your waist at the navel and your 10-day average on the day you measured. A tape estimate can be several points off a lab scan, so it’s most useful for following your own trend.</p>
     </section>
 
     <!-- Settings: a section per topic, each a list of rows between hairlines. -->
@@ -530,7 +530,7 @@
         <div class="setting-row wide-actions">
           <div class="setting-text">
             <h3>Download</h3>
-            <p>Your weigh-ins as a spreadsheet, with each one’s note and 14-day average. Or everything in your log as JSON: weigh-ins with their notes and where imported ones came from, waist measurements, height, the body fat formula, your goal, units, what the overview shows, reminder time and your agreement to the health data policy.</p>
+            <p>Your weigh-ins as a spreadsheet, with each one’s note and 10-day average. Or everything in your log as JSON: weigh-ins with their notes and where imported ones came from, waist measurements, height, the body fat formula, your goal, units, what the overview shows, reminder time and your agreement to the health data policy.</p>
           </div>
           <div class="setting-actions">
             <button class="small-button" type="button" id="download-csv">Download weigh-ins (CSV)</button>
@@ -611,7 +611,7 @@
   </dialog>
   <dialog id="goal-dialog" aria-labelledby="goal-title">
     <div class="dialog-heading"><h2 id="goal-title">Set a goal</h2><button class="icon-button" data-close type="button" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="./icons.svg#close"/></svg></button></div>
-    <p class="dialog-detail" id="goal-detail">Progress is measured with your 14-day average, so one heavy or light day doesn’t move it much.</p>
+    <p class="dialog-detail" id="goal-detail">Progress is measured with your 10-day average, so one heavy or light day doesn’t move it much.</p>
     <form id="goal-form">
       <label class="field-label" for="goal-weight">Goal weight</label>
       <div class="split-field">
