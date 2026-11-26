@@ -49,6 +49,7 @@ let trend;
 let weeklyRate; // The weekly trend as of the last weigh-in (rateAsOf), or null.
 let progress; // goalProgress for today's average, which is as of the last weigh-in, or null without a goal.
 let status; // logStatus for today: whether the log is empty, active or back after a break.
+let highLow; // recentRange for the days behind today's average: their highest and lowest weigh-ins, or null.
 let fat = []; // bodyFatHistory through today: each waist measurement and its estimate.
 let allWaists = false; // Whether the body fat table lists every measurement.
 let waistAutoFill = true; // The waist dialog shows the measurement on its date until the user types in it.
@@ -627,9 +628,12 @@ function showMetrics() {
   showHero(status.lastAverage);
   const count = trend.current?.count ?? 0;
   const since = asOf();
+  // After the count, the highest and lowest of those weigh-ins, once there are
+  // two. The Trend section has the same pair, with when each was.
+  const spread = highLow ? " · highest " + weight(highLow.high.weight) + ", lowest " + weight(highLow.low.weight) : "";
   $("avg-detail").textContent = kind === "empty" ? "Baseline averages your last " + WINDOW_DAYS + " days, so day-to-day swings don’t hide where you are."
     : kind === "lapsed" ? "Your last weigh-in was " + shortDate(status.lastDate) + ", " + status.daysAgo + " days ago. Your average then was " + weight(status.lastAverage) + ". Log today to pick up where you left off."
-    : (since ? "As of " + shortDate(since) + " · from " : "From ") + count + (count === 1 ? " weigh-in" : " weigh-ins") + (since ? " in " : " in the last ") + WINDOW_DAYS + " days";
+    : (since ? "As of " + shortDate(since) + " · from " : "From ") + count + (count === 1 ? " weigh-in" : " weigh-ins") + (since ? " in " : " in the last ") + WINDOW_DAYS + " days" + spread;
   showRate();
   showFigures();
   $("facts").hidden = kind === "empty";
@@ -948,14 +952,13 @@ function showFigures() {
   const since = asOf();
   $("figures-as-of").hidden = !since;
   $("figures-as-of").textContent = since ? "As of " + shortDate(since) + ", your last weigh-in." : "";
-  const recent = recentRange(state.entries, status.lastDate);
   // The 10 days end on the last weigh-in, so with an earlier one, "16 days ago"
   // would read as outside them: the date says when instead.
   const when = entry => since ? shortDate(entry.date) : daysAgo(entry.daysAgo);
-  $("range-figures").hidden = !recent;
-  $("range-figures").replaceChildren(...!recent ? [] : [
-    figure("Highest in " + WINDOW_DAYS + " days", weight(recent.high.weight), when(recent.high)),
-    figure("Lowest in " + WINDOW_DAYS + " days", weight(recent.low.weight), when(recent.low))
+  $("range-figures").hidden = !highLow;
+  $("range-figures").replaceChildren(...!highLow ? [] : [
+    figure("Highest in " + WINDOW_DAYS + " days", weight(highLow.high.weight), when(highLow.high)),
+    figure("Lowest in " + WINDOW_DAYS + " days", weight(highLow.low.weight), when(highLow.low))
   ]);
 }
 
@@ -1356,6 +1359,7 @@ function showTrendForecast(forecast, announce) {
 function render() {
   trend = calculateTrend(state.entries, today);
   status = logStatus(state.entries, today);
+  highLow = trend.current ? recentRange(state.entries, status.lastDate) : null;
   weeklyRate = rateAsOf(state.entries, today, unit());
   progress = goalProgress(state.goal, trend.current?.average, unit());
   fat = bodyFatHistory(state.entries, state.waists, state.sex, today);
