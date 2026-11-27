@@ -220,31 +220,6 @@
         </section>
       </div>
 
-      <section class="forecast" id="forecast" aria-labelledby="forecast-title" hidden>
-        <div class="section-head">
-          <h2 id="forecast-title">Forecast</h2>
-          <button class="text-button" type="button" data-goal>Edit goal</button>
-        </div>
-        <div class="forecast-body">
-          <fieldset class="rate-choice" id="rate-choice">
-            <legend>Forecast from</legend>
-            <label class="rate-option"><input type="radio" name="rate-source" value="committed"><span class="rate-name">Your target rate</span><span class="rate-value" id="rate-committed"></span></label>
-            <label class="rate-option"><input type="radio" name="rate-source" value="current"><span class="rate-name">Last 3 weeks</span><span class="rate-value" id="rate-current"></span></label>
-            <label class="rate-option"><input type="radio" name="rate-source" value="overall"><span class="rate-name" id="rate-overall-name">Since you started</span><span class="rate-value" id="rate-overall"></span></label>
-          </fieldset>
-          <div class="forecast-result">
-            <p class="forecast-lead" id="forecast-lead" aria-live="polite"></p>
-            <div class="table-wrap" id="forecast-table" hidden>
-              <table>
-                <thead><tr><th scope="col">Milestone</th><th scope="col" class="num">Weight</th><th scope="col" class="num">Expected</th></tr></thead>
-                <tbody id="forecast-rows"></tbody>
-              </table>
-            </div>
-            <p class="note">Forecasts assume your 10-day average keeps changing at the chosen rate.</p>
-          </div>
-        </div>
-      </section>
-
       <section class="trend" id="trend" aria-labelledby="trend-title">
         <div class="section-head">
           <h2 id="trend-title">Trend</h2>
@@ -273,6 +248,31 @@
           <p class="note" id="forecast-method">The forecast carries on your weekly trend from the 10-day average on your last weigh-in. The shaded band is the likely range: if the trend holds, the average lands inside it 8 times in 10, given how much your weigh-ins swing from day to day. It can’t foresee a change in what you eat or do, and it looks at most 12 weeks ahead, because weight change usually slows over months.</p>
         </div>
         <p class="note">On a day with a weigh-in, the line averages the weigh-ins from that day and the 9 days before it. A day without one keeps the last weigh-in’s average, for up to 9 days, so the line holds flat when weigh-ins stop. It’s dashed there, and where an average rests on fewer than 4 weigh-ins. When there’s room, a thin line joins each weigh-in to that day’s average, to show how far the day strayed from it. Each change compares the average on your last weigh-in with the one 7, 30 or 90 days before it, or with your first weigh-in for all time.</p>
+      </section>
+
+      <section class="forecast" id="forecast" aria-labelledby="forecast-title" hidden>
+        <div class="section-head">
+          <h2 id="forecast-title">Forecast</h2>
+          <button class="text-button" type="button" data-goal>Edit goal</button>
+        </div>
+        <div class="forecast-body">
+          <fieldset class="rate-choice" id="rate-choice">
+            <legend>Forecast from</legend>
+            <label class="rate-option"><input type="radio" name="rate-source" value="committed"><span class="rate-name">Your target rate</span><span class="rate-value" id="rate-committed"></span></label>
+            <label class="rate-option"><input type="radio" name="rate-source" value="current"><span class="rate-name">Last 3 weeks</span><span class="rate-value" id="rate-current"></span></label>
+            <label class="rate-option"><input type="radio" name="rate-source" value="overall"><span class="rate-name" id="rate-overall-name">Since you started</span><span class="rate-value" id="rate-overall"></span></label>
+          </fieldset>
+          <div class="forecast-result">
+            <p class="forecast-lead" id="forecast-lead" aria-live="polite"></p>
+            <div class="table-wrap" id="forecast-table" hidden>
+              <table>
+                <thead><tr><th scope="col">Milestone</th><th scope="col" class="num">Weight</th><th scope="col" class="num">Expected</th></tr></thead>
+                <tbody id="forecast-rows"></tbody>
+              </table>
+            </div>
+            <p class="note">Forecasts assume your 10-day average keeps changing at the chosen rate.</p>
+          </div>
+        </div>
       </section>
     </div>
 
