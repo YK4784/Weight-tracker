@@ -3,9 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="color-scheme" content="light dark">
-  <meta name="theme-color" content="#fdfdf7" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#0d0e0b" media="(prefers-color-scheme: dark)">
+  <!-- The theme is light unless dark was chosen on this device with the button
+       at the top right, whatever the system's setting. theme.js sets both of
+       these to match the choice. -->
+  <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#fdfdf7">
   <meta name="description" content="Keep a daily weight log, follow your 10-day moving average, track progress toward a goal weight, review each month, and calculate your BMI and body fat with Baseline.">
   <title>Baseline</title>
   <link rel="icon" href="./mark.svg" type="image/svg+xml">
@@ -32,6 +34,9 @@
        along with the Content Security Policy in vercel.json. npm test checks
        that they match. -->
   <link rel="preconnect" href="https://enabling-duck-7464.clerk.accounts.dev" crossorigin>
+  <!-- Ahead of the stylesheet and not a module, so the theme is set before
+       anything is drawn and the page never shows in the other one first. -->
+  <script src="./theme.js"></script>
   <link rel="stylesheet" href="./styles.css">
   <!-- Every module app.mjs imports, so they load alongside it rather than after it. -->
   <link rel="modulepreload" href="./model.mjs">
@@ -55,6 +60,9 @@
         </nav>
         <div class="user-button" id="user-button"></div>
       </div>
+      <!-- Light or dark, kept on this device (see theme.js). It shows whether
+           or not anyone is signed in. -->
+      <button class="icon-button theme-toggle" type="button" id="theme-toggle" aria-label="Dark theme" aria-pressed="false"><svg class="icon theme-icon-moon" aria-hidden="true"><use href="./icons.svg#moon"/></svg><svg class="icon theme-icon-sun" aria-hidden="true"><use href="./icons.svg#sun"/></svg></button>
     </div>
   </header>
 

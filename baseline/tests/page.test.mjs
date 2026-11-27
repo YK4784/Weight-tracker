@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { frontendApiFor } from "../dist/account.mjs";
+import vm from "node:vm";
+import { clearLogCache, frontendApiFor } from "../dist/account.mjs";
 import { CLERK_PUBLISHABLE_KEY } from "../dist/config.mjs";
 
 const dist = new URL("../dist/", import.meta.url);
@@ -71,10 +72,11 @@ test("the consent step's box starts unticked, with the wording people agree to",
 });
 
 test("the pages run no outside code but Clerk's, and set no cookies", async () => {
-  // The app's one script is its own; the policy has none.
-  assert.deepEqual([...page.matchAll(/<script\b[^>]*>/g)].map(([tag]) => tag), ['<script type="module" src="./app.mjs">']);
-  assert.doesNotMatch(policy, /<script\b/);
-  const sources = Object.fromEntries(await Promise.all(["app.mjs", "model.mjs", "chart.mjs", "account.mjs", "export.mjs", "importers.mjs", "import-worker.mjs", "auth.mjs", "config.mjs", "sw.js"].map(async name => [name, await read(name)])));
+  // The app's two scripts are its own: the one that sets the theme, then the
+  // app. The policy has only the first.
+  assert.deepEqual([...page.matchAll(/<script\b[^>]*>/g)].map(([tag]) => tag), ['<script src="./theme.js">', '<script type="module" src="./app.mjs">']);
+  assert.deepEqual([...policy.matchAll(/<script\b[^>]*>/g)].map(([tag]) => tag), ['<script src="./theme.js">']);
+  const sources = Object.fromEntries(await Promise.all(["theme.js", "app.mjs", "model.mjs", "chart.mjs", "account.mjs", "export.mjs", "importers.mjs", "import-worker.mjs", "auth.mjs", "config.mjs", "sw.js"].map(async name => [name, await read(name)])));
   for (const [name, source] of Object.entries(sources)) {
     assert.doesNotMatch(source, /document\.cookie|sendBeacon|XMLHttpRequest|new WebSocket|new EventSource|geolocation/, name);
     // The app talks only to its own API, and the worker only fetches what the page asked for.
@@ -146,10 +148,10 @@ test("the charts leave vertical swipes to the page, and note marks and weekends 
   assert.match(page, /id="log-bar"/);
 });
 
-test("the trend line's thin parts are dashed and lighter, in both color schemes", async () => {
+test("the trend line's thin parts are dashed and lighter, in both themes", async () => {
   const css = await read("styles.css");
   const light = /^:root \{[^}]*\}/m.exec(css)[0];
-  const dark = /@media \(prefers-color-scheme: dark\) \{\s*:root \{[^}]*\}/.exec(css)[0];
+  const dark = /^:root\[data-theme="dark"\] \{[^}]*\}/m.exec(css)[0];
   for (const scheme of [light, dark]) assert.match(scheme, /--accent-thin: #[0-9a-f]{6};/);
   const thin = /^#trend-chart \.avg-thin \{[^}]*\}/m.exec(css)[0];
   assert.match(thin, /stroke: var\(--accent-thin\);/);
@@ -258,9 +260,9 @@ test("the manifest describes Baseline for an install dialog, with a screenshot f
   assert.equal(manifest.dir, "ltr");
   assert.deepEqual(manifest.categories, ["health", "fitness"]);
   assert.equal(manifest.display, "standalone");
-  // The launch screen's colour can't follow dark mode yet, so it stays the light theme's.
+  // The launch screen's colour can't follow the theme, so it stays the light one's.
   assert.equal(manifest.background_color, "#fdfdf7");
-  assert.equal(manifest.background_color, /<meta name="theme-color" content="([^"]+)" media="\(prefers-color-scheme: light\)">/.exec(page)[1]);
+  assert.equal(manifest.background_color, /<meta name="theme-color" content="([^"]+)">/.exec(page)[1]);
   assert.match(page, /stays the light paper in dark mode too/);
   assert.deepEqual(manifest.screenshots.map(shot => shot.form_factor), ["narrow", "wide"]);
   for (const shot of manifest.screenshots) {
@@ -296,4 +298,108 @@ test("the install hint is one quiet line above the account's, with Install and N
   assert.match(app, /addEventListener\("beforeinstallprompt", event => \{\n {2}event\.preventDefault\(\);\n {2}installPrompt = event;/);
   const css = await read("styles.css");
   assert.match(css, /^\.app-footer \{[^}]*color: var\(--ink-3\);/m);
+});
+
+// Runs theme.js as a page does, against a stand-in document. `stored` is what
+// the browser's storage holds for the theme, and `blocked` makes storage
+// throw, as in a private window that refuses it. The button appears once the
+// page has loaded, as it does after the <head>.
+async function runTheme({ stored = null, blocked = false } = {}) {
+  const store = new Map(stored === null ? [] : [["baseline.theme.v1", stored]]);
+  const localStorage = {
+    getItem(key) { if (blocked) throw new Error("blocked"); return store.has(key) ? store.get(key) : null; },
+    setItem(key, value) { if (blocked) throw new Error("blocked"); store.set(key, String(value)); }
+  };
+  const element = () => ({
+    attributes: new Map(), listeners: {},
+    setAttribute(name, value) { this.attributes.set(name, value); },
+    addEventListener(type, listener) { this.listeners[type] = listener; }
+  });
+  const metas = { "color-scheme": element(), "theme-color": element() };
+  const button = element();
+  const root = { dataset: {} };
+  const pageListeners = {};
+  const windowListeners = {};
+  const document = {
+    documentElement: root,
+    readyState: "loading",
+    querySelector: selector => metas[/^meta\[name="([^"]+)"\]$/.exec(selector)[1]],
+    getElementById: id => (id === "theme-toggle" && document.readyState !== "loading" ? button : null),
+    addEventListener(type, listener) { pageListeners[type] = listener; }
+  };
+  vm.runInNewContext(await read("theme.js"), { document, localStorage, addEventListener(type, listener) { windowListeners[type] = listener; } });
+  return {
+    root, metas, button, store,
+    load() { document.readyState = "interactive"; pageListeners.DOMContentLoaded(); },
+    storageEvent: event => windowListeners.storage(event)
+  };
+}
+
+test("the theme is light unless dark was chosen on this device, whatever the system's setting", async () => {
+  // Nothing in the pages, their styles or the script follows the system's colour scheme.
+  const css = await read("styles.css");
+  for (const name of ["styles.css", "index.html", "health-data-privacy.html", "theme.js", "app.mjs"]) {
+    assert.doesNotMatch(await read(name), /prefers-color-scheme/, name);
+  }
+  assert.match(css, /^:root\[data-theme="dark"\] \{\n {2}color-scheme: dark;/m);
+  // With nothing saved, or anything but "dark", the page is light.
+  for (const stored of [null, "light", "system", ""]) {
+    const { root, metas } = await runTheme({ stored });
+    assert.equal(root.dataset.theme, "light", String(stored));
+    assert.equal(metas["color-scheme"].attributes.get("content"), "light");
+    assert.equal(metas["theme-color"].attributes.get("content"), "#fdfdf7");
+  }
+  const dark = await runTheme({ stored: "dark" });
+  assert.equal(dark.root.dataset.theme, "dark");
+  assert.equal(dark.metas["color-scheme"].attributes.get("content"), "dark");
+  // The browser's toolbar takes each theme's paper.
+  assert.equal(/^:root \{[^}]*--paper: (#[0-9a-f]{6});/m.exec(css)[1], "#fdfdf7");
+  assert.equal(/^:root\[data-theme="dark"\] \{[^}]*--paper: (#[0-9a-f]{6});/m.exec(css)[1], dark.metas["theme-color"].attributes.get("content"));
+});
+
+test("the button at the top right switches the theme, remembers it, and says which is on", async () => {
+  // On both pages it's the last thing in the header, and the script that sets
+  // the theme comes before the stylesheet, so no page shows in the other theme first.
+  for (const name of ["index.html", "health-data-privacy.html"]) {
+    const source = await read(name);
+    const header = source.slice(source.indexOf('<header class="masthead">'), source.indexOf("</header>"));
+    assert.match(header, /<button class="icon-button theme-toggle" type="button" id="theme-toggle" aria-label="Dark theme" aria-pressed="false">.*<\/button>\s*<\/div>\s*$/, name);
+    const script = source.indexOf('<script src="./theme.js"></script>');
+    assert.ok(script > 0 && script < source.indexOf('<link rel="stylesheet" href="./styles.css">'), name);
+    assert.match(source, /<meta name="color-scheme" content="light">/, name);
+  }
+  const { root, button, store, load, storageEvent } = await runTheme();
+  load();
+  assert.equal(button.attributes.get("aria-pressed"), "false");
+  button.listeners.click();
+  assert.equal(root.dataset.theme, "dark");
+  assert.equal(button.attributes.get("aria-pressed"), "true");
+  assert.equal(store.get("baseline.theme.v1"), "dark");
+  button.listeners.click();
+  assert.equal(root.dataset.theme, "light");
+  assert.equal(button.attributes.get("aria-pressed"), "false");
+  assert.equal(store.get("baseline.theme.v1"), "light");
+  // A change made in another tab shows here too.
+  store.set("baseline.theme.v1", "dark");
+  storageEvent({ key: "baseline.theme.v1" });
+  assert.equal(root.dataset.theme, "dark");
+  // A choice made earlier shows on the button once the page has loaded.
+  const saved = await runTheme({ stored: "dark" });
+  saved.load();
+  assert.equal(saved.button.attributes.get("aria-pressed"), "true");
+  // Where storage is refused, the page is light and the button still works.
+  const blocked = await runTheme({ blocked: true });
+  blocked.load();
+  assert.equal(blocked.root.dataset.theme, "light");
+  blocked.button.listeners.click();
+  assert.equal(blocked.root.dataset.theme, "dark");
+  // Signing out, which clears the log from the device, leaves the theme.
+  const kept = new Map([["baseline.theme.v1", "dark"], ["baseline.last-user.v1", "user_1"], ["baseline.log-cache.v1:user_1", "{}"]]);
+  clearLogCache({
+    get length() { return kept.size; },
+    key: index => [...kept.keys()][index] ?? null,
+    getItem: key => kept.get(key) ?? null,
+    removeItem: key => { kept.delete(key); }
+  });
+  assert.deepEqual([...kept.keys()], ["baseline.theme.v1"]);
 });

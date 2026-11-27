@@ -15,7 +15,10 @@
 }
 
 /* Ivory paper, olive-black ink and one blue. Page and section headings are set
-   in a serif, everything else in a grotesque. Buttons and chips are pills. */
+   in a serif, everything else in a grotesque. Buttons and chips are pills.
+   The theme is light unless dark was chosen with the button at the top right:
+   theme.js sets data-theme on the root element, and the system's own setting
+   plays no part. */
 :root {
   color-scheme: light;
   --paper: #fdfdf7;
@@ -65,37 +68,35 @@
      and the safe area under it on phones without a home button. */
   --bar-height: calc(65px + env(safe-area-inset-bottom));
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    color-scheme: dark;
-    --paper: #0d0e0b;
-    --surface: #1b1b18;
-    --sunken: #272725;
-    --thumb: #454541;
-    --ink: #fdfdf7;
-    --ink-2: #bcbcb7;
-    --ink-3: #9d9d99;
-    --rule: #32322f;
-    --field-border: #72726c;
-    --button-border: #53544f;
-    --accent: #61a6fa;
-    --accent-strong: #91c3fd;
-    --accent-wash: #162136;
-    --accent-soft: #1e3b8a;
-    --band: rgb(97 166 250 / 17%);
-    --accent-thin: #3f699a;
-    --on-accent: #172554;
-    --solid: #fdfdf7;
-    --on-solid: #0b0b0a;
-    --dot: #7d7d77;
-    --weekend: rgb(253 253 247 / 3.5%);
-    --danger: #ed7383;
-    --on-danger: #20030a;
-    --caution-wash: #3c2d0b;
-    --shadow: 0 5px 32px rgb(0 0 0 / 50%);
-    --shadow-card: 0 1px 12px rgb(0 0 0 / 30%);
-    --glow: none;
-  }
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --paper: #0d0e0b;
+  --surface: #1b1b18;
+  --sunken: #272725;
+  --thumb: #454541;
+  --ink: #fdfdf7;
+  --ink-2: #bcbcb7;
+  --ink-3: #9d9d99;
+  --rule: #32322f;
+  --field-border: #72726c;
+  --button-border: #53544f;
+  --accent: #61a6fa;
+  --accent-strong: #91c3fd;
+  --accent-wash: #162136;
+  --accent-soft: #1e3b8a;
+  --band: rgb(97 166 250 / 17%);
+  --accent-thin: #3f699a;
+  --on-accent: #172554;
+  --solid: #fdfdf7;
+  --on-solid: #0b0b0a;
+  --dot: #7d7d77;
+  --weekend: rgb(253 253 247 / 3.5%);
+  --danger: #ed7383;
+  --on-danger: #20030a;
+  --caution-wash: #3c2d0b;
+  --shadow: 0 5px 32px rgb(0 0 0 / 50%);
+  --shadow-card: 0 1px 12px rgb(0 0 0 / 30%);
+  --glow: none;
 }
 /* The colors handed to Clerk (see auth.mjs). Clerk's components declare their own
    --accent, so passing var(--accent) would make theirs refer to itself. */
@@ -136,7 +137,13 @@ a { color: inherit; }
 /* Header */
 .masthead-inner { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 72px; }
 .wordmark { font-size: 1.375rem; font-weight: 600; letter-spacing: -.03em; text-decoration: underline 3px var(--accent); text-underline-offset: 6px; text-decoration-skip-ink: none; }
-.masthead-actions { display: flex; align-items: center; gap: 12px; }
+/* The links, the avatar and the theme button keep to the right together. */
+.masthead-actions { display: flex; align-items: center; gap: 12px; margin-left: auto; }
+/* Light or dark: a ring at the top right, showing the moon in the light theme
+   and the sun in the dark one. */
+.icon-button.theme-toggle { flex: none; border: 1px solid var(--button-border); color: var(--ink); }
+.theme-icon-sun, :root[data-theme="dark"] .theme-icon-moon { display: none; }
+:root[data-theme="dark"] .theme-icon-sun { display: inline-block; }
 .nav { display: flex; gap: 4px; }
 .nav a { padding: 8px 14px; border-radius: 999px; color: var(--ink-2); font-weight: 500; text-decoration: none; }
 @media (hover: hover) { .nav a:hover { color: var(--ink); } }
@@ -595,9 +602,7 @@ dialog { width: min(420px, calc(100% - 32px)); max-height: calc(100dvh - 32px); 
 /* The page behind a dialog blurs under a veil of its own paper. The colours are
    written out, since ::backdrop only lately inherits custom properties. */
 dialog::backdrop { background: rgb(253 253 247 / 60%); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
-@media (prefers-color-scheme: dark) {
-  dialog::backdrop { background: rgb(13 14 11 / 65%); }
-}
+:root[data-theme="dark"] dialog::backdrop { background: rgb(13 14 11 / 65%); }
 .dialog-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 dialog h2 { font-size: 1.25rem; font-weight: 600; letter-spacing: -.02em; }
 .dialog-heading .icon-button { margin-right: -8px; }
@@ -747,15 +752,17 @@ dialog.sheet[open] { display: flex; flex-direction: column; overflow: hidden; }
 @media (max-width: 440px) {
   .field-row { grid-template-columns: minmax(0, 1fr); }
 }
-/* The wordmark, three links and the avatar share one line down to 320px. */
-@media (max-width: 380px) {
-  .masthead-inner { gap: 8px; }
-  .masthead-actions { gap: 4px; }
-  .wordmark { font-size: 1.125rem; text-underline-offset: 5px; }
-  .nav a { padding-inline: 6px; font-size: .9375rem; }
-}
-@media (max-width: 340px) {
-  .nav a { padding-inline: 4px; }
+/* On a phone the header takes two lines, since one can't hold everything: the
+   wordmark with the avatar and the theme button, then the three links, each a
+   third of the width. */
+@media (max-width: 440px) {
+  .masthead-inner { flex-wrap: wrap; gap: 6px 8px; min-height: 0; padding-block: 10px 2px; }
+  /* The links and the avatar become the header's own items. Signed out, the
+     hidden attribute still hides them all. */
+  #account-bar { display: contents; }
+  .user-button { margin-left: auto; }
+  #main-nav { order: 1; flex: 1 0 100%; gap: 4px; }
+  #main-nav a { flex: 1 1 0; padding-inline: 4px; text-align: center; }
 }
 @media (max-width: 360px) {
   th, td { padding-inline: 4px; }
