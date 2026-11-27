@@ -260,7 +260,7 @@ The policy lets in Baseline's own files and Clerk, and nothing else, following [
 | `style-src` | `'self'`, `'unsafe-inline'` | Clerk's components add their styles as the page runs. |
 | `frame-src` | `https://challenges.cloudflare.com`, `https://*.protect.clerk.com` | The bot check's frame. |
 | `worker-src` | `'self'`, `blob:` | The service worker. |
-| `font-src` | `'self'` | Funnel Sans. |
+| `font-src` | `'self'` | Geist and Fraunces. |
 | `object-src`, `base-uri`, `frame-ancestors` | `'none'` | No plugins, no `<base>` tag, and no framing. |
 | `form-action` | `'self'` | Forms post only to Baseline. |
 | `report-uri` | `/api/csp-report` | Where browsers send reports. |

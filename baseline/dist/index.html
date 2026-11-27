@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="light dark">
-  <meta name="theme-color" content="#f6f5f1" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#121315" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#fdfdf7" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0d0e0b" media="(prefers-color-scheme: dark)">
   <meta name="description" content="Keep a daily weight log, follow your 10-day moving average, track progress toward a goal weight, review each month, and calculate your BMI and body fat with Baseline.">
   <title>Baseline</title>
   <link rel="icon" href="./mark.svg" type="image/svg+xml">
@@ -23,7 +23,9 @@
        proposed as user_preferences) is still only an origin trial, with no
        Android support (Chrome Platform Status, November 2026). -->
   <link rel="manifest" href="./manifest.webmanifest">
-  <link rel="preload" href="./fonts/funnel-sans-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <!-- Geist sets the text and Fraunces the headings. -->
+  <link rel="preload" href="./fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="./fonts/fraunces-latin.woff2" as="font" type="font/woff2" crossorigin>
   <!-- Clerk's Frontend API, where auth.mjs loads sign-in from. The host is
        decoded from CLERK_PUBLISHABLE_KEY in config.mjs (see frontendApiFor), so
        it must change whenever the key does, as with a production instance,

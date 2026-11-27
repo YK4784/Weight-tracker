@@ -18,7 +18,7 @@ const appearance = {
     colorRing: "var(--auth-accent)",
     colorModalBackdrop: "rgb(10 11 13 / 45%)",
     fontFamily: "var(--font)",
-    borderRadius: "0.5rem"
+    borderRadius: "0.75rem"
   }
 };
 

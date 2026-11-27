@@ -1,39 +1,66 @@
 @font-face {
-  font-family: "Funnel Sans";
-  src: url("./fonts/funnel-sans-latin.woff2") format("woff2");
-  font-weight: 300 800;
+  font-family: "Geist";
+  src: url("./fonts/geist-latin.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+/* With its optical-size axis, so headings get the display cut. */
+@font-face {
+  font-family: "Fraunces";
+  src: url("./fonts/fraunces-latin.woff2") format("woff2");
+  font-weight: 100 900;
   font-style: normal;
   font-display: swap;
 }
 
-/* One accent (a blue pen) on paper. Everything else is ink and hairlines. */
+/* Ivory paper, olive-black ink and one blue. Page and section headings are set
+   in a serif, everything else in a grotesque. Buttons and chips are pills. */
 :root {
   color-scheme: light;
-  --paper: #f6f5f1;
+  --paper: #fdfdf7;
   --surface: #ffffff;
-  --ink: #17181b;
-  /* The secondary inks are warm greys, like the paper and the hairlines. Each
-     keeps the contrast of the blue-greys they replaced: 7.5:1 and 4.9:1 on the paper. */
-  --ink-2: #544e49;
-  --ink-3: #706a65;
-  --rule: #e2e0d9;
-  --field-border: #96938b;
-  --accent: #2443d9;
-  --accent-strong: #1a34b5;
-  --accent-wash: #e7ebfc;
+  /* A step under the paper: chips, the unit switches' tracks and quiet notes. */
+  --sunken: #f5f5f0;
+  /* The chosen unit in a unit switch, raised from its track. */
+  --thumb: #ffffff;
+  --ink: #1b1b18;
+  /* The secondary inks are the ink thinned onto the paper, so they share its
+     warmth: 7:1 and 4.9:1 on the paper. */
+  --ink-2: #585854;
+  --ink-3: #6f6f69;
+  --rule: #e4e4dc;
+  /* Fields keep an edge at 3:1 against the paper. Buttons, which their words
+     name, get a lighter one. */
+  --field-border: #90908a;
+  --button-border: #cecec5;
+  --accent: #2463eb;
+  --accent-strong: #1d4fd7;
+  --accent-wash: #f0f6ff;
+  /* The halo around a field that has focus. */
+  --accent-soft: #dcebfe;
   /* The trend forecast's likely range: the accent, thin enough for grid lines to show through. */
-  --band: rgb(36 67 217 / 12%);
-  /* The trend line where it says less (see lineParts in chart.mjs): the accent at 65%
+  --band: rgb(36 99 235 / 12%);
+  /* The trend line where it says less (see lineParts in chart.mjs): the accent at 74%
      on paper, which still keeps 3:1 against it. */
-  --accent-thin: #6e81e1;
+  --accent-thin: #5c8bee;
   --on-accent: #ffffff;
-  --dot: #8a867d;
+  /* The chosen chip and the toast: near-black, with the paper's ivory on it. */
+  --solid: #0b0b0a;
+  --on-solid: #fdfdf7;
+  --dot: #8a8a83;
   /* Weekends on the chart: ink at 3.5%, just darker than the paper. */
-  --weekend: rgb(23 24 27 / 3.5%);
-  --danger: #b3261e;
+  --weekend: rgb(27 27 24 / 3.5%);
+  --danger: #c52640;
   --on-danger: #ffffff;
-  --shadow: 0 1px 2px rgb(23 24 27 / 6%), 0 10px 30px rgb(23 24 27 / 8%);
-  --font: "Funnel Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* Behind a question or a caution inside a form. */
+  --caution-wash: #fef9e7;
+  --shadow: 0 5px 32px rgb(0 0 0 / 10%);
+  --shadow-card: 0 1px 12px rgb(0 0 0 / 5%);
+  /* Under the main button: its own blue, spread wide. */
+  --glow: 0 4px 14px rgb(9 97 228 / 39%);
+  --font: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: "Fraunces", Georgia, "Times New Roman", serif;
   /* The log bar on phones: its 48px button, 8px above and below, a hairline,
      and the safe area under it on phones without a home button. */
   --bar-height: calc(65px + env(safe-area-inset-bottom));
@@ -41,24 +68,33 @@
 @media (prefers-color-scheme: dark) {
   :root {
     color-scheme: dark;
-    --paper: #121315;
-    --surface: #1b1c1f;
-    --ink: #eeede8;
-    --ink-2: #c0bfb8;
-    --ink-3: #96958f;
-    --rule: #2c2d31;
-    --field-border: #6c6d73;
-    --accent: #7088f5;
-    --accent-strong: #8b9ff8;
-    --accent-wash: #1f2647;
-    --band: rgb(112 136 245 / 17%);
-    --accent-thin: #4f5fa7;
-    --on-accent: #0b0e26;
-    --dot: #7d7a73;
-    --weekend: rgb(238 237 232 / 3.5%);
-    --danger: #f2877e;
-    --on-danger: #2a0a07;
-    --shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 10px 30px rgb(0 0 0 / 35%);
+    --paper: #0d0e0b;
+    --surface: #1b1b18;
+    --sunken: #272725;
+    --thumb: #454541;
+    --ink: #fdfdf7;
+    --ink-2: #bcbcb7;
+    --ink-3: #9d9d99;
+    --rule: #32322f;
+    --field-border: #72726c;
+    --button-border: #53544f;
+    --accent: #61a6fa;
+    --accent-strong: #91c3fd;
+    --accent-wash: #162136;
+    --accent-soft: #1e3b8a;
+    --band: rgb(97 166 250 / 17%);
+    --accent-thin: #3f699a;
+    --on-accent: #172554;
+    --solid: #fdfdf7;
+    --on-solid: #0b0b0a;
+    --dot: #7d7d77;
+    --weekend: rgb(253 253 247 / 3.5%);
+    --danger: #ed7383;
+    --on-danger: #20030a;
+    --caution-wash: #3c2d0b;
+    --shadow: 0 5px 32px rgb(0 0 0 / 50%);
+    --shadow-card: 0 1px 12px rgb(0 0 0 / 30%);
+    --glow: none;
   }
 }
 /* The colors handed to Clerk (see auth.mjs). Clerk's components declare their own
@@ -76,8 +112,12 @@
 html { background: var(--paper); }
 /* The viewport covers the whole screen (viewport-fit=cover in index.html), so
    the page keeps itself clear of a landscape iPhone's notch. */
-body { margin: 0; min-width: 300px; padding-inline: env(safe-area-inset-left) env(safe-area-inset-right); background: var(--paper); color: var(--ink); font: 400 1rem/1.5 var(--font); -webkit-font-smoothing: antialiased; }
+body { margin: 0; min-width: 300px; padding-inline: env(safe-area-inset-left) env(safe-area-inset-right); background: var(--paper); color: var(--ink); font: 400 1rem/1.5 var(--font); font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased; }
+/* Figures are tabular everywhere: Geist's proportional 1 sits so close to a
+   decimal point that "27.1" reads as "271". */
 h1, h2, p, dl, dd { margin: 0; }
+/* Semibold is the heaviest weight on the page. */
+strong, b { font-weight: 600; }
 button, input { font: inherit; color: inherit; }
 button { background: none; border: 0; padding: 0; cursor: pointer; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 button:disabled { cursor: default; opacity: .4; }
@@ -85,7 +125,7 @@ a { color: inherit; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 [hidden] { display: none !important; }
 .sr-only, .skip-link:not(:focus), body[data-view="log"] #entries-title { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
-.skip-link:focus { position: fixed; z-index: 9; top: calc(8px + env(safe-area-inset-top)); left: max(12px, env(safe-area-inset-left)); padding: 8px 14px; background: var(--surface); }
+.skip-link:focus { position: fixed; z-index: 9; top: calc(8px + env(safe-area-inset-top)); left: max(12px, env(safe-area-inset-left)); padding: 8px 16px; border-radius: 999px; background: var(--surface); box-shadow: var(--shadow); }
 .icon { display: inline-block; flex: none; width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; vertical-align: middle; }
 .wrap { width: min(100% - 48px, 1040px); margin-inline: auto; }
 
@@ -94,14 +134,14 @@ a { color: inherit; }
    :hover rule sits in @media (hover: hover). */
 
 /* Header */
-.masthead { border-bottom: 1px solid var(--rule); }
-.masthead-inner { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 64px; }
-.wordmark { font-size: 1.375rem; font-weight: 760; letter-spacing: -.02em; text-decoration: underline 3px var(--accent); text-underline-offset: 6px; text-decoration-skip-ink: none; }
+.masthead-inner { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 72px; }
+.wordmark { font-size: 1.375rem; font-weight: 600; letter-spacing: -.03em; text-decoration: underline 3px var(--accent); text-underline-offset: 6px; text-decoration-skip-ink: none; }
 .masthead-actions { display: flex; align-items: center; gap: 12px; }
 .nav { display: flex; gap: 4px; }
-.nav a { padding: 8px 12px; border-radius: 8px; color: var(--ink-2); font-weight: 600; text-decoration: none; }
+.nav a { padding: 8px 14px; border-radius: 999px; color: var(--ink-2); font-weight: 500; text-decoration: none; }
 @media (hover: hover) { .nav a:hover { color: var(--ink); } }
-.nav a[aria-current="page"] { color: var(--ink); text-decoration: underline 2px var(--accent); text-underline-offset: 8px; }
+/* The page you're on sits in a pill. */
+.nav a[aria-current="page"] { background: var(--sunken); color: var(--ink); }
 /* Holds the avatar's space before Clerk mounts it. */
 .user-button { display: flex; flex: none; align-items: center; justify-content: center; min-width: 32px; min-height: 32px; }
 
@@ -109,18 +149,18 @@ a { color: inherit; }
 .auth { padding-block: 48px 64px; }
 .auth:focus { outline: none; }
 .auth-message { max-width: 34rem; margin-inline: auto; text-align: center; }
-.auth-message h1 { font-size: 1.5rem; font-weight: 700; letter-spacing: -.015em; color: var(--ink); }
-.auth-message p { margin-top: 8px; color: var(--ink-2); text-wrap: pretty; }
+.auth-message h1 { font-size: 2rem; }
+.auth-message p { margin-top: 10px; color: var(--ink-2); text-wrap: pretty; }
 .auth-message .button { margin-top: 20px; }
-.auth-message code { padding: 1px 5px; border-radius: 4px; background: var(--accent-wash); color: var(--ink); font: .9375em ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: nowrap; }
+.auth-message code { padding: 1px 6px; border-radius: 6px; background: var(--accent-wash); color: var(--ink); font: .9375em ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: nowrap; }
 /* Only shows when loading takes long enough to notice. */
 #auth-loading p { color: var(--ink-3); animation: fade-in .2s .5s both; }
 @keyframes fade-in { from { opacity: 0; } }
 /* While a log loads, the overview's layout stands in for it in hairline
    blocks: the heading, the average, the facts and the form. */
 .auth[data-view="log-loading"] { padding-block: 32px 48px; }
-.bone { display: block; border-radius: 4px; background: var(--rule); }
-.bone-title { width: 12rem; height: 14px; margin: 6px 0 31px; }
+.bone { display: block; border-radius: 6px; background: var(--rule); }
+.bone-title { width: 14rem; height: 20px; margin: 6px 0 31px; }
 .bone-eyebrow { width: 8rem; height: 12px; margin-top: 6px; }
 .bone-hero { width: min(100%, 21rem); height: clamp(4.25rem, 10.5vw + .75rem, 6.75rem); margin-top: 16px; }
 .bone-line { width: min(100%, 17rem); height: 12px; margin-top: 22px; }
@@ -128,27 +168,27 @@ a { color: inherit; }
 .bone-value { width: 4rem; height: 16px; margin-top: 10px; }
 .skeleton .entry-panel .bone-label { margin-top: 22px; }
 .bone-heading { width: 9rem; height: 16px; margin-bottom: 4px; }
-.bone-field { display: block; height: 48px; border: 1px solid var(--rule); border-radius: 8px; }
-.bone-button { height: 44px; margin-top: 22px; border-radius: 8px; }
+.bone-field { display: block; height: 52px; border: 1px solid var(--rule); border-radius: 12px; }
+.bone-button { height: 48px; margin-top: 22px; border-radius: 999px; }
 .sign-in { display: flex; justify-content: center; }
 /* A one-off message over the sign-in form, such as after deleting an account. */
-.auth-notice { max-width: 25rem; margin: 0 auto 24px; color: var(--ink); font-weight: 600; text-align: center; text-wrap: pretty; }
+.auth-notice { max-width: 25rem; margin: 0 auto 24px; color: var(--ink); font-weight: 500; text-align: center; text-wrap: pretty; }
 .auth-note { max-width: 25rem; margin: 20px auto 0; color: var(--ink-3); font-size: .875rem; text-align: center; text-wrap: pretty; }
 .auth-note p + p { margin-top: 8px; }
 .auth-note a { color: var(--ink-2); text-underline-offset: 3px; }
 /* The consent step: what Baseline stores, the box to tick and Continue, then
    the ways out for someone who doesn't agree, under a hairline. */
 .consent { max-width: 34rem; margin-inline: auto; }
-.consent h1 { font-size: 1.5rem; font-weight: 700; letter-spacing: -.015em; color: var(--ink); }
+.consent h1 { font-size: 2rem; }
 .consent-change { margin-top: 8px; color: var(--ink-2); text-wrap: pretty; }
 .consent-text { margin-top: 12px; font-size: 1.125rem; text-wrap: pretty; }
 .consent-policy { margin-top: 10px; }
-#consent-form { margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--ink); }
-.consent-check { display: flex; align-items: flex-start; gap: 12px; font-weight: 600; cursor: pointer; }
+#consent-form { margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--rule); }
+.consent-check { display: flex; align-items: flex-start; gap: 12px; font-weight: 500; cursor: pointer; }
 .consent-check input { flex: none; width: 20px; height: 20px; margin: 2px 0 0; accent-color: var(--accent); cursor: pointer; }
 .consent-continue { width: 100%; margin-top: 20px; }
 .consent-other { margin-top: 40px; padding-top: 16px; border-top: 1px solid var(--rule); }
-.consent-other h2 { font-size: 1rem; font-weight: 700; }
+.consent-other h2 { font-size: 1rem; font-weight: 600; }
 .consent-other p { margin-top: 4px; color: var(--ink-2); text-wrap: pretty; }
 .consent-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 /* The first-run screen: one sentence, then a large switch for the unit, the
@@ -162,7 +202,7 @@ a { color: inherit; }
 /* The radio stays for the keyboard and screen readers; the frame shows the choice. */
 .unit-choice .choice input { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .unit-choice .choice:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
-.choice-unit { font-size: 1.375rem; font-weight: 700; line-height: 1.2; }
+.choice-unit { font-size: 1.375rem; font-weight: 600; line-height: 1.2; }
 .choice-name { color: var(--ink-3); font-size: .8125rem; }
 .unit-choice + .field-label { margin-top: 20px; }
 .first-run-skip { margin-top: 16px; text-align: center; }
@@ -172,8 +212,10 @@ a { color: inherit; }
 .page { padding-block: 32px 48px; }
 .page:focus { outline: none; }
 .page-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
-h1 { font-size: 1.125rem; font-weight: 600; color: var(--ink-2); }
-body:is([data-view="log"], [data-view="settings"], [data-view="data"], [data-view="first-run"]) h1 { font-size: 2.25rem; font-weight: 700; line-height: 1.1; letter-spacing: -.025em; color: var(--ink); }
+/* Page headings are the serif. The overview's, which is the date, is smaller,
+   so the average under it stays the largest thing on the page. */
+h1 { font-family: var(--font-display); font-size: 1.75rem; font-weight: 400; line-height: 1.17; letter-spacing: -.01em; color: var(--ink); }
+body:is([data-view="log"], [data-view="settings"], [data-view="data"], [data-view="first-run"]) h1 { font-size: 2.5rem; }
 .page-detail { margin-top: 8px; color: var(--ink-3); }
 .page-detail:empty { display: none; }
 /* Says the log on screen is the copy kept on this device, and that changes are
@@ -187,20 +229,22 @@ body[data-view="log"] .button.quick-log { display: inline-flex; }
 .log-bar { display: none; position: fixed; z-index: 4; inset: auto 0 0; padding: 8px max(16px, env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); border-top: 1px solid var(--rule); background: var(--paper); }
 .log-bar .button { width: 100%; min-height: 48px; }
 /* The log's views, under its heading. */
-.log-tabs { margin: -4px 0 18px -12px; }
-.nav.log-tabs a { padding-inline: 12px; }
+/* Chips: the view on screen is the solid one. */
+.log-tabs { gap: 8px; margin: -4px 0 20px; }
+.nav.log-tabs a { padding: 6px 14px; background: var(--sunken); }
+.nav.log-tabs a[aria-current="page"] { background: var(--solid); color: var(--on-solid); }
 
 /* Summary + entry */
 .top { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 360px); align-items: start; gap: 40px 64px; padding-bottom: 40px; border-bottom: 1px solid var(--rule); }
-.eyebrow { font-size: 1rem; font-weight: 600; color: var(--ink-2); }
+.eyebrow { font-size: 1rem; font-weight: 500; color: var(--ink-2); }
 .hero { display: flex; align-items: baseline; gap: 12px; margin-top: 2px; font-size: clamp(5.5rem, 14vw + 1rem, 9rem); font-weight: 500; line-height: 1; letter-spacing: -.045em; }
-.hero-unit { font-size: clamp(1.5rem, 1.8vw + 1rem, 2rem); font-weight: 600; letter-spacing: 0; color: var(--ink-2); }
+.hero-unit { font-size: clamp(1.5rem, 1.8vw + 1rem, 2rem); font-weight: 500; letter-spacing: 0; color: var(--ink-2); }
 /* Stones and pounds are two numbers, so they get a smaller size to fit a phone. */
 body[data-weight-unit="st"] .hero:not(.is-empty) { font-size: clamp(3.5rem, 9vw + 1rem, 7rem); }
-.hero.is-empty { font-size: 3.5rem; font-weight: 500; color: var(--ink-3); }
+.hero.is-empty { font-size: 3.5rem; font-weight: 400; color: var(--ink-3); }
 .hero-note { margin-top: 10px; color: var(--ink-2); }
 .hero-rate { margin-top: 4px; color: var(--ink-2); }
-.hero-rate strong { font-weight: 700; color: var(--ink); }
+.hero-rate strong { font-weight: 600; color: var(--ink); }
 .hero-rate.is-pending { color: var(--ink-3); }
 /* "Set a goal when you're ready": a quiet line for the first two weeks, with
    a 44px hit area that takes no room. */
@@ -209,18 +253,18 @@ body[data-weight-unit="st"] .hero:not(.is-empty) { font-size: clamp(3.5rem, 9vw 
 @media (hover: hover) { .quiet-button:hover { color: var(--ink); text-decoration-color: currentColor; } }
 /* Progress toward the goal: a rule split at each milestone. */
 .goal-progress { max-width: 34rem; margin-top: 22px; }
-.progress-track { position: relative; height: 6px; margin-bottom: 10px; border-radius: 3px; background: var(--rule); overflow: hidden; }
+.progress-track { position: relative; height: 8px; margin-bottom: 10px; border-radius: 999px; background: var(--rule); overflow: hidden; }
 .progress-fill { position: absolute; inset: 0 auto 0 0; background: var(--accent); }
 .progress-tick { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--paper); }
 .progress-note { color: var(--ink-2); text-wrap: pretty; }
-.progress-note strong { font-weight: 700; color: var(--ink); }
+.progress-note strong { font-weight: 600; color: var(--ink); }
 .progress-note.is-pending { color: var(--ink-3); }
 /* After a break the bar stays at the last average, in grey (see showProgress). */
 .goal-progress.is-stale .progress-fill { background: var(--ink-3); }
 /* An empty log: "Log your first weigh-in" as a page heading in the hero's
    place, over one line on the average. The rest of the overview waits for a
    weigh-in, so the line under the top is the only rule above Body fat. */
-#main[data-status="empty"] #avg-title { font-size: 2.25rem; font-weight: 700; line-height: 1.1; letter-spacing: -.025em; color: var(--ink); text-wrap: balance; }
+#main[data-status="empty"] #avg-title { font-family: var(--font-display); font-size: 2.5rem; font-weight: 400; line-height: 1.17; letter-spacing: -.01em; color: var(--ink); text-wrap: balance; }
 #main[data-status="empty"] .hero-note { max-width: 34rem; margin-top: 12px; font-size: 1.125rem; text-wrap: pretty; }
 #main[data-status="empty"] .body-fat { margin-top: 0; border-top: 0; }
 /* After a break: the last average, in grey, and when it was. */
@@ -231,65 +275,68 @@ body[data-weight-unit="st"] .hero:not(.is-empty) { font-size: clamp(3.5rem, 9vw 
 .facts { display: flex; flex-wrap: wrap; gap: 16px 48px; margin-top: 32px; padding-top: 20px; border-top: 1px solid var(--rule); }
 .fact dt { font-size: .875rem; color: var(--ink-3); }
 .fact dd { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-top: 2px; }
-.fact-value { font-size: 1.375rem; font-weight: 700; letter-spacing: -.01em; }
-.fact-value.is-empty { font-weight: 500; color: var(--ink-3); }
+.fact-value { font-size: 1.375rem; font-weight: 600; letter-spacing: -.02em; }
+.fact-value.is-empty { font-weight: 400; color: var(--ink-3); }
 .fact-note { color: var(--ink-3); }
 
-.entry-panel { padding: 24px; border: 1px solid var(--rule); border-radius: 14px; background: var(--surface); }
-.entry-panel h2 { margin-bottom: 18px; font-size: 1.25rem; font-weight: 700; letter-spacing: -.01em; }
-.field-label { display: block; margin-bottom: 6px; font-weight: 600; }
+.entry-panel { padding: 28px; border: 1px solid var(--rule); border-radius: 24px; background: var(--surface); box-shadow: var(--shadow-card); }
+.entry-panel h2 { margin-bottom: 18px; font-size: 1.25rem; font-weight: 600; letter-spacing: -.02em; }
+.field-label { display: block; margin-bottom: 6px; font-weight: 500; }
 :is(.input-frame, .split-field) + :is(.field-label, .field-head) { margin-top: 16px; }
-.field-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 6px; }
+.field-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 6px; }
 .field-head .field-label { margin-bottom: 0; }
-/* Units, chosen like the chart's ranges. */
-.unit-switch { display: flex; gap: 2px; margin-right: -8px; }
-.unit-switch button { padding: 2px 8px; border-radius: 6px; color: var(--ink-3); font-weight: 700; }
+/* Units: a track with the chosen one raised from it. */
+.unit-switch { display: flex; gap: 2px; padding: 3px; border-radius: 10px; background: var(--sunken); }
+.unit-switch button { padding: 3px 10px; border-radius: 7px; color: var(--ink-2); font-weight: 500; }
 @media (hover: hover) { .unit-switch button:hover { color: var(--ink); } }
-.unit-switch button[aria-pressed="true"] { color: var(--ink); text-decoration: underline 2px var(--accent); text-underline-offset: 6px; }
+.unit-switch button[aria-pressed="true"] { background: var(--thumb); color: var(--ink); box-shadow: 0 1px 2px rgb(0 0 0 / 10%); }
 /* 44px tall, and as wide as each unit, meeting its neighbours in the gap.
-   Over a field, it stops at the field's top edge, 6px below. */
+   Over a field, it stops short of the field's top edge, 9px below. */
 .unit-switch button::before { inset: min(0px, calc((100% - 44px) / 2)) -1px; }
 .field-head .unit-switch button::before { top: min(0px, calc(100% - 38px)); bottom: -6px; }
 /* A weight in stones and pounds, or a height in feet and inches, takes two inputs. */
 .split-field { display: flex; gap: 8px; }
 .split-field > .input-frame { flex: 1 1 0; }
-.input-frame { position: relative; display: flex; align-items: center; min-width: 0; border: 1px solid var(--field-border); border-radius: 8px; background: var(--surface); }
-.input-frame:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-wash); }
-.input-frame input { width: 100%; min-width: 0; min-height: 46px; margin: 0; padding: 10px 12px; border: 0; outline: none; background: transparent; font-size: 1.0625rem; font-variant-numeric: tabular-nums; }
+.input-frame { position: relative; display: flex; align-items: center; min-width: 0; border: 1px solid var(--field-border); border-radius: 12px; background: var(--surface); }
+.input-frame:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.input-frame input { width: 100%; min-width: 0; min-height: 50px; margin: 0; padding: 12px 14px; border: 0; outline: none; background: transparent; font-size: 1.0625rem; font-variant-numeric: tabular-nums; }
 .input-frame input::placeholder { color: var(--ink-3); opacity: 1; }
 .input-frame input[type="number"] { appearance: textfield; -moz-appearance: textfield; }
 .input-frame input[type="number"]::-webkit-inner-spin-button, .input-frame input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
-.input-unit { padding-right: 14px; color: var(--ink-3); }
+.input-unit { padding-right: 16px; color: var(--ink-3); }
 .date-field { position: relative; display: flex; flex: 1; align-items: center; min-width: 0; }
 .date-frame input { padding-right: 36px; }
 .date-frame input::-webkit-calendar-picker-indicator { position: absolute; right: 6px; width: 28px; height: 28px; opacity: 0; cursor: pointer; }
 .date-frame input::-webkit-date-and-time-value { text-align: left; }
 .input-icon { position: absolute; right: 12px; width: 17px; height: 17px; color: var(--ink-3); pointer-events: none; }
 .date-step { display: grid; flex: 0 0 40px; align-self: stretch; place-items: center; color: var(--ink-2); }
-.date-step:first-child { border-right: 1px solid var(--rule); border-radius: 7px 0 0 7px; }
-.date-step:last-child { border-left: 1px solid var(--rule); border-radius: 0 7px 7px 0; }
-@media (hover: hover) { .date-step:not([aria-disabled="true"]):hover { background: var(--accent-wash); color: var(--accent); } }
+.date-step:first-child { border-right: 1px solid var(--rule); border-radius: 11px 0 0 11px; }
+.date-step:last-child { border-left: 1px solid var(--rule); border-radius: 0 11px 11px 0; }
+@media (hover: hover) { .date-step:not([aria-disabled="true"]):hover { background: var(--sunken); color: var(--ink); } }
 .date-step[aria-disabled="true"] { cursor: default; }
 .date-step[aria-disabled="true"] .icon { opacity: .3; }
 .date-step:focus-visible { outline-offset: -2px; }
 
-.button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 10px 18px; border-radius: 8px; font-weight: 700; line-height: 1.2; white-space: nowrap; }
-.button.primary { background: var(--accent); color: var(--on-accent); }
-@media (hover: hover) { .button.primary:hover { background: var(--accent-strong); } }
-.button.secondary { border: 1px solid var(--field-border); }
-@media (hover: hover) { .button.secondary:hover { background: var(--surface); } }
-.button.danger { background: var(--danger); color: var(--on-danger); }
+/* Buttons are pills. The main one is the accent, with its own blue spread under it. */
+.button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 48px; padding: 12px 22px; border-radius: 999px; font-weight: 500; line-height: 1.2; white-space: nowrap; }
+.button.primary { background: var(--accent); color: var(--on-accent); box-shadow: var(--glow); font-weight: 600; }
+/* Until it can be pressed, it's flat and grey. */
+.button.primary:disabled { background: var(--rule); color: var(--ink-3); box-shadow: none; opacity: 1; }
+@media (hover: hover) { .button.primary:not(:disabled):hover { background: var(--accent-strong); } }
+.button.secondary { border: 1px solid var(--button-border); }
+@media (hover: hover) { .button.secondary:hover { background: var(--sunken); } }
+.button.danger { background: var(--danger); color: var(--on-danger); font-weight: 600; }
 .save-button { width: 100%; margin-top: 22px; }
 /* The question under a weight field before saving a weigh-in that looks
    mistyped (see checkWeighIn in model.mjs). Closed, it takes no room but its
    live region stays on the page, so screen readers hear it open. */
-.weigh-in-check.is-open { margin-top: 12px; padding: 12px 14px; border-radius: 8px; background: var(--paper); }
+.weigh-in-check.is-open { margin-top: 12px; padding: 12px 14px; border-radius: 12px; background: var(--caution-wash); }
 .check-text { color: var(--ink); text-wrap: pretty; }
 .check-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .weigh-in-check + :is(.field-label, .field-head) { margin-top: 16px; }
 .form-hint { margin-top: 10px; font-size: .875rem; color: var(--ink-3); text-align: center; text-wrap: pretty; }
 .form-hint:empty { display: none; }
-.text-button, .text-link { color: var(--accent); font-weight: 700; text-decoration: underline 1px transparent; text-underline-offset: 3px; }
+.text-button, .text-link { color: var(--accent); font-weight: 500; text-decoration: underline 1px transparent; text-underline-offset: 3px; }
 /* Small controls get a hit area of at least 44 × 44px that takes no room and
    changes nothing in the look: a transparent box over the control, centred on
    it and reaching as far past its edges as it needs to. Controls that sit side
@@ -309,26 +356,25 @@ body[data-weight-unit="st"] .hero:not(.is-empty) { font-size: clamp(3.5rem, 9vw 
 .rate-option:last-child { border-bottom: 1px solid var(--rule); }
 .rate-option input { flex: none; width: 18px; height: 18px; margin: 0; accent-color: var(--accent); cursor: pointer; }
 .rate-name { flex: 1; color: var(--ink-2); }
-.rate-option:has(input:checked) .rate-name { color: var(--ink); font-weight: 600; }
-.rate-value { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.rate-value.is-empty { font-weight: 500; color: var(--ink-3); }
+.rate-option:has(input:checked) .rate-name { color: var(--ink); font-weight: 500; }
+.rate-value { font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rate-value.is-empty { font-weight: 400; color: var(--ink-3); }
 .forecast-lead { max-width: 60ch; color: var(--ink-2); text-wrap: pretty; }
-.forecast-lead strong { font-weight: 700; color: var(--ink); }
+.forecast-lead strong { font-weight: 600; color: var(--ink); }
 .forecast-result .table-wrap { margin-top: 14px; }
 .forecast-result td { height: 46px; }
 
 /* Trend */
 .trend { padding-block: 36px; border-bottom: 1px solid var(--rule); }
 .section-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 24px; }
-.section-head h2 { font-size: 1.375rem; font-weight: 700; letter-spacing: -.015em; }
-.ranges { display: flex; gap: 2px; margin-right: -10px; }
-.ranges button { padding: 6px 10px; border-radius: 6px; color: var(--ink-3); font-weight: 700; font-variant-numeric: tabular-nums; }
-@media (hover: hover) { .ranges button:hover { color: var(--ink); } }
-.ranges button[aria-pressed="true"] { color: var(--ink); text-decoration: underline 2px var(--accent); text-underline-offset: 7px; }
-/* 44px tall, meeting the next range in the gap. "All", the narrowest, is last,
-   so it reaches 44px wide to its right, where nothing else is. */
-.ranges button::before { inset: min(0px, calc((100% - 44px) / 2)) -1px; }
-.ranges button:last-child::before { right: min(-1px, calc(100% - 43px)); }
+.section-head h2 { font-family: var(--font-display); font-size: 1.5rem; font-weight: 400; line-height: 1.17; letter-spacing: -.01em; }
+/* Chips: the range on the chart is the solid one. */
+.ranges { display: flex; gap: 6px; }
+.ranges button { padding: 6px 12px; border-radius: 999px; background: var(--sunken); color: var(--ink-2); font-weight: 500; font-variant-numeric: tabular-nums; }
+@media (hover: hover) { .ranges button:not([aria-pressed="true"]):hover { color: var(--ink); } }
+.ranges button[aria-pressed="true"] { background: var(--solid); color: var(--on-solid); }
+/* 44px tall, meeting the next range in the gap. Each chip is at least 44px wide. */
+.ranges button::before { inset: min(0px, calc((100% - 44px) / 2)) -3px; }
 /* Changes in the average, then the recent high and low: figures like the facts. */
 .trend-figures { display: flex; flex-wrap: wrap; gap: 16px 64px; margin-top: 14px; padding-bottom: 24px; border-bottom: 1px solid var(--rule); }
 .figures { display: flex; flex-wrap: wrap; gap: 16px 40px; }
@@ -367,22 +413,22 @@ body[data-weight-unit="st"] .hero:not(.is-empty) { font-size: clamp(3.5rem, 9vw 
 #trend-chart .stem { stroke: var(--dot); stroke-width: 1.5; }
 #trend-chart .end-dot, #trend-chart .cursor-avg { fill: var(--accent); stroke: var(--paper); stroke-width: 4; paint-order: stroke; }
 #trend-chart .cursor-dot { fill: var(--ink-2); stroke: var(--paper); stroke-width: 4; paint-order: stroke; }
-:is(#trend-chart, #fat-chart) .end-label { fill: var(--ink); font-size: 14px; font-weight: 700; }
+:is(#trend-chart, #fat-chart) .end-label { fill: var(--ink); font-size: 14px; font-weight: 600; }
 #trend-chart .goal { stroke: var(--ink-2); stroke-width: 1; stroke-dasharray: 4 3; }
-#trend-chart .goal-label { fill: var(--ink-2); font-weight: 600; }
+#trend-chart .goal-label { fill: var(--ink-2); font-weight: 500; }
 :is(#trend-chart, #fat-chart) .crosshair { stroke: var(--ink-3); stroke-width: 1; }
 #trend-chart .note-mark { stroke: var(--ink-3); stroke-width: 2; }
 /* The forecast is dotted and its end dot open, since it hasn't happened. */
 #trend-chart .band { fill: var(--band); }
 #trend-chart .forecast { fill: none; stroke: var(--accent); stroke-width: 2.25; stroke-linecap: round; stroke-dasharray: 0 5; }
 #trend-chart :is(.forecast-dot, .cursor-forecast) { fill: var(--paper); stroke: var(--accent); stroke-width: 2; }
-#trend-chart .forecast-label { fill: var(--accent); font-size: 14px; font-weight: 700; }
+#trend-chart .forecast-label { fill: var(--accent); font-size: 14px; font-weight: 600; }
 #trend-chart .today-line { stroke: var(--field-border); stroke-width: 1; stroke-dasharray: 2 3; }
-#trend-chart .forecast-title { fill: var(--ink-2); font-weight: 600; }
-.chart-tooltip { position: absolute; z-index: 2; width: max-content; max-width: 100%; padding: 10px 12px; border: 1px solid var(--rule); border-radius: 10px; background: var(--surface); box-shadow: var(--shadow); font-size: .875rem; pointer-events: none; }
-.chart-tooltip strong { display: block; margin-bottom: 4px; font-weight: 700; }
+#trend-chart .forecast-title { fill: var(--ink-2); font-weight: 500; }
+.chart-tooltip { position: absolute; z-index: 2; width: max-content; max-width: 100%; padding: 12px 14px; border: 1px solid var(--rule); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow); font-size: .875rem; pointer-events: none; }
+.chart-tooltip strong { display: block; margin-bottom: 4px; font-weight: 600; }
 .tip-row { display: flex; align-items: center; gap: 8px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
-.tip-row b { color: var(--ink); font-weight: 700; }
+.tip-row b { color: var(--ink); font-weight: 600; }
 /* Lined up with the words after the key above it. */
 .tip-detail { padding-left: 26px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .tip-note { max-width: 15rem; margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--rule); color: var(--ink-2); overflow-wrap: anywhere; }
@@ -394,7 +440,7 @@ body[data-weight-unit="st"] .hero:not(.is-empty) { font-size: clamp(3.5rem, 9vw 
 .note { max-width: 68ch; margin-top: 14px; color: var(--ink-3); font-size: .875rem; }
 /* The trend forecast in words, under the chart, with how it's worked out. */
 .forecast-words { max-width: 68ch; margin-top: 14px; color: var(--ink-2); text-wrap: pretty; }
-.forecast-words strong { color: var(--ink); font-weight: 700; }
+.forecast-words strong { color: var(--ink); font-weight: 600; }
 .forecast-words + .note { margin-top: 6px; }
 
 /* Entries */
@@ -404,12 +450,12 @@ body[data-view="log"] .entries { padding-top: 0; }
 body[data-view="log"] .entries .section-head { margin-bottom: 0; }
 .table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; text-align: left; }
-th { padding: 10px 12px; border-bottom: 1px solid var(--ink); color: var(--ink-3); font-size: .875rem; font-weight: 600; white-space: nowrap; }
+th { padding: 10px 12px; border-bottom: 1px solid var(--rule); color: var(--ink-3); font-size: .875rem; font-weight: 500; white-space: nowrap; }
 td { height: 54px; padding: 8px 12px; border-bottom: 1px solid var(--rule); white-space: nowrap; }
 th:first-child, td:first-child { padding-left: 0; }
 th:last-child, td:last-child { padding-right: 0; }
 .num { text-align: right; }
-.entry-weight { font-weight: 700; }
+.entry-weight { font-weight: 600; }
 .table-unit { margin-left: 3px; color: var(--ink-3); font-size: .875rem; }
 .rate-cell { color: var(--ink-2); }
 .rate-cell.unclear { color: var(--ink-3); }
@@ -423,23 +469,23 @@ tr:is([data-edit], [data-waist-edit]) { cursor: pointer; }
 tr.has-note td { height: 44px; padding-bottom: 0; border-bottom: 0; }
 .note-row td { height: auto; padding-block: 0 12px; color: var(--ink-2); font-size: .9375rem; white-space: normal; overflow-wrap: anywhere; text-wrap: pretty; }
 /* Month headings on the log page. */
-.month-row th { padding: 28px 0 8px; border-bottom: 1px solid var(--rule); color: var(--ink); font-size: 1rem; font-weight: 700; }
+.month-row th { padding: 28px 0 8px; border-bottom: 1px solid var(--rule); color: var(--ink); font-size: 1rem; font-weight: 600; }
 tbody:first-of-type .month-row th { padding-top: 20px; }
-.icon-button { display: inline-grid; place-items: center; width: 36px; height: 36px; border-radius: 8px; color: var(--ink-3); }
+.icon-button { display: inline-grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; color: var(--ink-3); }
 /* A table's pencil sits at the table's right edge, where the scrolling wrapper
    would clip its hit area, so the hit area grows to the left. */
 .row-action .icon-button::before { inset: min(0px, calc((100% - 44px) / 2)) 0 min(0px, calc((100% - 44px) / 2)) min(0px, calc(100% - 44px)); }
-@media (hover: hover) { .icon-button:hover { background: var(--accent-wash); color: var(--accent); } }
+@media (hover: hover) { .icon-button:hover { background: var(--sunken); color: var(--ink); } }
 .short-label { display: none; }
 .table-empty { padding: 28px 0; color: var(--ink-3); }
 .pagination { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 16px; color: var(--ink-3); }
 .pagination > div { display: flex; gap: 8px; }
-.small-button { padding: 6px 14px; border: 1px solid var(--field-border); border-radius: 8px; font-weight: 700; }
-@media (hover: hover) { .small-button:not(:disabled):hover { background: var(--surface); } }
+.small-button { padding: 6px 16px; border: 1px solid var(--button-border); border-radius: 999px; font-weight: 500; }
+@media (hover: hover) { .small-button:not(:disabled):hover { background: var(--sunken); } }
 /* Monthly summary: a month per row, its figures in the same columns every time. */
-.month-list { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--ink); }
+.month-list { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--rule); }
 .month { display: grid; grid-template-columns: minmax(160px, 210px) minmax(0, 1fr); gap: 14px 40px; padding-block: 20px; border-bottom: 1px solid var(--rule); }
-.month h3 { margin: 0; font-size: 1.125rem; font-weight: 700; letter-spacing: -.01em; }
+.month h3 { margin: 0; font-size: 1.125rem; font-weight: 600; letter-spacing: -.01em; }
 .month-detail { margin-top: 2px; color: var(--ink-3); font-size: .875rem; text-wrap: balance; }
 .month-figures { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px 24px; }
 .month-figures .fact-value { font-size: 1.125rem; }
@@ -455,19 +501,18 @@ tbody:first-of-type .month-row th { padding-top: 20px; }
 .fat-figures { margin-top: 14px; }
 .chart-wrap.fat-chart { height: clamp(180px, 20vw, 240px); }
 .body-fat .table-wrap { margin-top: 18px; }
-.fat-cell { font-weight: 700; }
+.fat-cell { font-weight: 600; }
 .waist-more { margin-top: 14px; }
-/* Settings: a section per topic, each a list of rows between hairlines, the
-   first under an ink rule like a table's head. */
+/* Settings: a section per topic, each a list of rows between hairlines. */
 .settings { max-width: 48rem; }
 .settings-section + .settings-section { margin-top: 44px; }
 .settings-section .section-head { margin-bottom: 12px; }
-.settings-section .section-head + * { border-top: 1px solid var(--ink); }
+.settings-section .section-head + * { border-top: 1px solid var(--rule); }
 .setting-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px 40px; padding-block: 16px; border-bottom: 1px solid var(--rule); }
-.setting-row h3 { margin: 0; font-size: 1rem; font-weight: 700; }
+.setting-row h3 { margin: 0; font-size: 1rem; font-weight: 600; }
 .setting-text p { max-width: 60ch; margin-top: 2px; color: var(--ink-2); text-wrap: pretty; }
-.setting-text .setting-value { margin: 0 0 2px; color: var(--ink); font-size: 1.125rem; font-weight: 700; }
-.setting-value.is-empty, .setting-value .is-empty { color: var(--ink-3); font-weight: 500; }
+.setting-text .setting-value { margin: 0 0 2px; color: var(--ink); font-size: 1.125rem; font-weight: 600; }
+.setting-value.is-empty, .setting-value .is-empty { color: var(--ink-3); font-weight: 400; }
 .setting-note { margin-left: 4px; color: var(--ink-3); font-size: 1rem; font-weight: 400; }
 .setting-text .account-email { color: var(--ink); overflow-wrap: anywhere; }
 .setting-text .account-email.is-empty { color: var(--ink-3); }
@@ -477,7 +522,7 @@ tbody:first-of-type .month-row th { padding-top: 20px; }
 .wide-actions .setting-actions { justify-content: flex-start; }
 .setting-check { display: flex; align-items: flex-start; gap: 12px; padding-block: 14px; border-bottom: 1px solid var(--rule); cursor: pointer; }
 .setting-check input { flex: none; width: 18px; height: 18px; margin: 3px 0 0; accent-color: var(--accent); cursor: pointer; }
-.setting-name { display: block; font-weight: 700; }
+.setting-name { display: block; font-weight: 600; }
 .setting-hint { display: block; max-width: 60ch; margin-top: 2px; color: var(--ink-2); text-wrap: pretty; }
 .small-button.danger-text { color: var(--danger); }
 a.small-button { display: inline-block; text-decoration: none; }
@@ -486,16 +531,16 @@ a.small-button { display: inline-block; text-decoration: none; }
 .data-lead { max-width: 60ch; margin-bottom: 32px; color: var(--ink-2); text-wrap: pretty; }
 .data-list { margin: 0; }
 .data-row, .policy-list > div { display: grid; grid-template-columns: minmax(8rem, 11rem) minmax(0, 1fr); gap: 4px 24px; padding-block: 14px; border-bottom: 1px solid var(--rule); }
-:is(.data-row, .policy-list > div) dt { font-weight: 700; }
+:is(.data-row, .policy-list > div) dt { font-weight: 600; }
 :is(.data-row, .policy-list > div) dd { max-width: 60ch; color: var(--ink-2); text-wrap: pretty; }
 .data-never, .policy ul { margin: 0; padding: 0; list-style: none; }
 :is(.data-never, .policy ul) li { padding-block: 14px; border-bottom: 1px solid var(--rule); color: var(--ink-2); text-wrap: pretty; }
 /* Import: the panel for a file, between hairlines like the rows around it,
    with the three counts as rows and a few of each group's weigh-ins under them. */
-.setting-text .import-result { margin-top: 8px; color: var(--ink); font-weight: 600; }
+.setting-text .import-result { margin-top: 8px; color: var(--ink); font-weight: 500; }
 .import-panel { padding-block: 16px 20px; border-bottom: 1px solid var(--rule); }
 .import-file-name:focus { outline: none; }
-.import-file-name { margin: 0; font-size: 1rem; font-weight: 700; overflow-wrap: anywhere; }
+.import-file-name { margin: 0; font-size: 1rem; font-weight: 600; overflow-wrap: anywhere; }
 .import-kind { margin-top: 2px; color: var(--ink-2); }
 .import-reading { margin-top: 14px; }
 .import-reading .progress-track { margin-bottom: 8px; }
@@ -503,10 +548,10 @@ a.small-button { display: inline-block; text-decoration: none; }
 .import-panel .choice-group { margin-top: 18px; }
 .import-panel .choice-group .field-hint { margin: -2px 0 8px; }
 .import-range { margin-top: 14px; color: var(--ink-2); }
-.import-groups { margin-top: 12px; border-top: 1px solid var(--ink); }
+.import-groups { margin-top: 12px; border-top: 1px solid var(--rule); }
 .import-group { padding-block: 12px; border-bottom: 1px solid var(--rule); }
-.import-group-head { font-weight: 700; }
-.import-group-head.is-empty { color: var(--ink-3); font-weight: 500; }
+.import-group-head { font-weight: 600; }
+.import-group-head.is-empty { color: var(--ink-3); font-weight: 400; }
 .import-examples { margin: 4px 0 0; padding: 0; list-style: none; color: var(--ink-2); font-size: .9375rem; font-variant-numeric: tabular-nums; }
 .import-examples li { overflow-wrap: anywhere; }
 .import-examples li + li { margin-top: 2px; }
@@ -514,13 +559,13 @@ a.small-button { display: inline-block; text-decoration: none; }
 .import-warnings:empty { display: none; }
 .import-warnings li + li { margin-top: 4px; }
 .import-summary .note { margin-top: 12px; }
-.import-note { margin-top: 14px; padding: 12px 14px; border-radius: 8px; background: var(--surface); color: var(--ink-2); text-wrap: pretty; }
+.import-note { margin-top: 14px; padding: 12px 14px; border-radius: 12px; background: var(--sunken); color: var(--ink-2); text-wrap: pretty; }
 .import-note:empty { display: none; }
 .import-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
 .import-recent { margin-top: 24px; }
-.import-recent-title { margin: 0 0 8px; font-size: 1rem; font-weight: 700; }
+.import-recent-title { margin: 0 0 8px; font-size: 1rem; font-weight: 600; }
 .import-list { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--rule); }
-.import-source { margin: 0; font-size: 1rem; font-weight: 700; }
+.import-source { margin: 0; font-size: 1rem; font-weight: 600; }
 /* The account line and the links to Your data and the policy. */
 .app-footer { margin-top: 48px; color: var(--ink-3); font-size: .875rem; text-align: center; }
 .install-hint { max-width: 34rem; margin: 0 auto 8px; text-wrap: pretty; }
@@ -529,38 +574,43 @@ a.small-button { display: inline-block; text-decoration: none; }
 .storage-status:not([hidden]) + .footer-links { margin-top: 8px; }
 .footer-links a { color: var(--ink-2); text-underline-offset: 3px; }
 
-/* The health data policy: one column of plain text, in sections under ink rules. */
+/* The health data policy: one column of plain text, in sections under hairlines. */
 .policy { max-width: 46rem; padding-block: 32px 64px; }
 .policy:focus { outline: none; }
-.policy-draft { margin-bottom: 28px; padding: 12px 14px; border: 1px solid var(--field-border); border-radius: 8px; color: var(--ink-2); text-wrap: pretty; }
+.policy-draft { margin-bottom: 28px; padding: 12px 14px; border-radius: 12px; background: var(--caution-wash); color: var(--ink-2); text-wrap: pretty; }
 .policy-draft strong { color: var(--ink); }
-.policy h1 { font-size: 2.25rem; font-weight: 700; line-height: 1.1; letter-spacing: -.025em; color: var(--ink); }
+.policy h1 { font-size: 2.5rem; }
 .policy-version { margin-top: 10px; color: var(--ink-3); }
 .policy-lead { max-width: 60ch; margin-top: 20px; font-size: 1.125rem; text-wrap: pretty; }
 .policy section { margin-top: 40px; }
-.policy h2 { padding-bottom: 10px; border-bottom: 1px solid var(--ink); font-size: 1.375rem; font-weight: 700; letter-spacing: -.015em; }
+.policy h2 { padding-bottom: 10px; border-bottom: 1px solid var(--rule); font-family: var(--font-display); font-size: 1.5rem; font-weight: 400; line-height: 1.17; letter-spacing: -.01em; }
 .policy section > p { max-width: 60ch; margin-top: 12px; color: var(--ink-2); text-wrap: pretty; }
 .policy section > p + :is(dl, ul) { margin-top: 12px; border-top: 1px solid var(--rule); }
 .policy-list { margin: 0; }
-.policy-list strong { color: var(--ink); font-weight: 600; }
+.policy-list strong { color: var(--ink); font-weight: 500; }
 .policy-back { margin-top: 40px; }
 
 /* Dialogs and toast */
-dialog { width: min(420px, calc(100% - 32px)); max-height: calc(100dvh - 32px); padding: 24px; border: 1px solid var(--rule); border-radius: 14px; background: var(--surface); color: var(--ink); box-shadow: var(--shadow); }
-dialog::backdrop { background: rgb(10 11 13 / 45%); }
+dialog { width: min(420px, calc(100% - 32px)); max-height: calc(100dvh - 32px); padding: 24px; border: 1px solid var(--rule); border-radius: 24px; background: var(--surface); color: var(--ink); box-shadow: var(--shadow); }
+/* The page behind a dialog blurs under a veil of its own paper. The colours are
+   written out, since ::backdrop only lately inherits custom properties. */
+dialog::backdrop { background: rgb(253 253 247 / 60%); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+@media (prefers-color-scheme: dark) {
+  dialog::backdrop { background: rgb(13 14 11 / 65%); }
+}
 .dialog-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-dialog h2 { font-size: 1.25rem; font-weight: 700; letter-spacing: -.01em; }
+dialog h2 { font-size: 1.25rem; font-weight: 600; letter-spacing: -.02em; }
 .dialog-heading .icon-button { margin-right: -8px; }
 .dialog-detail { margin: 8px 0 20px; color: var(--ink-2); }
 .dialog-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 24px; }
 .edit-actions { justify-content: space-between; }
-.danger-link { color: var(--danger); font-weight: 700; }
+.danger-link { color: var(--danger); font-weight: 600; }
 /* What deleting removes, under the dialog's first line. */
 .erase-list { margin: -12px 0 0; padding-left: 1.25em; color: var(--ink-2); }
 .erase-list li + li { margin-top: 2px; }
 .erase-list + .dialog-detail { margin-top: 12px; }
 .erase-copy { margin: -6px 0 20px; }
-.bmi-preview { display: flex; align-items: baseline; justify-content: space-between; margin-top: 16px; padding: 12px 14px; border-radius: 8px; background: var(--paper); }
+.bmi-preview { display: flex; align-items: baseline; justify-content: space-between; margin-top: 16px; padding: 12px 14px; border-radius: 12px; background: var(--sunken); }
 .bmi-preview strong { font-size: 1.25rem; }
 .field-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 12px; margin-top: 16px; }
 body[data-weight-unit="st"] .start-row { grid-template-columns: minmax(0, 1fr); }
@@ -568,23 +618,23 @@ body[data-weight-unit="st"] .start-row { grid-template-columns: minmax(0, 1fr); 
 .choice-group { min-width: 0; margin: 16px 0 0; padding: 0; border: 0; }
 .choice-group legend { padding: 0; }
 .choices { display: flex; gap: 8px; }
-.choice { display: flex; flex: 1 1 0; align-items: center; gap: 10px; min-height: 46px; padding: 10px 12px; border: 1px solid var(--field-border); border-radius: 8px; background: var(--surface); cursor: pointer; }
-.choice:has(input:checked) { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.choice { display: flex; flex: 1 1 0; align-items: center; gap: 10px; min-height: 50px; padding: 12px 14px; border: 1px solid var(--field-border); border-radius: 12px; background: var(--surface); cursor: pointer; }
+.choice:has(input:checked) { border-color: var(--accent); background: var(--accent-wash); box-shadow: inset 0 0 0 1px var(--accent); }
 .choice input { flex: none; width: 18px; height: 18px; margin: 0; accent-color: var(--accent); cursor: pointer; }
 .field-hint { margin-top: 6px; color: var(--ink-3); font-size: .875rem; text-wrap: pretty; }
 /* The note on a fast target rate stays in the page while empty, so screen readers hear it appear. */
 .rate-note { color: var(--ink-2); }
 .rate-note:empty { margin-top: 0; }
 .optional { font-weight: 400; color: var(--ink-3); }
-.goal-preview, .dialog-note { margin-top: 18px; padding: 12px 14px; border-radius: 8px; background: var(--paper); color: var(--ink-2); text-wrap: pretty; }
-.select-frame select { width: 100%; min-width: 0; min-height: 46px; margin: 0; padding: 10px 12px; border: 0; border-radius: 8px; outline: none; background: transparent; color: inherit; font: inherit; font-size: 1.0625rem; font-variant-numeric: tabular-nums; cursor: pointer; }
+.goal-preview, .dialog-note { margin-top: 18px; padding: 12px 14px; border-radius: 12px; background: var(--sunken); color: var(--ink-2); text-wrap: pretty; }
+.select-frame select { width: 100%; min-width: 0; min-height: 50px; margin: 0; padding: 12px 14px; border: 0; border-radius: 12px; outline: none; background: transparent; color: inherit; font: inherit; font-size: 1.0625rem; font-variant-numeric: tabular-nums; cursor: pointer; }
 #goal-form .edit-actions .button, #reminder-form .edit-actions .button { margin-left: auto; }
 /* The log sheet rises from the bottom of the screen. Its bottom follows the
    bottom of the visible part of the screen, which an on-screen keyboard moves
    up, so Save sits right above the keyboard. --view-bottom and --view-height
    come from the visual viewport while the sheet is open (see fitSheet in
    app.mjs). Over the keyboard it needs no room for the home indicator. */
-dialog.sheet { inset: auto 0 max(0px, calc(100% - var(--view-bottom, 100%))); width: min(100%, 480px); max-width: none; max-height: calc(var(--view-height, 100dvh) - 12px); margin: 0 auto; padding: 20px max(20px, env(safe-area-inset-right)) calc(20px + env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left)); border-width: 1px 1px 0; border-radius: 14px 14px 0 0; }
+dialog.sheet { inset: auto 0 max(0px, calc(100% - var(--view-bottom, 100%))); width: min(100%, 480px); max-width: none; max-height: calc(var(--view-height, 100dvh) - 12px); margin: 0 auto; padding: 20px max(20px, env(safe-area-inset-right)) calc(20px + env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left)); border-width: 1px 1px 0; border-radius: 24px 24px 0 0; }
 dialog.sheet.over-keyboard { padding-bottom: 12px; }
 /* On a short screen, only the fields scroll, so the heading stays and Save
    stays above the keyboard. They keep room for the focus ring, and for the hit
@@ -610,18 +660,18 @@ dialog.sheet[open] { display: flex; flex-direction: column; overflow: hidden; }
   dialog.sheet[open]::backdrop { animation: fade-in .2s; }
 }
 .formula { margin-top: 10px; color: var(--ink-3); font-size: .875rem; }
-.formula a { color: var(--accent); font-weight: 600; text-underline-offset: 2px; white-space: nowrap; }
-.toast { position: fixed; z-index: 5; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom)); display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px 16px; width: max-content; max-width: min(40rem, calc(100% - 32px)); padding: 10px 16px; border-radius: 10px; background: var(--ink); color: var(--paper); box-shadow: var(--shadow); font-weight: 600; transform: translateX(-50%); }
+.formula a { color: var(--accent); font-weight: 500; text-underline-offset: 2px; white-space: nowrap; }
+.toast { position: fixed; z-index: 5; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom)); display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px 16px; width: max-content; max-width: min(40rem, calc(100% - 32px)); padding: 12px 18px; border-radius: 16px; background: var(--solid); color: var(--on-solid); box-shadow: var(--shadow); font-weight: 500; transform: translateX(-50%); }
 /* A closed toast keeps its status region on the page, out of sight, so screen readers hear the next message. */
 .toast:not(.is-open) { overflow: hidden; width: 1px; height: 1px; padding: 0; box-shadow: none; clip-path: inset(50%); }
 .toast-message { flex: 1 1 auto; text-align: center; text-wrap: pretty; }
 .toast.has-actions .toast-message { flex-basis: 18rem; text-align: left; }
 .toast-actions { display: flex; gap: 4px; margin-right: -8px; }
 .toast-actions:empty { display: none; }
-.toast-button { min-height: 32px; margin-block: -4px; padding: 4px 8px; border-radius: 6px; color: var(--paper); font-weight: 700; text-decoration: underline 1px; text-underline-offset: 3px; }
-@media (hover: hover) { .toast-button:hover { background: color-mix(in srgb, var(--paper) 16%, transparent); } }
+.toast-button { min-height: 32px; margin-block: -4px; padding: 4px 10px; border-radius: 999px; color: var(--on-solid); font-weight: 600; text-decoration: underline 1px; text-underline-offset: 3px; }
+@media (hover: hover) { .toast-button:hover { background: color-mix(in srgb, var(--on-solid) 16%, transparent); } }
 .toast-button[aria-disabled="true"] { cursor: default; opacity: .6; }
-.toast-button:focus-visible { outline-color: var(--paper); }
+.toast-button:focus-visible { outline-color: var(--on-solid); }
 /* Full height on touch screens, at least 44px, without making the toast taller. */
 @media (pointer: coarse) {
   .toast-button { min-height: 44px; margin-block: -10px; }
@@ -681,7 +731,6 @@ dialog.sheet[open] { display: flex; flex-direction: column; overflow: hidden; }
   /* Each row's control goes under its words, lined up with them. */
   .setting-row { grid-template-columns: minmax(0, 1fr); gap: 10px; }
   .setting-actions { justify-content: flex-start; }
-  .setting-actions .unit-switch { margin: 0 0 0 -8px; }
   .chart-wrap { margin-top: 12px; }
   th, td { padding-inline: 6px; }
   th { font-size: .8125rem; }

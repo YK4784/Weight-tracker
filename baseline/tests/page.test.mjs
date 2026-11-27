@@ -259,7 +259,7 @@ test("the manifest describes Baseline for an install dialog, with a screenshot f
   assert.deepEqual(manifest.categories, ["health", "fitness"]);
   assert.equal(manifest.display, "standalone");
   // The launch screen's colour can't follow dark mode yet, so it stays the light theme's.
-  assert.equal(manifest.background_color, "#f6f5f1");
+  assert.equal(manifest.background_color, "#fdfdf7");
   assert.equal(manifest.background_color, /<meta name="theme-color" content="([^"]+)" media="\(prefers-color-scheme: light\)">/.exec(page)[1]);
   assert.match(page, /stays the light paper in dark mode too/);
   assert.deepEqual(manifest.screenshots.map(shot => shot.form_factor), ["narrow", "wide"]);

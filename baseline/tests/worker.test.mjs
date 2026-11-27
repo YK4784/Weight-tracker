@@ -12,7 +12,7 @@ const shell = JSON.parse(/^const SHELL = (\[[^\]]*\]);$/m.exec(source)[1]);
 // Files in baseline/dist/ that the worker leaves out on purpose.
 const LEFT_OUT = {
   "sw.js": "the worker itself, which the browser fetches and updates on its own",
-  "fonts/OFL.txt": "the font's license, which the app never loads",
+  "fonts/OFL.txt": "the fonts' license, which the app never loads",
   "screenshots/overview-narrow.webp": "a screenshot for the install dialog, which needs a connection anyway",
   "screenshots/overview-wide.webp": "a screenshot for the install dialog, which needs a connection anyway"
 };
@@ -22,7 +22,7 @@ test("the worker keeps every file in baseline/dist/, except the ones left out on
   const files = (await readdir(root, { recursive: true, withFileTypes: true }))
     .filter(entry => entry.isFile())
     .map(entry => relative(root, join(entry.parentPath, entry.name)).split(sep).join("/"));
-  assert.ok(files.includes("app.mjs") && files.includes("fonts/funnel-sans-latin.woff2"));
+  assert.ok(files.includes("app.mjs") && files.includes("fonts/geist-latin.woff2") && files.includes("fonts/fraunces-latin.woff2"));
   const missing = files.filter(file => !shell.includes(file) && !(file in LEFT_OUT));
   assert.deepEqual(missing, [], "add each to SHELL in sw.js, or to LEFT_OUT here with the reason");
   // Every listed file exists, once, and the page is listed by both its names.
